@@ -19,6 +19,7 @@ func main() {
 	defer db.Close()
 
 	r := gin.Default()
+	r.Use(cors())
 	r.GET("/health", func(c *gin.Context) {
 		if err := db.Ping(); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"service": "auth", "status": "db_down"})
@@ -32,4 +33,18 @@ func main() {
 		port = "8080"
 	}
 	log.Fatal(r.Run(":" + port))
+}
+
+// cors: gelistirme icin tum kokenlere izin verir (web istemcisi). Yayinda kisitlanmali.
+func cors() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
 }
