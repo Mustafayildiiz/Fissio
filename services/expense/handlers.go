@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -69,20 +70,29 @@ func (h *handler) parseReceipt(c *gin.Context) {
 	c.JSON(http.StatusOK, Parse(in.Text, cats, time.Now()))
 }
 
+type expenseItem struct {
+	Name   string  `json:"name"`
+	Amount float64 `json:"amount"`
+}
+
 type expenseInput struct {
-	Merchant   string  `json:"merchant"`
-	Amount     float64 `json:"amount"`
-	Date       string  `json:"date"`
-	CategoryID int     `json:"category_id"`
+	Merchant   string        `json:"merchant"`
+	Amount     float64       `json:"amount"`
+	Date       string        `json:"date"`
+	CategoryID int           `json:"category_id"`
+	Note       string        `json:"note"`
+	Items      []expenseItem `json:"items"`
 }
 
 type expenseOut struct {
-	ID           int64   `json:"id"`
-	Merchant     string  `json:"merchant"`
-	Amount       float64 `json:"amount"`
-	Date         string  `json:"date"`
-	CategoryID   int     `json:"category_id"`
-	CategoryName string  `json:"category_name"`
+	ID           int64         `json:"id"`
+	Merchant     string        `json:"merchant"`
+	Amount       float64       `json:"amount"`
+	Date         string        `json:"date"`
+	CategoryID   int           `json:"category_id"`
+	CategoryName string        `json:"category_name"`
+	Note         string        `json:"note"`
+	Items        []expenseItem `json:"items"`
 }
 
 func (in *expenseInput) validate() (time.Time, string) {
@@ -100,6 +110,22 @@ func (in *expenseInput) validate() (time.Time, string) {
 	if len([]rune(in.Merchant)) > 100 {
 		return time.Time{}, "merchant too long"
 	}
+	if len([]rune(in.Note)) > 500 {
+		return time.Time{}, "note too long"
+	}
+	if len(in.Items) > 100 {
+		return time.Time{}, "too many items"
+	}
+	for i := range in.Items {
+		it := &in.Items[i]
+		if len([]rune(it.Name)) > 100 || math.IsNaN(it.Amount) || math.IsInf(it.Amount, 0) || it.Amount < 0 || it.Amount >= 1e10 {
+			return time.Time{}, "invalid item"
+		}
+		it.Amount = math.Round(it.Amount*100) / 100
+	}
+	if in.Items == nil {
+		in.Items = []expenseItem{}
+	}
 	return d, ""
 }
 
@@ -109,7 +135,7 @@ func isFKViolation(err error) bool {
 }
 
 const selectExpense = `
-SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name
+SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
 type scanner interface{ Scan(dest ...any) error }
@@ -117,8 +143,13 @@ type scanner interface{ Scan(dest ...any) error }
 func scanExpense(s scanner) (expenseOut, error) {
 	var e expenseOut
 	var d time.Time
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName)
+	var items []byte
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items)
 	e.Date = d.Format(dateLayout)
+	e.Items = []expenseItem{}
+	if err == nil && len(items) > 0 {
+		_ = json.Unmarshal(items, &e.Items)
+	}
 	return e, err
 }
 
@@ -133,11 +164,12 @@ func (h *handler) createExpense(c *gin.Context) {
 		badRequest(c, msg)
 		return
 	}
+	itemsJSON, _ := json.Marshal(in.Items)
 	var id int64
 	err := h.db.QueryRow(
-		`INSERT INTO expense.expenses (user_id, merchant, amount, spent_at, category_id)
-		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		c.GetInt64("userID"), in.Merchant, in.Amount, d, in.CategoryID).Scan(&id)
+		`INSERT INTO expense.expenses (user_id, merchant, amount, spent_at, category_id, note, items)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+		c.GetInt64("userID"), in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON)).Scan(&id)
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
@@ -233,10 +265,11 @@ func (h *handler) updateExpense(c *gin.Context) {
 		badRequest(c, msg)
 		return
 	}
+	itemsJSON, _ := json.Marshal(in.Items)
 	res, err := h.db.Exec(
-		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4
-		 WHERE id=$5 AND user_id=$6`,
-		in.Merchant, in.Amount, d, in.CategoryID, id, c.GetInt64("userID"))
+		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6
+		 WHERE id=$7 AND user_id=$8`,
+		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"))
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
