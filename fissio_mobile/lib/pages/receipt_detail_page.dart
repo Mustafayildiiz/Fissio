@@ -166,6 +166,18 @@ class _Paper extends StatelessWidget {
         const SizedBox(height: 12),
         Text('Tarih : ${fmtDate(e.date)}', style: dark.copyWith(fontSize: 16)),
         const Divider(color: AppColors.darkText, thickness: 1.2, height: 18),
+        if (e.items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('Toplam kalem :', style: dark.copyWith(fontSize: 15)),
+                ),
+                Text(fmtMoney(e.amount), style: dark.copyWith(fontSize: 15)),
+              ],
+            ),
+          ),
         for (final it in e.items)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),

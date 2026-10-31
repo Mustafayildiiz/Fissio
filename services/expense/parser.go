@@ -236,11 +236,14 @@ func categorize(header, all []string, cats []Category) (int, string, float64) {
 	headerText := foldTR(strings.Join(header, "\n"))
 	allText := foldTR(strings.Join(all, "\n"))
 
-	bestID, bestName, bestScore := 0, fallbackCategory, 0
+	fallbackID := 0
 	for _, c := range cats {
 		if c.Name == fallbackCategory {
-			bestID = c.ID
+			fallbackID = c.ID
 		}
+	}
+	bestID, bestName, bestScore := fallbackID, fallbackCategory, 0
+	for _, c := range cats {
 		score := 0
 		for _, kw := range c.Keywords {
 			k := foldTR(kw)

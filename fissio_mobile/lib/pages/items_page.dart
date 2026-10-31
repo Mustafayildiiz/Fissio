@@ -17,8 +17,14 @@ class _Row {
   final TextEditingController name;
   final TextEditingController amount;
 
-  double get value =>
-      double.tryParse(amount.text.trim().replaceAll(',', '.')) ?? 0;
+  double get value {
+    final s = amount.text.trim().replaceAll(' ', '');
+    if (s.isEmpty) return 0;
+    if (s.contains(',')) {
+      return double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ?? 0;
+    }
+    return double.tryParse(s) ?? 0;
+  }
 
   void dispose() {
     name.dispose();
@@ -141,6 +147,7 @@ class _ItemsPageState extends State<ItemsPage> {
                                     style: dark.copyWith(fontSize: 14),
                                     decoration: const InputDecoration(
                                       hintText: 'ürün adı',
+                                      hintStyle: TextStyle(color: Color(0xFF64748B)),
                                       border: InputBorder.none,
                                     ),
                                   ),
@@ -155,7 +162,9 @@ class _ItemsPageState extends State<ItemsPage> {
                                     style: dark.copyWith(fontSize: 14),
                                     decoration: const InputDecoration(
                                       hintText: '0,00',
+                                      hintStyle: TextStyle(color: Color(0xFF64748B)),
                                       suffixText: ' ₺',
+                                      suffixStyle: TextStyle(color: AppColors.darkText),
                                       border: InputBorder.none,
                                     ),
                                   ),

@@ -73,6 +73,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   late final ReceiptDraft _draft;
   late final TextEditingController _merchant;
   late final TextEditingController _note;
+  late final TextEditingController _date;
 
   bool get _editing => widget.initial != null;
 
@@ -82,6 +83,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     _draft = _editing ? ReceiptDraft.from(widget.initial!) : ReceiptDraft();
     _merchant = TextEditingController(text: _draft.merchant);
     _note = TextEditingController(text: _draft.note);
+    _date = TextEditingController(text: fmtDate(_draft.date));
     if (appState.categories.isEmpty) appState.refresh();
   }
 
@@ -89,6 +91,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   void dispose() {
     _merchant.dispose();
     _note.dispose();
+    _date.dispose();
     super.dispose();
   }
 
@@ -99,7 +102,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
-    if (d != null) setState(() => _draft.date = d);
+    if (d != null) {
+      setState(() {
+        _draft.date = d;
+        _date.text = fmtDate(d);
+      });
+    }
   }
 
   void _next() {
@@ -200,28 +208,40 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         const SizedBox(height: 10),
                         ListenableBuilder(
                           listenable: appState,
-                          builder: (_, _) => DropdownButtonFormField<int>(
-                            initialValue: _draft.categoryId,
-                            isExpanded: true,
-                            dropdownColor: AppColors.light,
-                            style: const TextStyle(
-                              color: AppColors.darkText,
-                              fontFamily: fontFamily,
-                            ),
-                            decoration: lightField('Kategori', hint: 'Kategori seçiniz'),
-                            items: [
-                              for (final c in appState.categories)
-                                DropdownMenuItem(value: c.id, child: Text(c.name)),
-                            ],
-                            onChanged: (v) => setState(() => _draft.categoryId = v),
-                          ),
+                          builder: (_, _) {
+                            final validCat = appState.categories.any(
+                              (c) => c.id == _draft.categoryId,
+                            );
+                            return DropdownButtonFormField<int>(
+                              key: ValueKey(appState.categories.length),
+                              initialValue: validCat ? _draft.categoryId : null,
+                              isExpanded: true,
+                              dropdownColor: AppColors.light,
+                              style: const TextStyle(
+                                color: AppColors.darkText,
+                                fontFamily: fontFamily,
+                              ),
+                              decoration: lightField('Kategori', hint: 'Kategori seçiniz'),
+                              items: [
+                                for (final c in appState.categories)
+                                  DropdownMenuItem(
+                                    value: c.id,
+                                    child: Text(
+                                      c.name,
+                                      style: const TextStyle(color: AppColors.darkText),
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) => setState(() => _draft.categoryId = v),
+                            );
+                          },
                         ),
                         const SizedBox(height: 10),
                         InkWell(
                           onTap: _pickDate,
                           child: IgnorePointer(
                             child: TextField(
-                              controller: TextEditingController(text: fmtDate(_draft.date)),
+                              controller: _date,
                               style: const TextStyle(color: AppColors.darkText),
                               decoration: lightField(
                                 'Tarih',

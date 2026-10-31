@@ -176,45 +176,50 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
                 ),
               ),
             ),
-            ValueListenableBuilder<int?>(
-              valueListenable: widget.categoryFilter,
-              builder: (context, catId, _) {
-                final catName = catId == null
-                    ? 'Kategori'
-                    : appState.categories
-                        .where((c) => c.id == catId)
-                        .map((c) => c.name)
-                        .firstOrNull ?? 'Kategori';
-                return Column(
-                  children: [
+            Expanded(
+              child: ValueListenableBuilder<int?>(
+                valueListenable: widget.categoryFilter,
+                builder: (context, catId, _) {
+                  final catName = catId == null
+                      ? 'Kategori'
+                      : appState.categories
+                              .where((c) => c.id == catId)
+                              .map((c) => c.name)
+                              .firstOrNull ??
+                          'Kategori';
+                  return Column(
+                    children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
-                          _FilterChip('sıralama', false, _pickSort),
+                          Expanded(child: _FilterChip('sıralama', false, _pickSort)),
                           const SizedBox(width: 8),
-                          _FilterChip(catName, catId != null, _pickCategory),
+                          Expanded(child: _FilterChip(catName, catId != null, _pickCategory)),
                           const SizedBox(width: 8),
-                          _FilterChip(
-                            _range == null
-                                ? 'Tarih'
-                                : '${fmtDate(_range!.start)} - ${fmtDate(_range!.end)}',
-                            _range != null,
-                            _pickRange,
+                          Expanded(
+                            child: _FilterChip(
+                              _range == null
+                                  ? 'Tarih'
+                                  : '${fmtDate(_range!.start)} - ${fmtDate(_range!.end)}',
+                              _range != null,
+                              _pickRange,
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: ListenableBuilder(
-                        listenable: appState,
-                        builder: (context, _) => _list(catId),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListenableBuilder(
+                          listenable: appState,
+                          builder: (context, _) => _list(catId),
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              },
+                    ],
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -299,23 +304,22 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Flexible(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: active ? AppColors.accent : AppColors.card,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-          ),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? AppColors.accent : AppColors.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white, fontSize: 12),
         ),
       ),
     );

@@ -113,7 +113,9 @@ class AppState extends ChangeNotifier {
 
   // --- Panel hesapları (son 30 gün) ---
   List<Expense> get lastMonth {
-    final from = DateTime.now().subtract(const Duration(days: 30));
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final from = today.subtract(const Duration(days: 30));
     return expenses.where((e) => !e.date.isBefore(from)).toList();
   }
 

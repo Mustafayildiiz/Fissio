@@ -75,7 +75,9 @@ class ReceiptDraft {
         categoryId: e.categoryId,
         date: e.date,
         note: e.note,
-        items: e.items.map((i) => ExpenseItem(i.name, i.amount)).toList(),
+        items: e.items.isEmpty
+            ? [ExpenseItem(e.merchant.isEmpty ? 'Toplam' : e.merchant, e.amount)]
+            : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList(),
       );
 }
 
