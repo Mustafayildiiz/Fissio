@@ -6,6 +6,51 @@ class Category {
       Category(j['id'] as int, j['name'] as String);
 }
 
+class UserProfile {
+  final String id;
+  final String name;
+  final String email;
+  final String password;
+  final String? token;
+
+  const UserProfile({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.password,
+    this.token,
+  });
+
+  UserProfile copyWith({
+    String? name,
+    String? email,
+    String? password,
+    String? token,
+  }) => UserProfile(
+    id: id,
+    name: name ?? this.name,
+    email: email ?? this.email,
+    password: password ?? this.password,
+    token: token ?? this.token,
+  );
+
+  factory UserProfile.fromJson(Map<String, dynamic> j) => UserProfile(
+    id: j['id'] as String,
+    name: j['name'] as String,
+    email: j['email'] as String,
+    password: j['password'] as String,
+    token: j['token'] as String?,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'email': email,
+    'password': password,
+    'token': token,
+  };
+}
+
 class ExpenseItem {
   String name;
   double amount;
@@ -37,17 +82,17 @@ class Expense {
   });
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
-        id: j['id'] as int,
-        merchant: j['merchant'] as String,
-        amount: (j['amount'] as num).toDouble(),
-        date: DateTime.parse(j['date'] as String),
-        categoryId: j['category_id'] as int,
-        categoryName: j['category_name'] as String,
-        note: (j['note'] as String?) ?? '',
-        items: ((j['items'] as List?) ?? [])
-            .map((e) => ExpenseItem.fromJson(e))
-            .toList(),
-      );
+    id: j['id'] as int,
+    merchant: j['merchant'] as String,
+    amount: (j['amount'] as num).toDouble(),
+    date: DateTime.parse(j['date'] as String),
+    categoryId: j['category_id'] as int,
+    categoryName: j['category_name'] as String,
+    note: (j['note'] as String?) ?? '',
+    items: ((j['items'] as List?) ?? [])
+        .map((e) => ExpenseItem.fromJson(e))
+        .toList(),
+  );
 }
 
 /// Fiş formu ile ürün ekranı arasında taşınan taslak.
@@ -66,18 +111,17 @@ class ReceiptDraft {
     DateTime? date,
     this.note = '',
     List<ExpenseItem>? items,
-  })  : date = date ?? DateTime.now(),
-        items = items ?? [];
+  }) : date = date ?? DateTime.now(),
+       items = items ?? [];
 
   factory ReceiptDraft.from(Expense e) => ReceiptDraft(
-        id: e.id,
-        merchant: e.merchant,
-        categoryId: e.categoryId,
-        date: e.date,
-        note: e.note,
-        items: e.items.isEmpty
-            ? [ExpenseItem(e.merchant.isEmpty ? 'Toplam' : e.merchant, e.amount)]
-            : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList(),
-      );
+    id: e.id,
+    merchant: e.merchant,
+    categoryId: e.categoryId,
+    date: e.date,
+    note: e.note,
+    items: e.items.isEmpty
+        ? [ExpenseItem(e.merchant.isEmpty ? 'Toplam' : e.merchant, e.amount)]
+        : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList(),
+  );
 }
-

@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets.dart';
 import 'auth_page.dart';
 import 'info_page.dart';
+import 'profile_select_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -15,43 +16,29 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  Future<void> _logout(BuildContext context) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Çıkış yap'),
-        content: const Text('Oturumu kapatmak istiyor musunuz?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Vazgeç'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Çıkış yap'),
-          ),
-        ],
-      ),
+  void _switchProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
     );
-    if (ok != true) return;
-    await appState.logout();
-    if (!context.mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
+  }
+
+  void _openAuth(BuildContext context) {
+    Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const AuthPage()),
-      (_) => false,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final items = <(IconData, String, VoidCallback)>[
+      (Icons.people_outline, 'Profil Değiştir', () => _switchProfile(context)),
       (Icons.settings_outlined, 'Ayarlar', () => _open(context, 'Ayarlar', InfoTexts.settings)),
       (Icons.storage_outlined, 'Veri', () => _open(context, 'Veri', InfoTexts.data)),
       (Icons.support_agent, 'Destek', () => _open(context, 'Destek', InfoTexts.support)),
       (Icons.info_outline, 'Hakkımızda', () => _open(context, 'Hakkımızda', InfoTexts.about)),
       (Icons.privacy_tip_outlined, 'Gizlilik Politikası', () => _open(context, 'Gizlilik Politikası', InfoTexts.privacy)),
       (Icons.description_outlined, 'Kullanım şartları', () => _open(context, 'Kullanım şartları', InfoTexts.terms)),
-      (Icons.logout, 'Çıkış yap', () => _logout(context)),
+      (Icons.login, 'Giriş / Kayıt', () => _openAuth(context)),
     ];
     return ListenableBuilder(
       listenable: appState,
@@ -62,39 +49,47 @@ class SettingsPage extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.light,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      const CircleAvatar(
-                        radius: 34,
-                        backgroundColor: Color(0xFFE2E8F0),
-                        child: Icon(Icons.person, size: 36, color: AppColors.darkText),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Aktif profil',
-                              style: TextStyle(color: AppColors.darkText, fontSize: 12),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              appState.email ?? '-',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppColors.darkText, fontSize: 18),
-                            ),
-                          ],
+                InkWell(
+                  onTap: () => _switchProfile(context),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.light,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        const CircleAvatar(
+                          radius: 34,
+                          backgroundColor: Color(0xFFE2E8F0),
+                          child: Icon(Icons.person, size: 36, color: AppColors.darkText),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Aktif profil',
+                                style: TextStyle(color: AppColors.darkText, fontSize: 12),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                appState.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.darkText,
+                                  fontSize: 20,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.swap_horiz, color: AppColors.darkText),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -144,4 +139,3 @@ class SettingsPage extends StatelessWidget {
     );
   }
 }
-

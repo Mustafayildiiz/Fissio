@@ -2,6 +2,7 @@ import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/pages/auth_page.dart';
 import 'package:fissio_mobile/pages/home_page.dart';
 import 'package:fissio_mobile/pages/items_page.dart';
+import 'package:fissio_mobile/pages/profile_select_page.dart';
 import 'package:fissio_mobile/pages/receipt_detail_page.dart';
 import 'package:fissio_mobile/pages/receipt_form_page.dart';
 import 'package:fissio_mobile/pages/receipts_page.dart';
@@ -27,6 +28,8 @@ void main() {
 
   testWidgets('tüm ana ekranlar hatasız çizilir', (tester) async {
     final filter = ValueNotifier<int?>(null);
+    await tester.pumpWidget(_wrap(const ProfileSelectPage()));
+    await tester.pump();
     await tester.pumpWidget(_wrap(const AuthPage()));
     await tester.pump();
     await tester.pumpWidget(_wrap(HomePage(onOpenCategory: (_) {})));

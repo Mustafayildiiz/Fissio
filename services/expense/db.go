@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS expense.expenses (
 CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expense.expenses (user_id, spent_at);
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS note  TEXT  NOT NULL DEFAULT '';
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS profile_id TEXT NOT NULL DEFAULT 'default';
 `); err != nil {
 		return err
 	}

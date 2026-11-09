@@ -4,6 +4,7 @@ import '../app_state.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'profile_select_page.dart';
 import 'receipt_detail_page.dart';
 import 'receipt_form_page.dart';
 import 'scan_page.dart';
@@ -151,7 +152,19 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
       children: [
         Column(
           children: [
-            const FissioHeader(),
+            FissioHeader(
+              trailing: InkWell(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
+                ),
+                customBorder: const CircleBorder(),
+                child: const CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppColors.accent,
+                  child: Icon(Icons.person_outline, size: 20, color: Colors.white),
+                ),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: TextField(

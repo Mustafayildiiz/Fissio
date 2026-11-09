@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import 'auth_page.dart';
-import 'shell_page.dart';
+import 'profile_select_page.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -27,7 +27,9 @@ class _SplashPageState extends State<SplashPage> {
     if (!mounted) return;
     final ok = results[0] as bool;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => ok ? const ShellPage() : const AuthPage()),
+      MaterialPageRoute(
+        builder: (_) => ok ? const ProfileSelectPage() : const AuthPage(),
+      ),
     );
   }
 
@@ -63,4 +65,3 @@ class _SplashPageState extends State<SplashPage> {
     );
   }
 }
-

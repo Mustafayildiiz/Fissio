@@ -22,7 +22,7 @@ class _FissioAppState extends State<FissioApp> {
   @override
   void initState() {
     super.initState();
-    // Token süresi dolduğunda (401) girişe dön.
+    // Token süresi dolduğunda (401) giriş sayfasına dön.
     appState.onSessionExpired = () {
       navigatorKey.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const AuthPage()),

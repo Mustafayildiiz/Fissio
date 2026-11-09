@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'profile_select_page.dart';
 import 'receipt_detail_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -14,16 +15,34 @@ class HomePage extends StatelessWidget {
     return ListenableBuilder(
       listenable: appState,
       builder: (context, _) {
-        final initial = (appState.email ?? '?').characters.first.toUpperCase();
+        final initial = appState.displayName.characters.first.toUpperCase();
         final highest = appState.highestExpense;
         final top = appState.topCategory;
         return Column(
           children: [
             FissioHeader(
-              trailing: CircleAvatar(
-                radius: 18,
-                backgroundColor: AppColors.secondaryText,
-                child: Text(initial, style: const TextStyle(color: AppColors.darkText)),
+              trailing: InkWell(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
+                ),
+                customBorder: const CircleBorder(),
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppColors.card,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: AppColors.secondaryText.withValues(alpha: .5),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      initial,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
               ),
             ),
             Expanded(

@@ -4,7 +4,7 @@ import '../api.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'shell_page.dart';
+import 'profile_select_page.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -46,7 +46,7 @@ class _AuthPageState extends State<AuthPage> {
       }
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ShellPage()),
+        MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
         (_) => false,
       );
     } on ApiException catch (e) {
@@ -60,90 +60,174 @@ class _AuthPageState extends State<AuthPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 84,
-                  height: 84,
-                  decoration: const BoxDecoration(
-                    color: AppColors.accent,
-                    shape: BoxShape.circle,
+        child: Column(
+          children: [
+            const FissioHeader(),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _register ? 'Hesap Oluştur' : 'Giriş Yap',
+                          style: const TextStyle(color: Colors.white, fontSize: 28),
+                        ),
+                        const SizedBox(height: 20),
+                        Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: AppColors.light,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            children: [
+                              _ModeTab(
+                                label: 'Giriş Yap',
+                                icon: Icons.login,
+                                active: !_register,
+                                onTap: () => setState(() {
+                                  _register = false;
+                                  _error = null;
+                                }),
+                              ),
+                              const SizedBox(width: 6),
+                              _ModeTab(
+                                label: 'Kayıt Ol',
+                                icon: Icons.person_add_alt_1,
+                                active: _register,
+                                onTap: () => setState(() {
+                                  _register = true;
+                                  _error = null;
+                                }),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        DarkCard(
+                          padding: const EdgeInsets.all(16),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.light,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              children: [
+                                TextField(
+                                  controller: _email,
+                                  keyboardType: TextInputType.emailAddress,
+                                  autofillHints: const [AutofillHints.email],
+                                  style: const TextStyle(color: AppColors.darkText),
+                                  decoration: lightField(
+                                    'E-posta',
+                                    hint: 'E-posta giriniz',
+                                    suffix: const Icon(
+                                      Icons.alternate_email,
+                                      size: 18,
+                                      color: AppColors.darkText,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _password,
+                                  obscureText: true,
+                                  onSubmitted: (_) => _submit(),
+                                  style: const TextStyle(color: AppColors.darkText),
+                                  decoration: lightField(
+                                    'Şifre',
+                                    hint: 'En az 6 karakter',
+                                    suffix: const Icon(
+                                      Icons.lock_outline,
+                                      size: 18,
+                                      color: AppColors.darkText,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _error!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: AppColors.danger,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        PrimaryButton(
+                          label: _register ? 'Kayıt Ol' : 'Giriş Yap',
+                          busy: _busy,
+                          onPressed: _submit,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                const Text('Fissio', style: TextStyle(color: Colors.white, fontSize: 34)),
-                const SizedBox(height: 4),
-                Text(
-                  _register ? 'Hesap oluşturun' : 'Hesabınıza giriş yapın',
-                  style: const TextStyle(color: AppColors.secondaryText, fontSize: 13),
-                ),
-                const SizedBox(height: 28),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _email,
-                        keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.email],
-                        style: const TextStyle(color: AppColors.darkText),
-                        decoration: lightField('E-posta', hint: 'E-posta giriniz'),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _password,
-                        obscureText: true,
-                        onSubmitted: (_) => _submit(),
-                        style: const TextStyle(color: AppColors.darkText),
-                        decoration: lightField('Şifre', hint: 'En az 6 karakter'),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppColors.danger, fontSize: 13),
-                  ),
-                ],
-                const SizedBox(height: 22),
-                PrimaryButton(
-                  label: _register ? 'Kayıt ol' : 'Giriş yap',
-                  busy: _busy,
-                  onPressed: _submit,
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => setState(() {
-                            _register = !_register;
-                            _error = null;
-                          }),
-                  child: Text(
-                    _register
-                        ? 'Zaten hesabım var, giriş yap'
-                        : 'Hesabın yok mu? Kayıt ol',
-                    style: const TextStyle(color: AppColors.secondaryText),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
+class _ModeTab extends StatelessWidget {
+  const _ModeTab({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? AppColors.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: active ? Colors.white : AppColors.darkText,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: active ? Colors.white : AppColors.darkText,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
