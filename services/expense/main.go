@@ -39,10 +39,11 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"service": "expense", "status": "ok", "time": time.Now().UTC()})
 	})
 
-	h := &handler{db: db}
+	h := &handler{db: db, ocrFactory: NewOcrEngineFactoryFromEnv()}
 	api := r.Group("/", authMiddleware([]byte(secret)))
 	api.GET("/categories", h.listCategories)
 	api.POST("/receipts/parse", h.parseReceipt)
+	api.POST("/receipts/scan", h.scanReceipt)
 	api.POST("/expenses", h.createExpense)
 	api.GET("/expenses", h.listExpenses)
 	api.GET("/expenses/:id", h.getExpense)
@@ -72,7 +73,7 @@ func cors() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-OCR-Engine")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return

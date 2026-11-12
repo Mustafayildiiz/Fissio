@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
+import 'ocr/ocr_engine.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -26,6 +27,7 @@ class ApiClient {
 
   final String _auth = 'http://$_host:8081';
   final String _expense = 'http://$_host:8082';
+  final String _ocr = 'http://$_host:8083';
 
   Future<dynamic> _send(
     String method,
@@ -133,5 +135,30 @@ class ApiClient {
 
   Future<void> deleteExpense(int id) =>
       _send('DELETE', _expense, '/expenses/$id');
+
+  // --- OCR & Receipt Parsing ---
+  Future<OcrResult> extractOcrText(
+    String imageBase64, {
+    String engine = 'paddleocr',
+  }) async {
+    final j = await _send(
+      'POST',
+      _ocr,
+      '/ocr/extract',
+      body: {'image_base64': imageBase64, 'engine': engine},
+      query: {'engine': engine},
+    );
+    return OcrResult.fromJson(j as Map<String, dynamic>);
+  }
+
+  Future<ParsedReceipt> parseReceiptText(String rawText) async {
+    final j = await _send(
+      'POST',
+      _expense,
+      '/receipts/parse',
+      body: {'text': rawText},
+    );
+    return ParsedReceipt.fromJson(j as Map<String, dynamic>);
+  }
 }
 

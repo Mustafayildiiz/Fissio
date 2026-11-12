@@ -38,6 +38,28 @@ KREDİ KARTI  1.250,75`
 	if r.NeedsManual {
 		t.Fatal("needs_manual should be false")
 	}
+	if len(r.Items) != 2 || r.Items[0].Name != "EKMEK" || r.Items[0].Amount != 5.0 || r.Items[1].Name != "SÜT" || r.Items[1].Amount != 32.50 {
+		t.Fatalf("items = %+v", r.Items)
+	}
+}
+
+func TestOcrEngineFactoryResolution(t *testing.T) {
+	f := NewOcrEngineFactory("paddleocr", "http://ocr:8080")
+	eng, err := f.Resolve("")
+	if err != nil || eng.Name() != "paddleocr" {
+		t.Fatalf("default resolve = %v, %v", eng, err)
+	}
+	engAlias, err := f.Resolve("pp-ocrv4")
+	if err != nil || engAlias.Name() != "paddleocr" {
+		t.Fatalf("alias resolve = %v, %v", engAlias, err)
+	}
+	customEng, err := f.Resolve("custom")
+	if err != nil || customEng.Name() != "custom" {
+		t.Fatalf("custom resolve = %v, %v", customEng, err)
+	}
+	if _, err := f.Resolve("unknown_engine"); err == nil {
+		t.Fatal("expected error for unknown engine")
+	}
 }
 
 func TestParseFuelReceiptAmountOnNextLine(t *testing.T) {

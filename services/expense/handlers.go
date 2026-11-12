@@ -13,12 +13,17 @@ import (
 	"github.com/lib/pq"
 )
 
-type handler struct{ db *sql.DB }
+type handler struct {
+	db         *sql.DB
+	ocrFactory *OcrEngineFactory
+}
 
 const dateLayout = "2006-01-02"
 
 func badRequest(c *gin.Context, msg string) { c.JSON(http.StatusBadRequest, gin.H{"error": msg}) }
-func serverError(c *gin.Context)            { c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"}) }
+func serverError(c *gin.Context) {
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+}
 
 func (h *handler) loadCategories() ([]Category, error) {
 	rows, err := h.db.Query(`SELECT id, name, keywords FROM expense.categories ORDER BY id`)
@@ -68,6 +73,65 @@ func (h *handler) parseReceipt(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, Parse(in.Text, cats, time.Now()))
+}
+
+// scanReceipt: Resolves the active OcrEngine via Strategy Factory, extracts text from
+// the receipt image in memory, and parses structured receipt fields.
+func (h *handler) scanReceipt(c *gin.Context) {
+	var in struct {
+		ImageBase64 string `json:"image_base64"`
+		Engine      string `json:"engine"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		badRequest(c, "invalid request body")
+		return
+	}
+	if len(in.ImageBase64) == 0 || len(in.ImageBase64) > 20_000_000 {
+		badRequest(c, "image_base64 is required and must be under 15MB")
+		return
+	}
+
+	requestedEngine := in.Engine
+	if requestedEngine == "" {
+		requestedEngine = c.Query("engine")
+	}
+	if requestedEngine == "" {
+		requestedEngine = c.GetHeader("X-OCR-Engine")
+	}
+
+	factory := h.ocrFactory
+	if factory == nil {
+		factory = NewOcrEngineFactoryFromEnv()
+	}
+	engine, err := factory.Resolve(requestedEngine)
+	if err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	ocrRes, err := engine.ExtractText(c.Request.Context(), in.ImageBase64)
+	// Bellekten goruntu verisini hemen temizle (FR-2.3 / NFR-2)
+	in.ImageBase64 = ""
+	if err != nil {
+		if errors.Is(err, ErrInvalidOcrInput) {
+			badRequest(c, "invalid receipt image")
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	cats, err := h.loadCategories()
+	if err != nil {
+		serverError(c)
+		return
+	}
+
+	parsed := Parse(ocrRes.RawText, cats, time.Now())
+	c.JSON(http.StatusOK, gin.H{
+		"ocr":    ocrRes,
+		"parsed": parsed,
+	})
 }
 
 type expenseItem struct {
@@ -380,4 +444,3 @@ func (h *handler) summary(c *gin.Context) {
 		"by_category": items,
 	})
 }
-

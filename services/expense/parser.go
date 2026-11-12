@@ -25,13 +25,14 @@ type Confidence struct {
 
 // ParseResult FR-3.1 / FR-3.2 ciktisidir. Bulunamayan alanlar nil'dir.
 type ParseResult struct {
-	Merchant     string     `json:"merchant"`
-	Amount       *float64   `json:"amount"`
-	Date         *string    `json:"date"`
-	CategoryID   int        `json:"category_id"`
-	CategoryName string     `json:"category_name"`
-	Confidence   Confidence `json:"confidence"`
-	NeedsManual  bool       `json:"needs_manual"`
+	Merchant     string        `json:"merchant"`
+	Amount       *float64      `json:"amount"`
+	Date         *string       `json:"date"`
+	CategoryID   int           `json:"category_id"`
+	CategoryName string        `json:"category_name"`
+	Items        []expenseItem `json:"items,omitempty"`
+	Confidence   Confidence    `json:"confidence"`
+	NeedsManual  bool          `json:"needs_manual"`
 }
 
 const fallbackCategory = "Diğer"
@@ -75,6 +76,7 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 	id, name, conf := categorize(header, lines, cats)
 	res.CategoryID, res.CategoryName, res.Confidence.Category = id, name, conf
 
+	res.Items = extractItems(lines, res.Amount)
 	res.NeedsManual = res.Amount == nil
 	return res
 }
@@ -293,3 +295,59 @@ func isAlnum(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
+var skipItemKeywords = []string{
+	"toplam", "topkdv", "kdv", "odenecek", "tutar", "nakit",
+	"kredi", "kart", "para ustu", "fis no", "tarih", "saat",
+	"vkn", "mersis", "vergi", "tesekkur", "banka", "onay",
+}
+
+func extractItems(lines []string, totalAmount *float64) []expenseItem {
+	var items []expenseItem
+	for _, l := range lines {
+		f := foldTR(l)
+		if strings.Contains(f, "toplam") && !strings.Contains(f, "ara toplam") {
+			break // Toplam satirindan sonrasi odeme/alt bilgi
+		}
+		skip := false
+		for _, kw := range skipItemKeywords {
+			if strings.Contains(f, kw) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		masked := maskDates(l)
+		matches := amountRe.FindAllStringIndex(masked, -1)
+		if len(matches) == 0 {
+			continue
+		}
+		lastMatch := matches[len(matches)-1]
+		amtStr := masked[lastMatch[0]:lastMatch[1]]
+		val, ok := parseAmount(amtStr)
+		if !ok || val <= 0 {
+			continue
+		}
+		if totalAmount != nil && math.Abs(val-*totalAmount) < 0.005 && len(lines) <= 3 {
+			continue
+		}
+		namePart := strings.TrimSpace(l[:lastMatch[0]])
+		// Sondaki KDV orani (%01, %10, %20) veya * isaretlerini temizle
+		namePart = regexp.MustCompile(`(?i)[\s*%]+(?:01|08|10|18|20|1|8)\s*$`).ReplaceAllString(namePart, "")
+		namePart = strings.TrimSpace(strings.Trim(namePart, "*-=_#:"))
+		letters := 0
+		for _, r := range namePart {
+			if unicode.IsLetter(r) {
+				letters++
+			}
+		}
+		if letters >= 2 {
+			if r := []rune(namePart); len(r) > 80 {
+				namePart = string(r[:80])
+			}
+			items = append(items, expenseItem{Name: namePart, Amount: val})
+		}
+	}
+	return items
+}

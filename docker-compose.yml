@@ -28,11 +28,25 @@ services:
       - "8081:8080"
     networks: [internal]
 
+  ocr:
+    build: ./services/ocr
+    environment:
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+      OCR_VERSION: ${OCR_VERSION:-PP-OCRv4}
+      OCR_MODEL_VARIANT: ${OCR_MODEL_VARIANT:-mobile}
+      OCR_LANG: ${OCR_LANG:-tr}
+      OCR_USE_GPU: ${OCR_USE_GPU:-false}
+    ports:
+      - "8083:8080"
+    networks: [internal]
+
   expense:
     build: ./services/expense
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-fissio}:${POSTGRES_PASSWORD:-fissio_dev_password}@postgres:5432/${POSTGRES_DB:-fissio}?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-dev_only_change_me}
+      OCR_SERVICE_URL: ${OCR_SERVICE_URL:-http://ocr:8080}
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
     depends_on:
       postgres:
         condition: service_healthy

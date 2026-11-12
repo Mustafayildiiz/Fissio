@@ -62,8 +62,9 @@ class ModeSwitch extends StatelessWidget {
 }
 
 class ReceiptFormPage extends StatefulWidget {
-  const ReceiptFormPage({super.key, this.initial});
+  const ReceiptFormPage({super.key, this.initial, this.initialDraft});
   final Expense? initial; // doluysa düzenleme
+  final ReceiptDraft? initialDraft; // OCR taramasından gelen taslak
 
   @override
   State<ReceiptFormPage> createState() => _ReceiptFormPageState();
@@ -80,7 +81,9 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   @override
   void initState() {
     super.initState();
-    _draft = _editing ? ReceiptDraft.from(widget.initial!) : ReceiptDraft();
+    _draft = _editing
+        ? ReceiptDraft.from(widget.initial!)
+        : (widget.initialDraft ?? ReceiptDraft());
     _merchant = TextEditingController(text: _draft.merchant);
     _note = TextEditingController(text: _draft.note);
     _date = TextEditingController(text: fmtDate(_draft.date));
@@ -161,9 +164,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                           ),
                           const SizedBox(height: 10),
                           InkWell(
-                            onTap: () => showMessage(
-                              context,
-                              'Fotoğraf ile okuma bir sonraki fazda (Faz 5) eklenecek.',
+                            onTap: () => Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(builder: (_) => const ScanPage()),
                             ),
                             child: Container(
                               height: 120,

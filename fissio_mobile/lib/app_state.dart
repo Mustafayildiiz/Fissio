@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ChangeNotifier, VoidCallback;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'api.dart';
 import 'models.dart';
+import 'ocr/ocr_engine.dart';
 
 class AppState extends ChangeNotifier {
   AppState() {
@@ -13,6 +15,7 @@ class AppState extends ChangeNotifier {
   }
 
   late final ApiClient api;
+  final OcrEngineFactory ocrFactory = OcrEngineFactory(defaultEngine: 'paddleocr');
   final _storage = const FlutterSecureStorage();
   static const _tokenKey = 'jwt';
   static const _profilesKey = 'profiles_v2';
@@ -274,6 +277,34 @@ class AppState extends ChangeNotifier {
   Future<void> deleteExpense(int id) async {
     await api.deleteExpense(id);
     await refresh();
+  }
+
+  /// Seçili OCR motoru stratejisini (varsayılan: PaddleOCR PP-OCRv4 Mobile) kullanarak
+  /// fiş görselinden metin çıkarır, görsel belleğini sıfırlar (FR-2.3) ve metni ayrıştırır.
+  Future<({OcrResult ocr, ParsedReceipt parsed})> scanAndParseReceipt(
+    Uint8List imageBytes, {
+    String? engine,
+  }) async {
+    final ocrEngine = ocrFactory.resolve(api, engineName: engine);
+    try {
+      final ocrRes = await ocrEngine.extractText(imageBytes);
+      if (ocrRes.isEmpty) {
+        return (
+          ocr: ocrRes,
+          parsed: const ParsedReceipt(
+            merchant: '',
+            categoryId: 0,
+            categoryName: 'Diğer',
+            needsManual: true,
+          ),
+        );
+      }
+      final parsed = await api.parseReceiptText(ocrRes.rawText);
+      return (ocr: ocrRes, parsed: parsed);
+    } finally {
+      // FR-2.3: Ham fotoğraf verisi işlendikten hemen sonra bellekten temizlenir.
+      imageBytes.fillRange(0, imageBytes.length, 0);
+    }
   }
 
   // --- Panel hesapları (son 30 gün) ---

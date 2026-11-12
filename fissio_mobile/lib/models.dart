@@ -124,4 +124,47 @@ class ReceiptDraft {
         ? [ExpenseItem(e.merchant.isEmpty ? 'Toplam' : e.merchant, e.amount)]
         : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList(),
   );
+
+  factory ReceiptDraft.fromParsed(ParsedReceipt p) => ReceiptDraft(
+    merchant: p.merchant,
+    categoryId: p.categoryId > 0 ? p.categoryId : null,
+    date: p.date ?? DateTime.now(),
+    items: p.items.isNotEmpty
+        ? p.items.map((i) => ExpenseItem(i.name, i.amount)).toList()
+        : (p.amount != null && p.amount! > 0
+              ? [ExpenseItem(p.merchant.isEmpty ? 'Toplam' : p.merchant, p.amount!)]
+              : []),
+  );
+}
+
+class ParsedReceipt {
+  final String merchant;
+  final double? amount;
+  final DateTime? date;
+  final int categoryId;
+  final String categoryName;
+  final List<ExpenseItem> items;
+  final bool needsManual;
+
+  const ParsedReceipt({
+    required this.merchant,
+    this.amount,
+    this.date,
+    required this.categoryId,
+    required this.categoryName,
+    this.items = const [],
+    required this.needsManual,
+  });
+
+  factory ParsedReceipt.fromJson(Map<String, dynamic> j) => ParsedReceipt(
+    merchant: (j['merchant'] as String?) ?? '',
+    amount: (j['amount'] as num?)?.toDouble(),
+    date: j['date'] is String ? DateTime.tryParse(j['date'] as String) : null,
+    categoryId: (j['category_id'] as int?) ?? 0,
+    categoryName: (j['category_name'] as String?) ?? 'Diğer',
+    items: ((j['items'] as List?) ?? [])
+        .map((e) => ExpenseItem.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    needsManual: (j['needs_manual'] as bool?) ?? false,
+  );
 }
