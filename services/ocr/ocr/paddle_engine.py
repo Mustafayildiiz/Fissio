@@ -47,6 +47,14 @@ class PaddleOcrEngine(OcrEngine):
     def model_version(self) -> str:
         return f"{self._config.ocr_version}-{self._config.model_variant}"
 
+    @property
+    def is_loaded(self) -> bool:
+        return self._predictor is not None
+
+    def load(self) -> None:
+        """Eagerly initialize PaddleOCR weights (once, at application startup)."""
+        self._get_or_create_predictor()
+
     def _build_paddle_kwargs(self, lang: str) -> dict[str, Any]:
         """Build kwargs compatible with the installed PaddleOCR version for PP-OCRv4 Mobile."""
         desired: dict[str, Any] = {

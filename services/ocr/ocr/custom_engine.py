@@ -45,6 +45,13 @@ class CustomOcrEngine(OcrEngine):
     def model_version(self) -> str:
         return "fissio-custom-ocr-v1-stub"
 
+    @property
+    def is_loaded(self) -> bool:
+        return self._model is not None
+
+    def load(self) -> None:
+        self._load_model()
+
     def _load_model(self) -> Any:
         """
         Hook for loading custom model weights (e.g., onnxruntime.InferenceSession or torch.jit.load).

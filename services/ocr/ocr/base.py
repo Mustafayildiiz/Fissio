@@ -103,11 +103,24 @@ class OcrEngine(ABC):
             OcrEngineError: If inference fails.
         """
 
+    @property
+    def is_loaded(self) -> bool:
+        """Whether model weights are resident in memory (engines without weights are always loaded)."""
+        return True
+
+    def load(self) -> None:
+        """Load model weights into memory once (called from the FastAPI lifespan). No-op by default."""
+
     def health_check(self) -> dict[str, Any]:
         """Return operational metadata for health and readiness probes."""
         return {
             "engine": self.engine_name,
             "model_version": self.model_version,
             "ready": True,
+            "model_loaded": self.is_loaded,
         }
+
+
+# Alias: the abstract Strategy base is also referred to as `BaseOCREngine` in the project plan.
+BaseOCREngine = OcrEngine
 
