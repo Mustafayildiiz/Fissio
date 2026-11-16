@@ -15,10 +15,11 @@ except ImportError:  # pragma: no cover
     HAS_CV = False
 
 from ocr.base import OcrTextBlock
-from ocr.postprocess import dedupe_blocks
+from ocr.paddle_engine import PaddleOcrEngine
+from ocr.postprocess import dedupe_blocks, local_slope_fn
 
 if HAS_CV:
-    from ocr.preprocess import apply_clahe, preprocess_receipt
+    from ocr.preprocess import apply_clahe, preprocess_receipt, upscale_if_small
 
 
 def _box(x1: float, y1: float, x2: float, y2: float):
@@ -60,6 +61,13 @@ class PreprocessTests(unittest.TestCase):
         self.assertEqual(out.shape, img.shape)
         self.assertGreater(float(out.std()), float(img.std()))
 
+    def test_upscale_if_small(self) -> None:
+        small = np.zeros((300, 200, 3), np.uint8)
+        big = upscale_if_small(small, 800)
+        self.assertEqual(big.shape[:2], (900, 600))  # en fazla 3x
+        large = np.zeros((1200, 900, 3), np.uint8)
+        self.assertIs(upscale_if_small(large, 800), large)
+
     def test_invalid_inputs_do_not_raise(self) -> None:
         for bad in ([[0, 0, 0]], None, "x", np.zeros((0, 0, 3), np.uint8), np.zeros((10, 10), np.uint8)):
             self.assertIs(preprocess_receipt(bad), bad)
@@ -94,6 +102,47 @@ class DedupeTests(unittest.TestCase):
         a = OcrTextBlock("TOPLAM", 0.9, None)
         b = OcrTextBlock("TOPLAM", 0.9, None)
         self.assertEqual(len(dedupe_blocks([a, b])), 2)
+
+
+class TiltedRowsTests(unittest.TestCase):
+    """Eğik/kıvrık fişte sol etiket ile sağ tutar farklı Y'de görünür; satır birleştirme eğimi telafi etmeli."""
+
+    @staticmethod
+    def _tilted_blocks(slope: float = 0.1, rows: int = 8, pitch: float = 40.0):
+        blocks = []
+        for i in range(rows):
+            y = 40.0 + pitch * i
+            # Etiket: x 100-300, üst kenar eğimli
+            blocks.append(
+                OcrTextBlock(
+                    f"URUN{i}", 0.95,
+                    [(100, y), (300, y + slope * 200), (300, y + slope * 200 + 14), (100, y + 14)],
+                )
+            )
+            # Tutar: x 500-560, etiketin satırının eğim kadar altında (kayma)
+            dy = slope * 400
+            blocks.append(
+                OcrTextBlock(
+                    f"{i + 1},00", 0.95,
+                    [(500, y + dy), (560, y + dy + slope * 60), (560, y + dy + slope * 60 + 14), (500, y + dy + 14)],
+                )
+            )
+        return blocks
+
+    def test_local_slope_is_estimated(self) -> None:
+        slope_at = local_slope_fn(self._tilted_blocks())
+        self.assertAlmostEqual(slope_at(200.0), 0.1, delta=0.02)
+
+    def test_label_and_amount_end_up_on_the_same_row(self) -> None:
+        text, _ = PaddleOcrEngine._reconstruct_receipt_lines(self._tilted_blocks())
+        lines = text.splitlines()
+        self.assertEqual(len(lines), 8)
+        for i, line in enumerate(lines):
+            self.assertEqual(line, f"URUN{i} {i + 1},00")
+
+    def test_no_tilt_is_unchanged(self) -> None:
+        text, _ = PaddleOcrEngine._reconstruct_receipt_lines(self._tilted_blocks(slope=0.0))
+        self.assertEqual(text.splitlines()[0], "URUN0 1,00")
 
 
 if __name__ == "__main__":

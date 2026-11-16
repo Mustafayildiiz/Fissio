@@ -135,3 +135,55 @@ func containsWordFuzzy(text, word string) bool {
 	}
 	return fuzzyTokenMatch(n, word, fuzzyMinLen)
 }
+
+// hasToken, satirdaki kelimelerden (harf/rakam disi karakterlerle bolunmus) biri tok ise true.
+// "TOP *480.00" -> top; "TOPKDV" -> top DEGIL (tam token).
+func hasToken(line, tok string) bool {
+	f := foldTR(line)
+	for _, t := range strings.FieldsFunc(f, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if t == tok {
+			return true
+		}
+	}
+	return false
+}
+
+// isKDVLine, KDV satirini tanir (OCR sik sik KDV'yi KDU okur).
+func isKDVLine(line string) bool {
+	if hasKeyword(line, "kdv", fuzzyMinLen) {
+		return true
+	}
+	// OCR KDV'yi KDU/KDY/KOV gibi okur: "k" ile baslayan, "kdv"ye 1 duzenleme uzakta 3 harfli token.
+	f := foldTR(line)
+	for _, t := range strings.FieldsFunc(f, func(r rune) bool { return !unicode.IsLetter(r) }) {
+		if len(t) == 3 && t[0] == 'k' && levenshtein(t, "kdv") <= 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// isStarBanner, "** ELEKTRIK KESILDI **" gibi yildizla sarilmis bilgi satirlarini tanir.
+func isStarBanner(line string) bool {
+	t := strings.TrimSpace(line)
+	return strings.HasPrefix(t, "**") && strings.HasSuffix(t, "**")
+}
+
+// dropLeadingJunk, satir basindaki telefon/numara kalintilarini ("/05445020217 BIRLESIK ...") atar.
+func dropLeadingJunk(l string) string {
+	toks := strings.Fields(l)
+	for len(toks) > 1 {
+		digits := 0
+		for _, r := range toks[0] {
+			if unicode.IsDigit(r) {
+				digits++
+			}
+		}
+		if digits >= 4 || strings.HasPrefix(toks[0], "/") {
+			toks = toks[1:]
+			continue
+		}
+		break
+	}
+	return strings.Join(toks, " ")
+}

@@ -1,0 +1,67 @@
+{
+  "bim_kirli.jpg": {
+    "merchant": "BIM BIRLESIK MAGAZALAR A.S.",
+    "date": "2021-09-04",
+    "total": 223.65,
+    "note": "Kirli/kırışık/eğik. Kalem adı-fiyat eşleşmesi güvenilir okunamadığı için yalnızca fiyat çoklu kümesi (multiset) kullanılır; fiyatlar toplamı 223,65'e eşit.",
+    "items_match": "amount",
+    "items": [
+      {"amount": 3.95}, {"amount": 3.95}, {"amount": 13.90}, {"amount": 6.50}, {"amount": 6.90},
+      {"amount": 6.90}, {"amount": 4.50}, {"amount": 3.75}, {"amount": 2.50}, {"amount": 2.50},
+      {"amount": 4.50}, {"amount": 5.90}, {"amount": 2.50}, {"amount": 4.50}, {"amount": 2.50},
+      {"amount": 10.50}, {"amount": 6.50}, {"amount": 7.90}, {"amount": 3.95}, {"amount": 3.60},
+      {"amount": 11.90}, {"amount": 7.90}, {"amount": 6.90}, {"amount": 3.95}, {"amount": 24.90},
+      {"amount": 10.90}, {"amount": 15.50}, {"amount": 14.50}, {"amount": 6.50}, {"amount": 12.25},
+      {"amount": 0.75}
+    ],
+    "critical": [
+      {"label": "TOPKDV", "amount": 16.98},
+      {"label": "TOPLAM", "amount": 223.65},
+      {"label": "NAKIT", "amount": 225.00}
+    ]
+  },
+  "bim_koltuk.jpg": {
+    "merchant": "BIM BIRLESIK MAGAZALAR A.S.",
+    "date": "2019-12-12",
+    "total": 26.15,
+    "items_match": "pair",
+    "items": [
+      {"name": "PAT.CIPSI PATITO", "amount": 3.25},
+      {"name": "PAT.CIPSI PATITO", "amount": 3.25},
+      {"name": "SUT AROMALI", "amount": 1.00},
+      {"name": "ETI KARAM GURME 50 G", "amount": 1.75},
+      {"name": "ETI KARAM GURME 50 G", "amount": 1.75},
+      {"name": "200ML.MUZ.SUT", "amount": 1.00},
+      {"name": "SUT AROMALI", "amount": 1.00},
+      {"name": "200ML.MUZ.SUT", "amount": 1.00},
+      {"name": "SUT AROMALI", "amount": 1.00},
+      {"name": "SUT AROMALI", "amount": 1.00},
+      {"name": "KEK 35 G KEKSTRA", "amount": 0.70},
+      {"name": "KEK 35 G KEKSTRA", "amount": 0.70},
+      {"name": "ALISVERIS POSETI", "amount": 0.25},
+      {"name": "POPKEK MUZLU 60G", "amount": 3.00},
+      {"name": "DANKEK 40 GR", "amount": 1.00},
+      {"name": "DANKEK 40 GR", "amount": 1.00},
+      {"name": "ETI KARAM GURME 50 G", "amount": 3.50}
+    ],
+    "critical": [
+      {"label": "TOPKDV", "amount": 1.96},
+      {"label": "TOPLAM", "amount": 26.15},
+      {"label": "KREDI KARTI", "amount": 26.15}
+    ]
+  },
+  "can_bolat.jpg": {
+    "merchant": "CAN BOLAT MARKET",
+    "date": "2016-02-14",
+    "total": 480.00,
+    "items_match": "pair",
+    "items": [
+      {"name": "T.GIDA", "amount": 480.00}
+    ],
+    "critical": [
+      {"label": "KDV", "amount": 35.56},
+      {"label": "TOP", "amount": 480.00},
+      {"label": "NAKIT", "amount": 480.00}
+    ]
+  }
+}

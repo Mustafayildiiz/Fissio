@@ -18,8 +18,8 @@ from .base import (
     OcrTextBlock,
 )
 from .config import OcrConfig
-from .postprocess import dedupe_blocks
-from .preprocess import preprocess_receipt
+from .postprocess import dedupe_blocks, local_slope_fn
+from .preprocess import preprocess_receipt, upscale_if_small
 
 
 class PaddleOcrEngine(OcrEngine):
@@ -67,6 +67,7 @@ class PaddleOcrEngine(OcrEngine):
             "enable_mkldnn": self._config.enable_mkldnn,
             "cpu_threads": self._config.cpu_threads,
             "det_limit_side_len": self._config.det_limit_side_len,
+            "det_limit_type": self._config.det_limit_type,
             "rec_batch_num": self._config.rec_batch_num,
             "drop_score": self._config.drop_score,
             "show_log": False,
@@ -261,12 +262,17 @@ class PaddleOcrEngine(OcrEngine):
         if not blocks:
             return "", []
 
+        # Eğik çekilmiş fişlerde sol etiket ile sağ tutar farklı Y'de görünür; satır merkezini
+        # yerel eğimle düzelt (y_adj = y - s(y) * x).
+        slope_at = local_slope_fn(blocks)
+
         def _box_metrics(b: OcrTextBlock) -> tuple[float, float, float]:
             if not b.bbox:
                 return (0.0, 0.0, 20.0)
             xs = [pt[0] for pt in b.bbox]
             ys = [pt[1] for pt in b.bbox]
-            y_center = (min(ys) + max(ys)) / 2.0
+            y_raw = (min(ys) + max(ys)) / 2.0
+            y_center = y_raw - slope_at(y_raw) * ((min(xs) + max(xs)) / 2.0)
             x_min = min(xs)
             height = max(1.0, max(ys) - min(ys))
             return (y_center, x_min, height)
@@ -305,6 +311,8 @@ class PaddleOcrEngine(OcrEngine):
     def extract_text(self, image_input: ImageInput) -> OcrResult:
         start_ns = time.perf_counter_ns()
         img_array = self._decode_image_to_ndarray(image_input)
+        if self._config.upscale_min_side > 0:
+            img_array = upscale_if_small(img_array, self._config.upscale_min_side)
         if self._config.preprocess:
             # Perspektif düzeltme + CLAHE; hata/uygunsuzlukta girdiyi aynen döndürür.
             img_array = preprocess_receipt(
@@ -324,7 +332,8 @@ class PaddleOcrEngine(OcrEngine):
             blocks = self._parse_raw_paddle_output(
                 raw_output, drop_score=self._config.drop_score
             )
-            blocks = dedupe_blocks(blocks)
+            if self._config.dedupe:
+                blocks = dedupe_blocks(blocks)
             raw_text, ordered_blocks = self._reconstruct_receipt_lines(blocks)
 
             avg_conf = (

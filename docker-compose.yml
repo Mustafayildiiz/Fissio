@@ -38,7 +38,8 @@ services:
       OCR_USE_GPU: ${OCR_USE_GPU:-false}
       OCR_PREPROCESS: ${OCR_PREPROCESS:-true}
       OCR_PREPROCESS_WARP: ${OCR_PREPROCESS_WARP:-true}
-      OCR_PREPROCESS_CLAHE: ${OCR_PREPROCESS_CLAHE:-true}
+      OCR_PREPROCESS_CLAHE: ${OCR_PREPROCESS_CLAHE:-false}
+      OCR_DET_LIMIT_SIDE_LEN: ${OCR_DET_LIMIT_SIDE_LEN:-1600}
     # Model agirliklari her yeniden olusturmada tekrar inmesin
     volumes:
       - ocr_models:/root/.paddleocr

@@ -48,7 +48,17 @@ var (
 		"Ü", "u", "ü", "u",
 	)
 	amountRe = regexp.MustCompile(`(?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2}\b`)
-	dateRe   = regexp.MustCompile(`\b(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})\b`)
+	// Etiketle yapisik yazilan tarihler de (TARIH12.12.2019) yakalansin: \b yerine rakam-olmayan sinir.
+	dateRe = regexp.MustCompile(`(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$)`)
+	// OCR ondalik ayiraci sonrasina bosluk koyabilir ("+24, 90" -> "24,90").
+	spacedDecimalRe = regexp.MustCompile(`(\d[.,])\s(\d{2})\b`)
+	// Adet satiri: "4Adt X 0,90", "3 X 1,00", "4AdtX0.90", OCR bozugu "3A0.25". Kalemden ONCE gelir.
+	qtyPrefixRe = regexp.MustCompile(`(?i)^\s*\d+\s*(?:(?:adt|ad|ag|a)\s*x?|x)\s*\d+[.,]\d{2}`)
+	// Kalem adi sonundaki KDV orani ve sutun kalintilari (%08, 08, 808, 80%, %18, *).
+	trailingXRe = regexp.MustCompile(`(?i)\s+x$`)
+	// Ondalik ayiraci dusmus tutar: "%08 *070" -> 0,70; "%08 100" -> 1,00 (satirsonu, 3-4 hane).
+	bareAmountRe = regexp.MustCompile(`[\s*+$x](\d{3,4})\s*$`)
+	itemTailRe   = regexp.MustCompile(`(?i)(?:[\s*+$]+(?:%\s*\d{1,2}|\d{1,2}\s*%|[48]?08|01|10|18|20|1|8))+[\s*+$]*$`)
 )
 
 // foldTR Turkce karakterleri ASCII'ye indirger ve kucuk harfe cevirir
@@ -79,7 +89,13 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 	id, name, conf := categorize(header, lines, cats)
 	res.CategoryID, res.CategoryName, res.Confidence.Category = id, name, conf
 
-	res.Items = extractItems(lines, res.Amount)
+	var bare []bareCandidate
+	res.Items, bare = extractItemsWithBare(lines, res.Amount)
+	if t, ok := resolveTotal(lines, res.Items, res.Amount); ok {
+		res.Amount = &t
+		res.Confidence.Amount = 0.85
+	}
+	res.Items = recoverBareAmounts(res.Items, bare, res.Amount)
 	res.Items, res.NeedsReview, res.ItemsTotal = reconcileItems(res.Items, res.Amount)
 	res.NeedsManual = res.Amount == nil
 	return res
@@ -88,7 +104,7 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 func splitLines(text string) []string {
 	var out []string
 	for _, l := range strings.Split(strings.ReplaceAll(text, "\r", ""), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
+		if l = strings.TrimSpace(spacedDecimalRe.ReplaceAllString(l, "$1$2")); l != "" {
 			out = append(out, l)
 		}
 	}
@@ -127,11 +143,11 @@ func extractAmount(lines []string) (float64, float64, bool) {
 	var tier1, tier2 []int
 	for i, l := range lines {
 		f := foldTR(l)
-		if hasKeyword(l, "kdv", fuzzyMinLen) || strings.Contains(f, "%") || hasKeyword(l, "ara toplam", fuzzyMinLen) {
+		if isKDVLine(l) || strings.Contains(f, "%") || hasKeyword(l, "ara toplam", fuzzyMinLen) {
 			continue
 		}
 		switch {
-		case hasKeyword(l, "toplam", fuzzyMinLen) || hasKeyword(l, "odenecek", fuzzyMinLen):
+		case hasKeyword(l, "toplam", fuzzyMinLen) || hasKeyword(l, "odenecek", fuzzyMinLen) || hasToken(l, "top"):
 			tier1 = append(tier1, i)
 		case hasKeyword(l, "tutar", fuzzyMinLen) || hasKeyword(l, "tahsil", fuzzyMinLen) ||
 			hasKeyword(l, "kredi kart", fuzzyMinLen) || hasKeyword(l, "nakit", fuzzyMinLen):
@@ -160,7 +176,7 @@ func extractAmount(lines []string) (float64, float64, bool) {
 	best, found := 0.0, false
 	for _, l := range lines {
 		f := foldTR(l)
-		if hasKeyword(l, "kdv", fuzzyMinLen) || strings.Contains(f, "%") {
+		if isKDVLine(l) || strings.Contains(f, "%") {
 			continue
 		}
 		for _, a := range amountsIn(l) {
@@ -192,7 +208,7 @@ func extractDate(lines []string, now time.Time) (string, bool) {
 	return "", false
 }
 
-var skipMerchantWords = []string{"fis", "tarih", "saat", "vkn", "vergi", "tel", "adres", "mersis", "no:", "www", "http", "kasiyer", "sicil"}
+var skipMerchantWords = []string{"elektrik", "kesildi", "eku", "fis", "tarih", "saat", "vkn", "vergi", "tel", "adres", "mersis", "no:", "www", "http", "kasiyer", "sicil"}
 
 func extractMerchant(header []string, cats []Category) (string, float64) {
 	// Bilinen bir marka anahtar kelimesi iceren ilk satir en guvenilir adaydir.
@@ -215,6 +231,9 @@ func extractMerchant(header []string, cats []Category) (string, float64) {
 				break
 			}
 		}
+		if isStarBanner(l) {
+			continue // "** ELEKTRIK KESILDI **" gibi bilgi satirlari isletme adi degildir
+		}
 		letters, digits := 0, 0
 		for _, r := range l {
 			if unicode.IsLetter(r) {
@@ -232,6 +251,7 @@ func extractMerchant(header []string, cats []Category) (string, float64) {
 
 func cleanMerchant(l string) string {
 	l = strings.TrimSpace(strings.Trim(l, "*-=_# "))
+	l = dropLeadingJunk(l)
 	if r := []rune(l); len(r) > 60 {
 		l = string(r[:60])
 	}
@@ -306,12 +326,23 @@ var skipItemKeywords = []string{
 }
 
 func extractItems(lines []string, totalAmount *float64) []expenseItem {
+	items, _ := extractItemsWithBare(lines, totalAmount)
+	return items
+}
+
+// extractItemsWithBare, kalemleri cikarir; ayrica ondalik ayiraci OCR'da dusmus ("*070", "100")
+// satirlari ADAY olarak doner. Adaylar yalnizca toplamla dogrulaninca eklenir (recoverBareAmounts).
+func extractItemsWithBare(lines []string, totalAmount *float64) ([]expenseItem, []bareCandidate) {
 	var items []expenseItem
+	var cands []bareCandidate
 	for _, l := range lines {
-		if hasKeyword(l, "toplam", fuzzyMinLen) && !hasKeyword(l, "ara toplam", fuzzyMinLen) {
+		if (hasKeyword(l, "toplam", fuzzyMinLen) || hasToken(l, "top")) && !hasKeyword(l, "ara toplam", fuzzyMinLen) {
 			break // Toplam satirindan sonrasi odeme/alt bilgi
 		}
-		skip := false
+		if loc := qtyPrefixRe.FindStringIndex(l); loc != nil {
+			l = strings.TrimSpace(l[loc[1]:]) // adet satiri kalem degildir; kalan (varsa) islenir
+		}
+		skip := isKDVLine(l) // KDV/KDU satiri kalem degildir
 		for _, kw := range skipItemKeywords {
 			// Urun adlarini yanlislikla atmamak icin bulanik eslesme yalnizca >= 6 harfli etiketlerde.
 			if hasKeyword(l, kw, 6) {
@@ -325,6 +356,14 @@ func extractItems(lines []string, totalAmount *float64) []expenseItem {
 		masked := maskDates(l)
 		matches := amountRe.FindAllStringIndex(masked, -1)
 		if len(matches) == 0 {
+			if m := bareAmountRe.FindStringSubmatchIndex(l); m != nil {
+				if n, err := strconv.Atoi(l[m[2]:m[3]]); err == nil && n > 0 {
+					name := cleanItemName(l[:m[0]])
+					if countLetters(name) >= 2 {
+						cands = append(cands, bareCandidate{Pos: len(items), Item: expenseItem{Name: name, Amount: float64(n) / 100}})
+					}
+				}
+			}
 			continue
 		}
 		lastMatch := matches[len(matches)-1]
@@ -337,9 +376,7 @@ func extractItems(lines []string, totalAmount *float64) []expenseItem {
 			continue
 		}
 		namePart := strings.TrimSpace(l[:lastMatch[0]])
-		// Sondaki KDV orani (%01, %10, %20) veya * isaretlerini temizle
-		namePart = regexp.MustCompile(`(?i)[\s*%]+(?:01|08|10|18|20|1|8)\s*$`).ReplaceAllString(namePart, "")
-		namePart = strings.TrimSpace(strings.Trim(namePart, "*-=_#:"))
+		namePart = cleanItemName(namePart)
 		letters := 0
 		for _, r := range namePart {
 			if unicode.IsLetter(r) {
@@ -353,5 +390,14 @@ func extractItems(lines []string, totalAmount *float64) []expenseItem {
 			items = append(items, expenseItem{Name: namePart, Amount: val})
 		}
 	}
-	return items
+	return items, cands
+}
+
+// cleanItemName, kalem adindaki KDV orani ve sutun kalintilarini temizler. Fiyatin onunde "*"
+// olan fislerde (`%08 *3,95`) ad "...  %08 *" ile biter; once "*" atilir, sonra oran.
+func cleanItemName(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), " *+$")
+	s = trailingXRe.ReplaceAllString(s, "") // "x1.00" gibi OCR kalintisi
+	s = itemTailRe.ReplaceAllString(s, "")
+	return strings.TrimSpace(strings.Trim(s, "*-=_#:+$ "))
 }

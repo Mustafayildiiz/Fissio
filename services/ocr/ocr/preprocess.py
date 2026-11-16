@@ -116,3 +116,22 @@ def preprocess_receipt(img: Any, *, enable_warp: bool = True, enable_clahe: bool
         except Exception:
             pass
     return out
+
+
+def upscale_if_small(img: Any, min_side: int) -> Any:
+    """Kısa kenarı `min_side`'dan küçük görselleri (en fazla 3x) büyütür; aksi halde aynen döner."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return img
+    if not isinstance(img, np.ndarray) or img.ndim != 3 or img.size == 0:
+        return img
+    short = min(img.shape[:2])
+    if short >= min_side:
+        return img
+    factor = min(3.0, min_side / float(short))
+    try:
+        return cv2.resize(img, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+    except Exception:
+        return img

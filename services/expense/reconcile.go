@@ -1,6 +1,10 @@
 package main
 
-import "math"
+import (
+	"math"
+	"strings"
+	"unicode"
+)
 
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
@@ -59,4 +63,127 @@ func reconcileItems(items []expenseItem, total *float64) (out []expenseItem, nee
 		}
 	}
 	return items, true, &sum
+}
+
+// resolveTotal, fisin alt blogundaki tutarlardan tutarli bir toplam bulur ve etiket/tutar sutunlari
+// OCR'da kaymis olsa bile (egik/kivrik fis) dogru toplami verir:
+//   - nakit odemede  odenen - para ustu = toplam   (225,00 - 1,35 = 223,65)
+//   - kalemlerin toplami alt blokta bir tutara esitse o tutar toplamdir.
+//
+// Mevcut toplam zaten tutarliysa degismez. Yalnizca toplam/KDV etiketli ilk satirdan itibaren olan odeme blogu kullanilir.
+func resolveTotal(lines []string, items []expenseItem, current *float64) (float64, bool) {
+	// Yalnizca toplam/KDV etiketli ilk satirdan itibaren olan odeme blogu: kalem fiyatlari
+	// tesadufen odenen-para ustu iliskisini saglayabilir (5,00 + 32,50 = 37,50).
+	start := -1
+	for i, l := range lines {
+		f := foldTR(l)
+		if hasKeyword(l, "toplam", fuzzyMinLen) || hasToken(l, "top") || isKDVLine(l) || strings.Contains(f, "topk") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return 0, false
+	}
+	var pool []float64
+	for _, l := range lines[start:] {
+		pool = append(pool, amountsIn(l)...)
+	}
+	has := func(v float64) bool {
+		for _, a := range pool {
+			if math.Abs(a-v) < 0.005 {
+				return true
+			}
+		}
+		return false
+	}
+	same := func(v float64) bool { return current != nil && math.Abs(*current-v) < 0.005 }
+
+	// 1) Kalem toplami alt blokta bir tutara esit
+	if len(items) >= 2 {
+		sum := sumItems(items)
+		if has(sum) && !same(sum) {
+			return sum, true
+		}
+	}
+	// 2) odenen - para ustu = toplam
+	best, found := 0.0, false
+	for _, paid := range pool {
+		for _, change := range pool {
+			total := round2(paid - change)
+			if change <= 0 || total <= change || !has(total) || math.Abs(total-paid) < 0.005 {
+				continue
+			}
+			if same(total) {
+				return 0, false // mevcut toplam zaten tutarli
+			}
+			if total > best {
+				best, found = total, true
+			}
+		}
+	}
+	return best, found
+}
+
+// bareCandidate, tutari ondalik ayiraci olmadan okunmus bir satirdir ("*070" -> 0,70).
+// Pos, aday ortaya ciktiginda o ana kadar toplanan kalem sayisidir (ekleme konumu).
+type bareCandidate struct {
+	Pos  int
+	Item expenseItem
+}
+
+func countLetters(s string) int {
+	n := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			n++
+		}
+	}
+	return n
+}
+
+// recoverBareAmounts, kalem toplami fis toplaminin altindaysa ve eksik fark TAM OLARAK bir aday
+// alt kumesinin toplamina esitse (en fazla 8 aday), o kalemleri yerlerine ekler. Fark kapanmiyorsa
+// hicbir sey eklenmez (tahmini tutarlarla kalem uydurulmaz).
+func recoverBareAmounts(items []expenseItem, cands []bareCandidate, total *float64) []expenseItem {
+	if total == nil || len(cands) == 0 || len(cands) > 8 {
+		return items
+	}
+	diff := round2(*total - sumItems(items))
+	if diff <= 0.005 {
+		return items
+	}
+	var picked []int
+	for mask := 1; mask < 1<<len(cands); mask++ {
+		sum := 0.0
+		for i := range cands {
+			if mask&(1<<i) != 0 {
+				sum += cands[i].Item.Amount
+			}
+		}
+		if math.Abs(round2(sum)-diff) < 0.005 {
+			picked = picked[:0]
+			for i := range cands {
+				if mask&(1<<i) != 0 {
+					picked = append(picked, i)
+				}
+			}
+			break
+		}
+	}
+	if len(picked) == 0 {
+		return items
+	}
+	out := make([]expenseItem, 0, len(items)+len(picked))
+	pi := 0
+	for idx := 0; idx <= len(items); idx++ {
+		for pi < len(picked) && cands[picked[pi]].Pos == idx {
+			out = append(out, cands[picked[pi]].Item)
+			pi++
+		}
+		if idx < len(items) {
+			out = append(out, items[idx])
+		}
+	}
+	return out
 }

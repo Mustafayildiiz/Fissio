@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import statistics
 import unicodedata
 
 from .base import OcrTextBlock
@@ -68,3 +69,32 @@ def dedupe_blocks(
         elif block.confidence > kept[dup_index].confidence:
             kept[dup_index] = block
     return kept
+
+
+def local_slope_fn(blocks: list[OcrTextBlock], *, max_slope: float = 0.3, neighbors: int = 7):
+    """
+    Dikey konuma göre değişen satır eğimi s(y) döndürür. Kağıt kıvrık/perspektifli olduğunda
+    eğim sayfa boyunca değişir; her konum için en yakın `neighbors` uzun kutunun (genişlik >=
+    2 x yükseklik) üst kenar eğiminin ortancası kullanılır. Yeterli kutu yoksa 0 döner.
+    Böylece sol etiket ile sağ tutar (aynı satırda ama farklı Y'de görünen) doğru eşleşir.
+    """
+    samples: list[tuple[float, float]] = []  # (y_center, slope)
+    for b in blocks:
+        if not b.bbox or len(b.bbox) < 4:
+            continue
+        (x0, y0), (x1, y1) = b.bbox[0], b.bbox[1]
+        ys = [p[1] for p in b.bbox]
+        height = max(1.0, max(ys) - min(ys))
+        if abs(x1 - x0) < 2 * height:
+            continue
+        samples.append(((min(ys) + max(ys)) / 2.0, (y1 - y0) / (x1 - x0)))
+    if len(samples) < 3:
+        return lambda y: 0.0
+    samples.sort()
+
+    def slope_at(y: float) -> float:
+        near = sorted(samples, key=lambda t: abs(t[0] - y))[:neighbors]
+        v = statistics.median(sl for _, sl in near)
+        return max(-max_slope, min(max_slope, v))
+
+    return slope_at
