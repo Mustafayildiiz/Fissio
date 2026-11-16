@@ -5,6 +5,7 @@ import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'items_page.dart';
+import 'photo_picker.dart';
 import 'scan_page.dart';
 
 /// "Manuel" / "Tara" seçici (iki ekranda da aynı).
@@ -113,6 +114,38 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     }
   }
 
+  /// Taslağın fotoğraflarını ve ayrıştırılan alanları kaybetmeden tara ekranına geçer.
+  Future<void> _goScan() async {
+    if (_draft.pendingImages.isNotEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Tara ekranına geç'),
+          content: const Text(
+            'Taranan/girilen alanlar yeniden taranınca değişecek. Fotoğraflar korunur. Devam edilsin mi?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Devam')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => ScanPage(initialPages: _draft.pendingImages)),
+    );
+  }
+
+  Future<void> _showAddPhotoSheet() async {
+    final bytes = await pickReceiptPhotos(
+      context,
+      room: kMaxReceiptPhotos - _draft.pendingImages.length,
+    );
+    if (bytes.isEmpty || !mounted) return;
+    setState(() => _draft.pendingImages.addAll(bytes));
+  }
+
   void _next() {
     if (_draft.categoryId == null) {
       showMessage(context, 'Lütfen bir kategori seçin.');
@@ -137,11 +170,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
               ModeSwitch(
                 scanActive: false,
                 onChange: (scan) {
-                  if (scan) {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => const ScanPage()),
-                    );
-                  }
+                  if (scan) _goScan();
                 },
               ),
             Expanded(
@@ -163,12 +192,41 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                             style: TextStyle(color: AppColors.darkText, fontSize: 18),
                           ),
                           const SizedBox(height: 10),
-                          InkWell(
-                            onTap: () => Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(builder: (_) => const ScanPage()),
+                          if (_draft.pendingImages.isNotEmpty) ...[
+                            SizedBox(
+                              height: 96,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: _draft.pendingImages.length,
+                                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                                itemBuilder: (_, i) => Stack(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.memory(_draft.pendingImages[i], width: 72, height: 96, fit: BoxFit.cover),
+                                    ),
+                                    Positioned(
+                                      top: 0,
+                                      right: 0,
+                                      child: InkWell(
+                                        onTap: () => setState(() => _draft.pendingImages.removeAt(i)),
+                                        child: const CircleAvatar(
+                                          radius: 11,
+                                          backgroundColor: Colors.black54,
+                                          child: Icon(Icons.close, size: 14, color: Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
+                            const SizedBox(height: 10),
+                          ],
+                          InkWell(
+                            onTap: _showAddPhotoSheet,
                             child: Container(
-                              height: 120,
+                              height: _draft.pendingImages.isEmpty ? 120 : 56,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: AppColors.darkText, width: 1.4),

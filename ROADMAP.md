@@ -26,7 +26,7 @@ flowchart LR
 - DB portu dışarı açılmaz, yalnızca Docker iç ağından erişilir (NFR-3).
 - Tek `docker-compose up` ile tüm backend ayağa kalkar (NFR-4). Migrasyonlar ve `.env` varsayılanları otomatik gelir.
 - Auth ve Expense servisleri JWT sırrını paylaşır. Expense servisi token'ı kendi içinde doğrular.
-- Veri modeli: `users(id, email, password_hash, created_at)`, `categories(id, name, keywords[])`, `expenses(id, user_id, merchant, amount, date, category_id, raw_text, created_at)`. Görsel hiçbir yerde saklanmaz.
+- Veri modeli: `users(id, email, password_hash, created_at)`, `categories(id, name, keywords[])`, `expenses(id, user_id, merchant, amount, date, category_id, raw_text, created_at)`. Fiş fotoğrafları `receipt_images(id, expense_id, user_id, position, content_type, data)` tablosunda, fişe bağlı ve hesaba özel saklanır (fiş silinince silinir); OCR servisi görsel saklamaz.
 
 ## 2. Fazlar
 
@@ -113,7 +113,8 @@ Toplam yaklaşık 7-8 hafta. İki kişi paralel çalışırsa Faz 1-3 (backend) 
 | Fiş şablonlarının çeşitliliği | Orta | Test seti büyüt, kuralları veri odaklı tut |
 | PaddleOCR sunucuda ağır çalışır (CPU süresi, imaj boyutu) | Orta | Mobile model varyantı, ölçüm ve loglama, gerekirse GPU seçeneği (`OCR_USE_GPU`) |
 | Özel OCR modeli PaddleOCR kalitesine ulaşamaz | Orta | Varsayılan motor PaddleOCR kalır, motor seçimi kullanıcıya açık, karşılaştırma testi |
-| Görselin ağ üzerinden OCR servisine gitmesi (gizlilik) | Orta | Servis içi ağ, diske yazmama, saklamama, kullanıcıya bilgilendirme metni |
+| Görselin ağ üzerinden OCR servisine gitmesi (gizlilik) | Orta | Servis içi ağ, OCR servisi diske yazmaz ve saklamaz |
+| Fiş fotoğraflarının sunucuda saklanması (KVKK/gizlilik) | Orta | Yalnızca sahibinin JWT'siyle erişim (sahiplik JOIN ile doğrulanır), fiş silinince CASCADE ile silinir, jpeg/png/webp dışı reddedilir, kullanıcıya Tara ekranında bilgilendirme metni; veri büyürse dosya sistemi/nesne depolamaya taşınır |
 | JWT sırrının kod içinde kalması | Orta | `.env` ve compose değişkenleri, varsayılan geliştirme değeri |
 | Kapsam büyümesi | Orta | Offline kuyruk, çoklu para birimi gibi özellikler bu sürümün dışında |
 
@@ -129,7 +130,8 @@ Toplam yaklaşık 7-8 hafta. İki kişi paralel çalışırsa Faz 1-3 (backend) 
 ## 6. Kabul Kriterleri
 - [ ] `docker-compose up` ile servisler ek ayar olmadan çalışır; dışarıdan Postgres portuna bağlanılamaz.
 - [ ] Fiş çekimi → önizleme → kayıt akışı çalışır.
-- [ ] Görsel hiçbir yerde saklanmaz: OCR servisi diske yazmaz, veritabanında görsel yoktur, cihazdaki geçici dosya silinmiştir.
+- [x] Fiş fotoğrafları yalnızca fişe bağlı ve hesaba özel saklanır: OCR servisi diske yazmaz/saklamaz, fiş silinince fotoğrafları da silinir, başka kullanıcı erişemez, cihazdaki geçici dosya silinmiştir (galeri orijinaline dokunulmaz).
+- [x] Uzun fişler için birden fazla fotoğraf (kamera veya galeriden çoklu seçim) tek fiş olarak taranır; fotoğraflar fiş detayında görüntülenir.
 - [ ] OCR süresi ölçülür ve hedef değerin altındadır (sunucu tarafı).
 - [ ] Ayarlar'dan PaddleOCR ve Özel OCR arasında seçim yapılabilir, seçilen motor OCR isteğinde kullanılır.
 - [ ] Haftalık ve aylık raporlar doğru toplamları gösterir.

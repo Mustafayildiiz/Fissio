@@ -74,10 +74,15 @@ class _ItemsPageState extends State<ItemsPage> {
     widget.draft.items = items;
     setState(() => _busy = true);
     try {
-      await appState.saveDraft(widget.draft);
+      final imagesOk = await appState.saveDraft(widget.draft);
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
-      showMessage(context, widget.draft.id == null ? 'Fiş kaydedildi.' : 'Fiş güncellendi.');
+      showMessage(
+        context,
+        !imagesOk
+            ? 'Fiş kaydedildi ancak fotoğraflar yüklenemedi; fiş detayından tekrar ekleyin.'
+            : (widget.draft.id == null ? 'Fiş kaydedildi.' : 'Fiş güncellendi.'),
+      );
     } on ApiException catch (e) {
       // Ağ hatasında kuyruğa alınmaz; form ekranda kalır, kullanıcı tekrar dener.
       if (mounted) showMessage(context, e.message);

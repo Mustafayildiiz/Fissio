@@ -49,6 +49,9 @@ func main() {
 	api.GET("/expenses/:id", h.getExpense)
 	api.PUT("/expenses/:id", h.updateExpense)
 	api.DELETE("/expenses/:id", h.deleteExpense)
+	api.POST("/expenses/:id/images", h.uploadImages)
+	api.GET("/expenses/:id/images/:imageId", h.getImage)
+	api.DELETE("/expenses/:id/images/:imageId", h.deleteImage)
 	api.GET("/reports/summary", h.summary)
 
 	port := os.Getenv("PORT")

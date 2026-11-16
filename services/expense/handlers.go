@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,10 +19,7 @@ type handler struct {
 	ocrFactory *OcrEngineFactory
 }
 
-const (
-	dateLayout           = "2006-01-02"
-	maxReceiptImageBytes = 15 << 20
-)
+const dateLayout = "2006-01-02"
 
 func badRequest(c *gin.Context, msg string) { c.JSON(http.StatusBadRequest, gin.H{"error": msg}) }
 func serverError(c *gin.Context) {
@@ -82,27 +79,33 @@ func (h *handler) parseReceipt(c *gin.Context) {
 // scanReceipt: Resolves the active OcrEngine via Strategy Factory, extracts text from
 // the receipt image in memory, and parses structured receipt fields.
 func (h *handler) scanReceipt(c *gin.Context) {
-	// multipart/form-data: "file" (gorsel, <= 15MB) ve istege bagli "engine" alani.
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxReceiptImageBytes+(1<<20))
-	fh, err := c.FormFile("file")
-	if err != nil {
+	// multipart/form-data: tekrarlanabilir "file" (sayfa, <= 6 adet, her biri <= 5MB) ve istege bagli
+	// "engine". Uzun fisler birden cok fotografla gelir; sayfalar sirayla OCR'lanir, metinler
+	// birlestirilir ve TEK kez ayristirilir.
+	files, ok := limitBody(c)
+	if !ok {
+		return
+	}
+	if len(files) == 0 {
 		badRequest(c, "multipart field 'file' is required")
 		return
 	}
-	if fh.Size == 0 || fh.Size > maxReceiptImageBytes {
-		badRequest(c, "file is required and must be under 15MB")
+	if len(files) > maxScanPages {
+		badRequest(c, "too many pages (max 6)")
 		return
 	}
-	f, err := fh.Open()
-	if err != nil {
-		badRequest(c, "invalid file")
-		return
-	}
-	image, err := io.ReadAll(f)
-	f.Close()
-	if err != nil {
-		badRequest(c, "invalid file")
-		return
+	pages := make([][]byte, 0, len(files))
+	for _, fh := range files {
+		if fh.Size == 0 || fh.Size > maxImageBytes {
+			badRequest(c, "each file is required and must be under 5MB")
+			return
+		}
+		data, err := readImage(fh)
+		if err != nil || len(data) == 0 {
+			badRequest(c, "invalid file")
+			return
+		}
+		pages = append(pages, data)
 	}
 
 	requestedEngine := c.PostForm("engine")
@@ -123,16 +126,34 @@ func (h *handler) scanReceipt(c *gin.Context) {
 		return
 	}
 
-	ocrRes, err := engine.ExtractText(c.Request.Context(), image)
-	// Bellekten goruntu verisini hemen temizle (FR-2.3 / NFR-2)
-	clear(image)
-	if err != nil {
-		if errors.Is(err, ErrInvalidOcrInput) {
-			badRequest(c, "invalid receipt image")
+	var texts []string
+	agg := OcrExtractionResult{PageCount: len(pages)}
+	confSum := 0.0
+	for i, img := range pages {
+		res, err := engine.ExtractText(c.Request.Context(), img)
+		// Bellekten goruntu verisini hemen temizle (FR-2.3 / NFR-2)
+		clear(img)
+		if err != nil {
+			if errors.Is(err, ErrInvalidOcrInput) {
+				badRequest(c, "invalid receipt image")
+				return
+			}
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-		return
+		texts = append(texts, res.RawText)
+		agg.Blocks = append(agg.Blocks, res.Blocks...)
+		agg.ElapsedMs += res.ElapsedMs
+		confSum += res.Confidence
+		if i == 0 {
+			agg.Engine, agg.ModelVersion = res.Engine, res.ModelVersion
+		}
+	}
+	agg.RawText = mergePageTexts(texts)
+	agg.Confidence = confSum / float64(len(pages))
+	agg.IsEmpty = strings.TrimSpace(agg.RawText) == ""
+	if agg.Blocks == nil {
+		agg.Blocks = []OcrTextBlock{}
 	}
 
 	cats, err := h.loadCategories()
@@ -141,9 +162,9 @@ func (h *handler) scanReceipt(c *gin.Context) {
 		return
 	}
 
-	parsed := Parse(ocrRes.RawText, cats, time.Now())
+	parsed := Parse(agg.RawText, cats, time.Now())
 	c.JSON(http.StatusOK, gin.H{
-		"ocr":    ocrRes,
+		"ocr":    agg,
 		"parsed": parsed,
 	})
 }
@@ -171,6 +192,7 @@ type expenseOut struct {
 	CategoryName string        `json:"category_name"`
 	Note         string        `json:"note"`
 	Items        []expenseItem `json:"items"`
+	ImageIDs     []int64       `json:"image_ids"`
 }
 
 func (in *expenseInput) validate() (time.Time, string) {
@@ -213,7 +235,8 @@ func isFKViolation(err error) bool {
 }
 
 const selectExpense = `
-SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items
+SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items,
+       ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
 type scanner interface{ Scan(dest ...any) error }
@@ -222,9 +245,14 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var e expenseOut
 	var d time.Time
 	var items []byte
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items)
+	var imageIDs pq.Int64Array
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &imageIDs)
 	e.Date = d.Format(dateLayout)
 	e.Items = []expenseItem{}
+	e.ImageIDs = []int64{} // JSON'da null degil []
+	if len(imageIDs) > 0 {
+		e.ImageIDs = []int64(imageIDs)
+	}
 	if err == nil && len(items) > 0 {
 		_ = json.Unmarshal(items, &e.Items)
 	}

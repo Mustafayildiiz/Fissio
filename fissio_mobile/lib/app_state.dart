@@ -254,7 +254,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> saveDraft(ReceiptDraft d) async {
+  /// Fişi kaydeder ve taslaktaki bekleyen fotoğrafları yükler. Fiş kaydı fotoğraf yüklemesi
+  /// başarısız olsa da korunur; fotoğraflar yüklenebildiyse true döner (yüklenemediyse çağıran
+  /// kullanıcıya "fotoğraflar yüklenemedi, detaydan tekrar ekleyin" der).
+  Future<bool> saveDraft(ReceiptDraft d) async {
     final body = {
       'merchant': d.merchant,
       'amount': d.items.fold<double>(0, (s, i) => s + i.amount),
@@ -266,12 +269,24 @@ class AppState extends ChangeNotifier {
       'note': d.note,
       'items': d.items.map((i) => i.toJson()).toList(),
     };
-    if (d.id == null) {
-      await api.createExpense(body);
-    } else {
-      await api.updateExpense(d.id!, body);
+    final saved = d.id == null
+        ? await api.createExpense(body)
+        : await api.updateExpense(d.id!, body);
+    var imagesOk = true;
+    if (d.pendingImages.isNotEmpty) {
+      try {
+        await api.uploadImages(saved.id, d.pendingImages);
+        // Yüklendi: bellekte gereksiz tutulmasın (FR-2.3 ruhu).
+        for (final p in d.pendingImages) {
+          p.fillRange(0, p.length, 0);
+        }
+        d.pendingImages = [];
+      } on ApiException {
+        imagesOk = false;
+      }
     }
-    await refresh();
+    await refresh(); // fotoğraf kimlikleri (image_ids) listede/detayda görünsün
+    return imagesOk;
   }
 
   Future<void> deleteExpense(int id) async {
@@ -279,18 +294,15 @@ class AppState extends ChangeNotifier {
     await refresh();
   }
 
-  /// Seçili OCR motoru stratejisiyle görseli tek çağrıda (JWT'li expense `/receipts/scan`)
-  /// tarar ve ayrıştırır; ham görsel baytları işlem sonunda sıfırlanır (FR-2.3).
+  /// Seçili OCR motoru stratejisiyle fiş sayfalarını tek çağrıda (JWT'li expense `/receipts/scan`)
+  /// tarar ve ayrıştırır. Baytlar SIFIRLANMAZ: taslağa `pendingImages` olarak taşınır ve fiş
+  /// kaydedilirken sunucuya yüklenir (yükleme sonrası `saveDraft` sıfırlar).
   Future<ScanResult> scanAndParseReceipt(
-    Uint8List imageBytes, {
+    List<Uint8List> pages, {
     String? engine,
   }) async {
     final ocrEngine = ocrFactory.resolve(api, engineName: engine);
-    try {
-      return await ocrEngine.scan(imageBytes);
-    } finally {
-      imageBytes.fillRange(0, imageBytes.length, 0);
-    }
+    return ocrEngine.scan(pages);
   }
 
   // --- Panel hesapları (son 30 gün) ---

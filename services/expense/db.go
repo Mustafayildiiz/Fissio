@@ -6,7 +6,8 @@ import (
 	"github.com/lib/pq"
 )
 
-// Not: Gorsel ve ham fis metni saklanmaz; yalnizca onaylanmis finansal kayit tutulur.
+// Not: Ham fis metni saklanmaz. Fis fotograflari yalnizca fise bagli, hesaba ozel kullanici verisi
+// olarak saklanir (expense.receipt_images, fis silinince silinir); OCR servisi hicbir sey saklamaz.
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`
 CREATE SCHEMA IF NOT EXISTS expense;
@@ -28,6 +29,16 @@ CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expense.expenses (user_id, 
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS note  TEXT  NOT NULL DEFAULT '';
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS profile_id TEXT NOT NULL DEFAULT 'default';
+CREATE TABLE IF NOT EXISTS expense.receipt_images (
+	id           BIGSERIAL PRIMARY KEY,
+	expense_id   BIGINT NOT NULL REFERENCES expense.expenses(id) ON DELETE CASCADE,
+	user_id      BIGINT NOT NULL,
+	position     INT NOT NULL,
+	content_type TEXT NOT NULL,
+	data         BYTEA NOT NULL,
+	created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_receipt_images_expense ON expense.receipt_images (expense_id, position);
 `); err != nil {
 		return err
 	}

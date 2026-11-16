@@ -31,6 +31,7 @@ type OcrExtractionResult struct {
 	ModelVersion string         `json:"model_version"`
 	ElapsedMs    float64        `json:"elapsed_ms"`
 	IsEmpty      bool           `json:"is_empty"`
+	PageCount    int            `json:"page_count,omitempty"`
 }
 
 // OcrEngine defines the Strategy Pattern interface for OCR providers in the Expense service.

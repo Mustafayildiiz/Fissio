@@ -13,7 +13,7 @@ class _FakePaddleEngine implements OcrEngine {
   String get modelVersion => 'PP-OCRv4-mobile';
 
   @override
-  Future<ScanResult> scan(Uint8List imageBytes) async {
+  Future<ScanResult> scan(List<Uint8List> pages) async {
     return (
       ocr: const OcrResult(
         rawText: 'BIM BIRLESIK MAGAZALAR A.S.\nTARIH: 09.11.2026\nTOPLAM 49,50',
@@ -60,7 +60,7 @@ void main() {
 
     final engine = factory.resolve(api);
     final sampleBytes = Uint8List.fromList([137, 80, 78, 71]);
-    final scanned = await engine.scan(sampleBytes);
+    final scanned = await engine.scan([sampleBytes]);
     final result = scanned.ocr;
     expect(scanned.parsed.amount, 49.5);
 

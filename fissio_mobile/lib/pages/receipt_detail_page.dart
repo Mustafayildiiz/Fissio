@@ -6,6 +6,7 @@ import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'receipt_form_page.dart';
+import 'receipt_images.dart';
 
 /// Üst ve alt kenarı fiş kağıdı gibi tırtıklı keser.
 class _ZigZagClipper extends CustomClipper<Path> {
@@ -112,6 +113,8 @@ class ReceiptDetailPage extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 16),
+                      ReceiptImageStrip(expense: e),
+                      const SizedBox(height: 16),
                       Center(
                         child: TextButton.icon(
                           onPressed: () => _delete(context, e),
@@ -159,8 +162,7 @@ class _Paper extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.photo_camera, color: AppColors.darkText, size: 28),
-            const SizedBox(width: 8),
+            const SizedBox(width: 36),
           ],
         ),
         const SizedBox(height: 12),

@@ -147,20 +147,41 @@ class ApiClient {
   Future<void> deleteExpense(int id) =>
       _send('DELETE', _expense, '/expenses/$id');
 
+  // --- Fiş fotoğrafları (hesaba bağlı, sunucuda saklanır) ---
+  /// Bir fişe fotoğraf yükler (tekrarlanan `file` alanı); yeni görsel kimliklerini döner.
+  Future<List<int>> uploadImages(int expenseId, List<Uint8List> images) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$_expense/expenses/$expenseId/images'));
+    for (var i = 0; i < images.length; i++) {
+      req.files.add(http.MultipartFile.fromBytes('file', images[i], filename: 'receipt_$i.jpg'));
+    }
+    if (token != null) req.headers['Authorization'] = 'Bearer $token';
+    final j = await _dispatch(req, timeout: Duration(seconds: 20 + 10 * images.length)) as Map<String, dynamic>;
+    return ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList();
+  }
+
+  Future<void> deleteImage(int expenseId, int imageId) =>
+      _send('DELETE', _expense, '/expenses/$expenseId/images/$imageId');
+
+  /// `Image.network` için adres ve JWT başlığı (görseller yalnızca sahibine açıktır).
+  String imageUrl(int expenseId, int imageId) => '$_expense/expenses/$expenseId/images/$imageId';
+  Map<String, String> get authHeaders => {if (token != null) 'Authorization': 'Bearer $token'};
+
   // --- OCR & Receipt Parsing ---
-  /// Tek çağrı: görsel multipart (binary) olarak JWT'li expense servisine gider;
-  /// expense OCR servisini çağırır ve metni ayrıştırır (app -> expense -> ocr).
+  /// Tek çağrı: fiş sayfaları (uzun fişler için birden çok fotoğraf) multipart (binary) olarak JWT'li
+  /// expense servisine gider; expense her sayfayı OCR'lar, metinleri birleştirir ve BİR kez ayrıştırır.
   Future<({OcrResult ocr, ParsedReceipt parsed})> scanReceipt(
-    Uint8List imageBytes, {
+    List<Uint8List> pages, {
     String engine = 'paddleocr',
   }) async {
     final req = http.MultipartRequest('POST', Uri.parse('$_expense/receipts/scan'))
-      ..fields['engine'] = engine
-      ..files.add(
-        http.MultipartFile.fromBytes('file', imageBytes, filename: 'receipt.jpg'),
-      );
+      ..fields['engine'] = engine;
+    for (var i = 0; i < pages.length; i++) {
+      req.files.add(http.MultipartFile.fromBytes('file', pages[i], filename: 'page_$i.jpg'));
+    }
     if (token != null) req.headers['Authorization'] = 'Bearer $token';
-    final j = await _dispatch(req, timeout: const Duration(seconds: 60))
+    // Sayfa başına ~25 sn + 20 sn, en fazla 120 sn.
+    final secs = (25 * pages.length + 20).clamp(60, 120);
+    final j = await _dispatch(req, timeout: Duration(seconds: secs))
         as Map<String, dynamic>;
     return (
       ocr: OcrResult.fromJson(j['ocr'] as Map<String, dynamic>),

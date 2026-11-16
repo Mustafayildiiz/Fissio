@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 class Category {
   final int id;
   final String name;
@@ -70,6 +72,9 @@ class Expense {
   final String note;
   final List<ExpenseItem> items;
 
+  /// Fişe bağlı fotoğraf kimlikleri (sunucuda saklanır, sıralı).
+  final List<int> imageIds;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -79,6 +84,7 @@ class Expense {
     required this.categoryName,
     required this.note,
     required this.items,
+    this.imageIds = const [],
   });
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -92,6 +98,7 @@ class Expense {
     items: ((j['items'] as List?) ?? [])
         .map((e) => ExpenseItem.fromJson(e))
         .toList(),
+    imageIds: ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
   );
 }
 
@@ -108,6 +115,9 @@ class ReceiptDraft {
   /// tutar her zaman kalem toplamıdır; ikisi farklıysa kullanıcıya uyarı gösterilir.
   double? receiptTotal;
 
+  /// Henüz sunucuya yüklenmemiş fiş fotoğrafları (tarama/çekimden gelir); kayıtta yüklenir.
+  List<Uint8List> pendingImages;
+
   ReceiptDraft({
     this.id,
     this.merchant = '',
@@ -116,8 +126,10 @@ class ReceiptDraft {
     this.note = '',
     List<ExpenseItem>? items,
     this.receiptTotal,
+    List<Uint8List>? pendingImages,
   }) : date = date ?? DateTime.now(),
-       items = items ?? [];
+       items = items ?? [],
+       pendingImages = pendingImages ?? [];
 
   factory ReceiptDraft.from(Expense e) => ReceiptDraft(
     id: e.id,

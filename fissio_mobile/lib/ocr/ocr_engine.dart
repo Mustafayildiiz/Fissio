@@ -67,8 +67,9 @@ abstract class OcrEngine {
   String get engineName;
   String get modelVersion;
 
-  /// Görseli tarar ve ayrıştırır. Implementasyonlar görsel baytlarını kalıcı saklamamalıdır.
-  Future<ScanResult> scan(Uint8List imageBytes);
+  /// Fiş sayfalarını (1..6 fotoğraf) tarar ve ayrıştırır. Implementasyonlar baytları kalıcı saklamamalıdır
+  /// (saklama yalnızca fiş kaydedilirken sunucuya yükleme ile yapılır).
+  Future<ScanResult> scan(List<Uint8List> pages);
 }
 
 /// Concrete OcrEngine strategy backed by PP-OCRv4 Mobile (`PaddleOCR`).
@@ -84,11 +85,11 @@ class PaddleOcrEngine implements OcrEngine {
   String get modelVersion => 'PP-OCRv4-mobile';
 
   @override
-  Future<ScanResult> scan(Uint8List imageBytes) async {
-    if (imageBytes.isEmpty) {
+  Future<ScanResult> scan(List<Uint8List> pages) async {
+    if (pages.isEmpty || pages.any((p) => p.isEmpty)) {
       throw ApiException('Görsel verisi boş olamaz.');
     }
-    return api.scanReceipt(imageBytes, engine: engineName);
+    return api.scanReceipt(pages, engine: engineName);
   }
 }
 
@@ -105,11 +106,11 @@ class CustomOcrEngine implements OcrEngine {
   String get modelVersion => 'fissio-custom-ocr-v1-stub';
 
   @override
-  Future<ScanResult> scan(Uint8List imageBytes) async {
-    if (imageBytes.isEmpty) {
+  Future<ScanResult> scan(List<Uint8List> pages) async {
+    if (pages.isEmpty || pages.any((p) => p.isEmpty)) {
       throw ApiException('Görsel verisi boş olamaz.');
     }
-    return api.scanReceipt(imageBytes, engine: engineName);
+    return api.scanReceipt(pages, engine: engineName);
   }
 }
 
