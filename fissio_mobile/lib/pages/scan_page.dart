@@ -47,7 +47,10 @@ class _ScanPageState extends State<ScanPage> {
   Future<void> _addFromCamera() async {
     if (_busy) return;
     if (_session.isFull) {
-      showMessage(context, 'En fazla ${ScanSession.maxPages} sayfa eklenebilir.');
+      showMessage(
+        context,
+        'En fazla ${ScanSession.maxPages} sayfa eklenebilir.',
+      );
       return;
     }
     await _guard(() async {
@@ -64,7 +67,10 @@ class _ScanPageState extends State<ScanPage> {
   Future<void> _addFromGallery() async {
     if (_busy) return;
     if (_session.isFull) {
-      showMessage(context, 'En fazla ${ScanSession.maxPages} sayfa eklenebilir.');
+      showMessage(
+        context,
+        'En fazla ${ScanSession.maxPages} sayfa eklenebilir.',
+      );
       return;
     }
     await _guard(() async {
@@ -93,7 +99,10 @@ class _ScanPageState extends State<ScanPage> {
         if (!_session.add(bytes)) skipped++;
       }
       if (skipped > 0 && mounted) {
-        showMessage(context, 'Sayfa sınırı (${ScanSession.maxPages}) nedeniyle $skipped fotoğraf eklenmedi.');
+        showMessage(
+          context,
+          'Sayfa sınırı (${ScanSession.maxPages}) nedeniyle $skipped fotoğraf eklenmedi.',
+        );
       }
     });
   }
@@ -202,19 +211,27 @@ class _ScanPageState extends State<ScanPage> {
                 const SizedBox(height: 4),
                 const Text(
                   'Sırayı değiştirmek için basılı tutup sürükleyin. Uzun fişte sayfalar yukarıdan aşağıya sıralanmalı.',
-                  style: TextStyle(color: AppColors.secondaryText, fontSize: 12),
+                  style: TextStyle(
+                    color: AppColors.secondaryText,
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 if (_session.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
                     child: Center(
-                      child: Text('Henüz sayfa yok.', style: TextStyle(color: Colors.white70)),
+                      child: Text(
+                        'Henüz sayfa yok.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
                     ),
                   )
                 else
                   ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * .5),
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(ctx).size.height * .5,
+                    ),
                     child: ReorderableListView.builder(
                       shrinkWrap: true,
                       itemCount: _session.length,
@@ -228,12 +245,23 @@ class _ScanPageState extends State<ScanPage> {
                         contentPadding: EdgeInsets.zero,
                         leading: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.memory(_session.pages[i], width: 48, height: 64, fit: BoxFit.cover),
+                          child: Image.memory(
+                            _session.pages[i],
+                            width: 48,
+                            height: 64,
+                            fit: BoxFit.cover,
+                          ),
                         ),
-                        title: Text('Sayfa ${i + 1}', style: const TextStyle(color: Colors.white)),
+                        title: Text(
+                          'Sayfa ${i + 1}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
                         trailing: IconButton(
                           tooltip: 'Sayfayı sil',
-                          icon: const Icon(Icons.close, color: AppColors.danger),
+                          icon: const Icon(
+                            Icons.close,
+                            color: AppColors.danger,
+                          ),
                           onPressed: () {
                             _session.removeAt(i);
                             setSheet(() {});
@@ -262,7 +290,10 @@ class _ScanPageState extends State<ScanPage> {
             BackTitle(
               'Fiş Oluştur',
               trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 2,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.card,
                   borderRadius: BorderRadius.circular(10),
@@ -283,7 +314,9 @@ class _ScanPageState extends State<ScanPage> {
                         DropdownMenuItem(
                           value: eng,
                           child: Text(
-                            eng == 'paddleocr' ? 'PP-OCRv4 Mobile' : 'Custom OCR',
+                            eng == 'paddleocr'
+                                ? 'PP-OCRv4 Mobile'
+                                : 'Custom OCR',
                           ),
                         ),
                     ],
@@ -323,75 +356,92 @@ class _ScanPageState extends State<ScanPage> {
                             SizedBox(height: 16),
                             Text(
                               'Fiş taranıyor ve ayrıştırılıyor...',
-                              style: TextStyle(color: Colors.white, fontSize: 14),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
                             ),
                           ],
                         ),
                       )
                     : pages.isEmpty
-                        ? const Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.document_scanner_outlined,
-                                  size: 90,
-                                  color: AppColors.secondaryText,
-                                ),
-                                SizedBox(height: 14),
-                                Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 32),
-                                  child: Text(
-                                    'Fişin fotoğrafını çekin. Fiş uzunsa birden fazla fotoğraf ekleyebilirsiniz.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(color: Colors.white, fontSize: 14),
-                                  ),
-                                ),
-                                SizedBox(height: 8),
-                                Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 32),
-                                  child: Text(
-                                    'Fiş fotoğrafları hesabınıza kaydedilir; fişi silince silinir.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(color: AppColors.secondaryText, fontSize: 12),
-                                  ),
-                                ),
-                              ],
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.document_scanner_outlined,
+                              size: 90,
+                              color: AppColors.secondaryText,
                             ),
-                          )
-                        : Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.memory(pages.last, fit: BoxFit.contain),
-                              Positioned(
-                                top: 10,
-                                left: 10,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Text(
-                                    'Sayfa ${pages.length}/${ScanSession.maxPages}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                                  ),
+                            SizedBox(height: 14),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 32),
+                              child: Text(
+                                'Fişin fotoğrafını çekin. Fiş uzunsa birden fazla fotoğraf ekleyebilirsiniz.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
                                 ),
                               ),
-                              Positioned(
-                                bottom: 12,
-                                left: 0,
-                                right: 0,
-                                child: Center(
-                                  child: PrimaryButton(
-                                    label: pages.length == 1 ? 'Fişi Tara' : 'Tara (${pages.length} sayfa)',
-                                    compact: true,
-                                    onPressed: _scan,
-                                  ),
+                            ),
+                            SizedBox(height: 8),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 32),
+                              child: Text(
+                                'Fiş fotoğrafları hesabınıza kaydedilir; fişi silince silinir.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: AppColors.secondaryText,
+                                  fontSize: 12,
                                 ),
                               ),
-                            ],
+                            ),
+                          ],
+                        ),
+                      )
+                    : Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.memory(pages.last, fit: BoxFit.contain),
+                          Positioned(
+                            top: 10,
+                            left: 10,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                'Sayfa ${pages.length}/${ScanSession.maxPages}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
                           ),
+                          Positioned(
+                            bottom: 12,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: PrimaryButton(
+                                label: pages.length == 1
+                                    ? 'Fişi Tara'
+                                    : 'Tara (${pages.length} sayfa)',
+                                compact: true,
+                                onPressed: _scan,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ),
             Container(
@@ -442,7 +492,10 @@ class _ScanPageState extends State<ScanPage> {
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: pages.isEmpty
-                            ? const Icon(Icons.collections_outlined, color: AppColors.secondaryText)
+                            ? const Icon(
+                                Icons.collections_outlined,
+                                color: AppColors.secondaryText,
+                              )
                             : Image.memory(pages.last, fit: BoxFit.cover),
                       ),
                     ),

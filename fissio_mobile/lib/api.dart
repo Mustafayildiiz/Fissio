@@ -96,11 +96,11 @@ class ApiClient {
 
   // --- Auth ---
   Future<void> register(String email, String password) => _send(
-        'POST',
-        _auth,
-        '/auth/register',
-        body: {'email': email, 'password': password},
-      );
+    'POST',
+    _auth,
+    '/auth/register',
+    body: {'email': email, 'password': password},
+  );
 
   Future<({String token, String email})> login(
     String email,
@@ -150,21 +150,38 @@ class ApiClient {
   // --- Fiş fotoğrafları (hesaba bağlı, sunucuda saklanır) ---
   /// Bir fişe fotoğraf yükler (tekrarlanan `file` alanı); yeni görsel kimliklerini döner.
   Future<List<int>> uploadImages(int expenseId, List<Uint8List> images) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$_expense/expenses/$expenseId/images'));
+    final req = http.MultipartRequest(
+      'POST',
+      Uri.parse('$_expense/expenses/$expenseId/images'),
+    );
     for (var i = 0; i < images.length; i++) {
-      req.files.add(http.MultipartFile.fromBytes('file', images[i], filename: 'receipt_$i.jpg'));
+      req.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          images[i],
+          filename: 'receipt_$i.jpg',
+        ),
+      );
     }
     if (token != null) req.headers['Authorization'] = 'Bearer $token';
-    final j = await _dispatch(req, timeout: Duration(seconds: 20 + 10 * images.length)) as Map<String, dynamic>;
-    return ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList();
+    final j = await _dispatch(
+      req,
+      timeout: Duration(seconds: 20 + 10 * images.length),
+    ) as Map<String, dynamic>;
+    return ((j['image_ids'] as List?) ?? [])
+        .map((e) => (e as num).toInt())
+        .toList();
   }
 
   Future<void> deleteImage(int expenseId, int imageId) =>
       _send('DELETE', _expense, '/expenses/$expenseId/images/$imageId');
 
   /// `Image.network` için adres ve JWT başlığı (görseller yalnızca sahibine açıktır).
-  String imageUrl(int expenseId, int imageId) => '$_expense/expenses/$expenseId/images/$imageId';
-  Map<String, String> get authHeaders => {if (token != null) 'Authorization': 'Bearer $token'};
+  String imageUrl(int expenseId, int imageId) =>
+      '$_expense/expenses/$expenseId/images/$imageId';
+  Map<String, String> get authHeaders => {
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
 
   // --- OCR & Receipt Parsing ---
   /// Tek çağrı: fiş sayfaları (uzun fişler için birden çok fotoğraf) multipart (binary) olarak JWT'li
@@ -173,16 +190,22 @@ class ApiClient {
     List<Uint8List> pages, {
     String engine = 'paddleocr',
   }) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$_expense/receipts/scan'))
-      ..fields['engine'] = engine;
+    final req = http.MultipartRequest(
+      'POST',
+      Uri.parse('$_expense/receipts/scan'),
+    )..fields['engine'] = engine;
     for (var i = 0; i < pages.length; i++) {
-      req.files.add(http.MultipartFile.fromBytes('file', pages[i], filename: 'page_$i.jpg'));
+      req.files.add(
+        http.MultipartFile.fromBytes('file', pages[i], filename: 'page_$i.jpg'),
+      );
     }
     if (token != null) req.headers['Authorization'] = 'Bearer $token';
     // Sayfa başına ~25 sn + 20 sn, en fazla 120 sn.
     final secs = (25 * pages.length + 20).clamp(60, 120);
-    final j = await _dispatch(req, timeout: Duration(seconds: secs))
-        as Map<String, dynamic>;
+    final j = await _dispatch(
+      req,
+      timeout: Duration(seconds: secs),
+    ) as Map<String, dynamic>;
     return (
       ocr: OcrResult.fromJson(j['ocr'] as Map<String, dynamic>),
       parsed: ParsedReceipt.fromJson(j['parsed'] as Map<String, dynamic>),

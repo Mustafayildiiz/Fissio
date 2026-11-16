@@ -42,15 +42,24 @@ class ReceiptImageStrip extends StatelessWidget {
           Row(
             children: [
               Text(
-                ids.isEmpty ? 'Fiş fotoğrafları' : 'Fiş fotoğrafları (${ids.length})',
+                ids.isEmpty
+                    ? 'Fiş fotoğrafları'
+                    : 'Fiş fotoğrafları (${ids.length})',
                 style: const TextStyle(color: AppColors.darkText, fontSize: 16),
               ),
               const Spacer(),
               if (ids.length < kMaxReceiptPhotos)
                 TextButton.icon(
                   onPressed: () => _add(context),
-                  icon: const Icon(Icons.add_a_photo_outlined, size: 18, color: AppColors.darkText),
-                  label: const Text('Fotoğraf ekle', style: TextStyle(color: AppColors.darkText)),
+                  icon: const Icon(
+                    Icons.add_a_photo_outlined,
+                    size: 18,
+                    color: AppColors.darkText,
+                  ),
+                  label: const Text(
+                    'Fotoğraf ekle',
+                    style: TextStyle(color: AppColors.darkText),
+                  ),
                 ),
             ],
           ),
@@ -73,12 +82,22 @@ class ReceiptImageStrip extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => ReceiptImageViewer(expenseId: expense.id, imageIds: ids, initialIndex: i),
+                      builder: (_) => ReceiptImageViewer(
+                        expenseId: expense.id,
+                        imageIds: ids,
+                        initialIndex: i,
+                      ),
                     ),
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: _NetImage(expenseId: expense.id, imageId: ids[i], width: 82, height: 110, fit: BoxFit.cover),
+                    child: _NetImage(
+                      expenseId: expense.id,
+                      imageId: ids[i],
+                      width: 82,
+                      height: 110,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
               ),
@@ -116,13 +135,18 @@ class _NetImage extends StatelessWidget {
           : SizedBox(
               width: width,
               height: height,
-              child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              child: const Center(
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
             ),
       errorBuilder: (context, error, stack) => Container(
         width: width,
         height: height,
         color: const Color(0xFFE2E8F0),
-        child: const Icon(Icons.broken_image_outlined, color: AppColors.darkText),
+        child: const Icon(
+          Icons.broken_image_outlined,
+          color: AppColors.darkText,
+        ),
       ),
     );
   }
@@ -168,7 +192,10 @@ class _ReceiptImageViewerState extends State<ReceiptImageViewer> {
         title: const Text('Fotoğrafı sil'),
         content: const Text('Bu fotoğraf fişten kalıcı olarak silinecek.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Sil', style: TextStyle(color: AppColors.danger)),
@@ -210,7 +237,10 @@ class _ReceiptImageViewerState extends State<ReceiptImageViewer> {
           minScale: 1,
           maxScale: 5,
           child: Center(
-            child: _NetImage(expenseId: widget.expenseId, imageId: widget.imageIds[i]),
+            child: _NetImage(
+              expenseId: widget.expenseId,
+              imageId: widget.imageIds[i],
+            ),
           ),
         ),
       ),

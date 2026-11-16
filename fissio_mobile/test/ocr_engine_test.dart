@@ -34,24 +34,27 @@ class _FakePaddleEngine implements OcrEngine {
 }
 
 void main() {
-  test('OcrEngineFactory resolves default PaddleOCR and CustomOCR strategies', () {
-    final api = ApiClient();
-    final factory = OcrEngineFactory();
+  test(
+    'OcrEngineFactory resolves default PaddleOCR and CustomOCR strategies',
+    () {
+      final api = ApiClient();
+      final factory = OcrEngineFactory();
 
-    final defaultEngine = factory.resolve(api);
-    expect(defaultEngine, isA<PaddleOcrEngine>());
-    expect(defaultEngine.engineName, 'paddleocr');
-    expect(defaultEngine.modelVersion, 'PP-OCRv4-mobile');
+      final defaultEngine = factory.resolve(api);
+      expect(defaultEngine, isA<PaddleOcrEngine>());
+      expect(defaultEngine.engineName, 'paddleocr');
+      expect(defaultEngine.modelVersion, 'PP-OCRv4-mobile');
 
-    final customEngine = factory.resolve(api, engineName: 'custom');
-    expect(customEngine, isA<CustomOcrEngine>());
-    expect(customEngine.engineName, 'custom');
+      final customEngine = factory.resolve(api, engineName: 'custom');
+      expect(customEngine, isA<CustomOcrEngine>());
+      expect(customEngine.engineName, 'custom');
 
-    expect(
-      () => factory.resolve(api, engineName: 'unknown'),
-      throwsArgumentError,
-    );
-  });
+      expect(
+        () => factory.resolve(api, engineName: 'unknown'),
+        throwsArgumentError,
+      );
+    },
+  );
 
   test('Registered OCR strategy returns OCR text and parsed fields', () async {
     final api = ApiClient();
@@ -71,4 +74,3 @@ void main() {
     expect(result.confidence, greaterThan(0.95));
   });
 }
-

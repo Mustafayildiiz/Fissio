@@ -15,7 +15,9 @@ class AppState extends ChangeNotifier {
   }
 
   late final ApiClient api;
-  final OcrEngineFactory ocrFactory = OcrEngineFactory(defaultEngine: 'paddleocr');
+  final OcrEngineFactory ocrFactory = OcrEngineFactory(
+    defaultEngine: 'paddleocr',
+  );
   final _storage = const FlutterSecureStorage();
   static const _tokenKey = 'jwt';
   static const _profilesKey = 'profiles_v2';

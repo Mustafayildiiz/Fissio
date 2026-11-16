@@ -43,7 +43,9 @@ class ScanSession {
   /// `ReorderableListView.onReorderItem` semantiği: [newIndex] öğe çıkarıldıktan SONRAKİ konumdur.
   void move(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _pages.length) return;
-    if (newIndex < 0 || newIndex >= _pages.length || newIndex == oldIndex) return;
+    if (newIndex < 0 || newIndex >= _pages.length || newIndex == oldIndex) {
+      return;
+    }
     _pages.insert(newIndex, _pages.removeAt(oldIndex));
   }
 

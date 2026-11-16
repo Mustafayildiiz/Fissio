@@ -79,7 +79,10 @@ class ReceiptDetailPage extends StatelessWidget {
                   const BackTitle('Fiş'),
                   const Padding(
                     padding: EdgeInsets.all(24),
-                    child: Text('Fiş bulunamadı.', style: TextStyle(color: Colors.white)),
+                    child: Text(
+                      'Fiş bulunamadı.',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ),
                 ],
               ),
@@ -96,7 +99,9 @@ class ReceiptDetailPage extends StatelessWidget {
                     label: 'Düzenle',
                     compact: true,
                     onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => ReceiptFormPage(initial: e)),
+                      MaterialPageRoute(
+                        builder: (_) => ReceiptFormPage(initial: e),
+                      ),
                     ),
                   ),
                 ),
@@ -118,7 +123,10 @@ class ReceiptDetailPage extends StatelessWidget {
                       Center(
                         child: TextButton.icon(
                           onPressed: () => _delete(context, e),
-                          icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: AppColors.danger,
+                          ),
                           label: const Text(
                             'Fişi sil',
                             style: TextStyle(color: AppColors.danger),
@@ -174,7 +182,10 @@ class _Paper extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text('Toplam kalem :', style: dark.copyWith(fontSize: 15)),
+                  child: Text(
+                    'Toplam kalem :',
+                    style: dark.copyWith(fontSize: 15),
+                  ),
                 ),
                 Text(fmtMoney(e.amount), style: dark.copyWith(fontSize: 15)),
               ],
@@ -214,4 +225,3 @@ class _Paper extends StatelessWidget {
     );
   }
 }
-

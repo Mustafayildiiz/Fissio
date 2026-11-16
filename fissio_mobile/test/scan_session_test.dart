@@ -18,14 +18,17 @@ void main() {
       expect(s.remaining, ScanSession.maxPages - 2);
     });
 
-    test('altı sayfa sınırı: fazlası eklenmez, addAll eklenen sayıyı döner', () {
-      final s = ScanSession();
-      final added = s.addAll(List.generate(9, (i) => _b(i + 1)));
-      expect(added, ScanSession.maxPages);
-      expect(s.isFull, isTrue);
-      expect(s.add(_b(99)), isFalse);
-      expect(s.remaining, 0);
-    });
+    test(
+      'altı sayfa sınırı: fazlası eklenmez, addAll eklenen sayıyı döner',
+      () {
+        final s = ScanSession();
+        final added = s.addAll(List.generate(9, (i) => _b(i + 1)));
+        expect(added, ScanSession.maxPages);
+        expect(s.isFull, isTrue);
+        expect(s.add(_b(99)), isFalse);
+        expect(s.remaining, 0);
+      },
+    );
 
     test('initial sayfalar limite kadar alınır', () {
       final s = ScanSession(initial: List.generate(8, (i) => _b(i + 1)));
@@ -68,7 +71,13 @@ void main() {
         'category_id': 1,
         'category_name': 'Market',
       };
-      expect(Expense.fromJson({...base, 'image_ids': [3, 4]}).imageIds, [3, 4]);
+      expect(
+        Expense.fromJson({
+          ...base,
+          'image_ids': [3, 4],
+        }).imageIds,
+        [3, 4],
+      );
       expect(Expense.fromJson(base).imageIds, isEmpty);
     });
 

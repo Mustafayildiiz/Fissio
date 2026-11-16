@@ -10,7 +10,11 @@ import 'scan_page.dart';
 
 /// "Manuel" / "Tara" seçici (iki ekranda da aynı).
 class ModeSwitch extends StatelessWidget {
-  const ModeSwitch({super.key, required this.scanActive, required this.onChange});
+  const ModeSwitch({
+    super.key,
+    required this.scanActive,
+    required this.onChange,
+  });
   final bool scanActive;
   final ValueChanged<bool> onChange; // true = Tara
 
@@ -30,7 +34,11 @@ class ModeSwitch extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, size: 16, color: active ? Colors.white : AppColors.darkText),
+                  Icon(
+                    icon,
+                    size: 16,
+                    color: active ? Colors.white : AppColors.darkText,
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     label,
@@ -55,7 +63,12 @@ class ModeSwitch extends StatelessWidget {
         children: [
           tab('Manuel', Icons.edit, !scanActive, () => onChange(false)),
           const SizedBox(width: 6),
-          tab('Tara', Icons.document_scanner_outlined, scanActive, () => onChange(true)),
+          tab(
+            'Tara',
+            Icons.document_scanner_outlined,
+            scanActive,
+            () => onChange(true),
+          ),
         ],
       ),
     );
@@ -125,15 +138,23 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
             'Taranan/girilen alanlar yeniden taranınca değişecek. Fotoğraflar korunur. Devam edilsin mi?',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Devam')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Vazgeç'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Devam'),
+            ),
           ],
         ),
       );
       if (ok != true || !mounted) return;
     }
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => ScanPage(initialPages: _draft.pendingImages)),
+      MaterialPageRoute(
+        builder: (_) => ScanPage(initialPages: _draft.pendingImages),
+      ),
     );
   }
 
@@ -154,9 +175,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     _draft
       ..merchant = _merchant.text.trim()
       ..note = _note.text.trim();
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ItemsPage(draft: _draft)),
-    );
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => ItemsPage(draft: _draft)));
   }
 
   @override
@@ -189,7 +209,10 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         children: [
                           const Text(
                             'Fiş fotoğrafı',
-                            style: TextStyle(color: AppColors.darkText, fontSize: 18),
+                            style: TextStyle(
+                              color: AppColors.darkText,
+                              fontSize: 18,
+                            ),
                           ),
                           const SizedBox(height: 10),
                           if (_draft.pendingImages.isNotEmpty) ...[
@@ -198,22 +221,35 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                               child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 itemCount: _draft.pendingImages.length,
-                                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(width: 8),
                                 itemBuilder: (_, i) => Stack(
                                   children: [
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(10),
-                                      child: Image.memory(_draft.pendingImages[i], width: 72, height: 96, fit: BoxFit.cover),
+                                      child: Image.memory(
+                                        _draft.pendingImages[i],
+                                        width: 72,
+                                        height: 96,
+                                        fit: BoxFit.cover,
+                                      ),
                                     ),
                                     Positioned(
                                       top: 0,
                                       right: 0,
                                       child: InkWell(
-                                        onTap: () => setState(() => _draft.pendingImages.removeAt(i)),
+                                        onTap: () => setState(
+                                          () =>
+                                              _draft.pendingImages.removeAt(i),
+                                        ),
                                         child: const CircleAvatar(
                                           radius: 11,
                                           backgroundColor: Colors.black54,
-                                          child: Icon(Icons.close, size: 14, color: Colors.white),
+                                          child: Icon(
+                                            Icons.close,
+                                            size: 14,
+                                            color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -229,22 +265,52 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                               height: _draft.pendingImages.isEmpty ? 120 : 56,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: AppColors.darkText, width: 1.4),
+                                border: Border.all(
+                                  color: AppColors.darkText,
+                                  width: 1.4,
+                                ),
                               ),
-                              child: const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: Color(0xFFE2E8F0),
-                                    child: Icon(Icons.photo_camera_outlined,
-                                        size: 20, color: AppColors.darkText),
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text('Fotoğraf ekle',
-                                      style: TextStyle(color: AppColors.darkText)),
-                                ],
-                              ),
+                              child: _draft.pendingImages.isEmpty
+                                  ? const Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 18,
+                                          backgroundColor: Color(0xFFE2E8F0),
+                                          child: Icon(
+                                            Icons.photo_camera_outlined,
+                                            size: 20,
+                                            color: AppColors.darkText,
+                                          ),
+                                        ),
+                                        SizedBox(height: 8),
+                                        Text(
+                                          'Fotoğraf ekle',
+                                          style: TextStyle(
+                                            color: AppColors.darkText,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : const Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.add_a_photo_outlined,
+                                          size: 20,
+                                          color: AppColors.darkText,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Fotoğraf ekle',
+                                          style: TextStyle(
+                                            color: AppColors.darkText,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                             ),
                           ),
                         ],
@@ -263,7 +329,10 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         TextField(
                           controller: _merchant,
                           style: const TextStyle(color: AppColors.darkText),
-                          decoration: lightField('Marka', hint: 'Marka adı giriniz'),
+                          decoration: lightField(
+                            'Marka',
+                            hint: 'Marka adı giriniz',
+                          ),
                         ),
                         const SizedBox(height: 10),
                         ListenableBuilder(
@@ -281,18 +350,24 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                                 color: AppColors.darkText,
                                 fontFamily: fontFamily,
                               ),
-                              decoration: lightField('Kategori', hint: 'Kategori seçiniz'),
+                              decoration: lightField(
+                                'Kategori',
+                                hint: 'Kategori seçiniz',
+                              ),
                               items: [
                                 for (final c in appState.categories)
                                   DropdownMenuItem(
                                     value: c.id,
                                     child: Text(
                                       c.name,
-                                      style: const TextStyle(color: AppColors.darkText),
+                                      style: const TextStyle(
+                                        color: AppColors.darkText,
+                                      ),
                                     ),
                                   ),
                               ],
-                              onChanged: (v) => setState(() => _draft.categoryId = v),
+                              onChanged: (v) =>
+                                  setState(() => _draft.categoryId = v),
                             );
                           },
                         ),
@@ -305,8 +380,11 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                               style: const TextStyle(color: AppColors.darkText),
                               decoration: lightField(
                                 'Tarih',
-                                suffix: const Icon(Icons.calendar_today,
-                                    size: 18, color: AppColors.darkText),
+                                suffix: const Icon(
+                                  Icons.calendar_today,
+                                  size: 18,
+                                  color: AppColors.darkText,
+                                ),
                               ),
                             ),
                           ),
@@ -317,14 +395,18 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                           maxLines: 2,
                           maxLength: 500,
                           style: const TextStyle(color: AppColors.darkText),
-                          decoration:
-                              lightField('Açıklama', hint: 'Açıklama giriniz').copyWith(counterText: ''),
+                          decoration: lightField(
+                            'Açıklama',
+                            hint: 'Açıklama giriniz',
+                          ).copyWith(counterText: ''),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 24),
-                  Center(child: PrimaryButton(label: 'Ürün Ekle', onPressed: _next)),
+                  Center(
+                    child: PrimaryButton(label: 'Ürün Ekle', onPressed: _next),
+                  ),
                 ],
               ),
             ),
@@ -334,4 +416,3 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     );
   }
 }
-

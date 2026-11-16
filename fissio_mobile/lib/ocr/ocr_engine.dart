@@ -8,21 +8,15 @@ class OcrTextBlock {
   final double confidence;
   final List<List<double>>? bbox;
 
-  const OcrTextBlock({
-    required this.text,
-    required this.confidence,
-    this.bbox,
-  });
+  const OcrTextBlock({required this.text, required this.confidence, this.bbox});
 
   factory OcrTextBlock.fromJson(Map<String, dynamic> j) => OcrTextBlock(
-        text: (j['text'] as String?) ?? '',
-        confidence: ((j['confidence'] as num?) ?? 0).toDouble(),
-        bbox: (j['bbox'] as List?)
-            ?.map(
-              (pt) => (pt as List).map((v) => (v as num).toDouble()).toList(),
-            )
-            .toList(),
-      );
+    text: (j['text'] as String?) ?? '',
+    confidence: ((j['confidence'] as num?) ?? 0).toDouble(),
+    bbox: (j['bbox'] as List?)
+        ?.map((pt) => (pt as List).map((v) => (v as num).toDouble()).toList())
+        .toList(),
+  );
 }
 
 class OcrResult {
@@ -45,15 +39,15 @@ class OcrResult {
   bool get isEmpty => rawText.trim().isEmpty;
 
   factory OcrResult.fromJson(Map<String, dynamic> j) => OcrResult(
-        rawText: (j['raw_text'] as String?) ?? '',
-        blocks: ((j['blocks'] as List?) ?? [])
-            .map((e) => OcrTextBlock.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        confidence: ((j['confidence'] as num?) ?? 0).toDouble(),
-        engine: (j['engine'] as String?) ?? 'paddleocr',
-        modelVersion: (j['model_version'] as String?) ?? 'PP-OCRv4-mobile',
-        elapsedMs: ((j['elapsed_ms'] as num?) ?? 0).toDouble(),
-      );
+    rawText: (j['raw_text'] as String?) ?? '',
+    blocks: ((j['blocks'] as List?) ?? [])
+        .map((e) => OcrTextBlock.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    confidence: ((j['confidence'] as num?) ?? 0).toDouble(),
+    engine: (j['engine'] as String?) ?? 'paddleocr',
+    modelVersion: (j['model_version'] as String?) ?? 'PP-OCRv4-mobile',
+    elapsedMs: ((j['elapsed_ms'] as num?) ?? 0).toDouble(),
+  );
 }
 
 /// OCR + ayrıştırma sonucu (expense `/receipts/scan` yanıtı).
@@ -143,4 +137,3 @@ class OcrEngineFactory {
     return builder(api);
   }
 }
-

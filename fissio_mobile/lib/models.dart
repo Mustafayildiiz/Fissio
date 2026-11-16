@@ -98,7 +98,9 @@ class Expense {
     items: ((j['items'] as List?) ?? [])
         .map((e) => ExpenseItem.fromJson(e))
         .toList(),
-    imageIds: ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
+    imageIds: ((j['image_ids'] as List?) ?? [])
+        .map((e) => (e as num).toInt())
+        .toList(),
   );
 }
 
@@ -150,7 +152,12 @@ class ReceiptDraft {
     items: p.items.isNotEmpty
         ? p.items.map((i) => ExpenseItem(i.name, i.amount)).toList()
         : (p.amount != null && p.amount! > 0
-              ? [ExpenseItem(p.merchant.isEmpty ? 'Toplam' : p.merchant, p.amount!)]
+              ? [
+                  ExpenseItem(
+                    p.merchant.isEmpty ? 'Toplam' : p.merchant,
+                    p.amount!,
+                  ),
+                ]
               : []),
   );
 }
