@@ -18,6 +18,8 @@ from .base import (
     OcrTextBlock,
 )
 from .config import OcrConfig
+from .postprocess import dedupe_blocks
+from .preprocess import preprocess_receipt
 
 
 class PaddleOcrEngine(OcrEngine):
@@ -303,6 +305,13 @@ class PaddleOcrEngine(OcrEngine):
     def extract_text(self, image_input: ImageInput) -> OcrResult:
         start_ns = time.perf_counter_ns()
         img_array = self._decode_image_to_ndarray(image_input)
+        if self._config.preprocess:
+            # Perspektif düzeltme + CLAHE; hata/uygunsuzlukta girdiyi aynen döndürür.
+            img_array = preprocess_receipt(
+                img_array,
+                enable_warp=self._config.preprocess_warp,
+                enable_clahe=self._config.preprocess_clahe,
+            )
 
         try:
             predictor = self._get_or_create_predictor()
@@ -315,6 +324,7 @@ class PaddleOcrEngine(OcrEngine):
             blocks = self._parse_raw_paddle_output(
                 raw_output, drop_score=self._config.drop_score
             )
+            blocks = dedupe_blocks(blocks)
             raw_text, ordered_blocks = self._reconstruct_receipt_lines(blocks)
 
             avg_conf = (

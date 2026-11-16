@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -35,7 +36,7 @@ type OcrExtractionResult struct {
 // OcrEngine defines the Strategy Pattern interface for OCR providers in the Expense service.
 type OcrEngine interface {
 	Name() string
-	ExtractText(ctx context.Context, imageBase64 string) (*OcrExtractionResult, error)
+	ExtractText(ctx context.Context, image []byte) (*OcrExtractionResult, error)
 }
 
 var (
@@ -59,29 +60,38 @@ func NewRemoteMicroserviceOcrEngine(engineName, baseURL string) *RemoteMicroserv
 	return &RemoteMicroserviceOcrEngine{
 		engineName: engineName,
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		client:     &http.Client{Timeout: 25 * time.Second},
+		client:     &http.Client{Timeout: 55 * time.Second},
 	}
 }
 
 func (e *RemoteMicroserviceOcrEngine) Name() string { return e.engineName }
 
-func (e *RemoteMicroserviceOcrEngine) ExtractText(ctx context.Context, imageBase64 string) (*OcrExtractionResult, error) {
-	if strings.TrimSpace(imageBase64) == "" {
+func (e *RemoteMicroserviceOcrEngine) ExtractText(ctx context.Context, image []byte) (*OcrExtractionResult, error) {
+	if len(image) == 0 {
 		return nil, ErrInvalidOcrInput
 	}
-	reqBody, err := json.Marshal(map[string]string{
-		"image_base64": imageBase64,
-		"engine":       e.engineName,
-	})
+	// Gorsel multipart olarak (base64 sisirmesi olmadan) ve yalnizca bellekte iletilir.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("engine", e.engineName); err != nil {
+		return nil, err
+	}
+	fw, err := mw.CreateFormFile("file", "receipt")
 	if err != nil {
+		return nil, err
+	}
+	if _, err := fw.Write(image); err != nil {
+		return nil, err
+	}
+	if err := mw.Close(); err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/ocr/extract", bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/ocr/extract/upload", &body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("X-OCR-Engine", e.engineName)
 
 	resp, err := e.client.Do(req)

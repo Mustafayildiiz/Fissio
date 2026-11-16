@@ -36,6 +36,12 @@ services:
       OCR_MODEL_VARIANT: ${OCR_MODEL_VARIANT:-mobile}
       OCR_LANG: ${OCR_LANG:-tr}
       OCR_USE_GPU: ${OCR_USE_GPU:-false}
+      OCR_PREPROCESS: ${OCR_PREPROCESS:-true}
+      OCR_PREPROCESS_WARP: ${OCR_PREPROCESS_WARP:-true}
+      OCR_PREPROCESS_CLAHE: ${OCR_PREPROCESS_CLAHE:-true}
+    # Model agirliklari her yeniden olusturmada tekrar inmesin
+    volumes:
+      - ocr_models:/root/.paddleocr
     ports:
       - "8083:8080"
     networks: [internal]
@@ -56,6 +62,7 @@ services:
 
 volumes:
   pgdata:
+  ocr_models:
 
 networks:
   internal:

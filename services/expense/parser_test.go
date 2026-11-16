@@ -38,6 +38,10 @@ KREDİ KARTI  1.250,75`
 	if r.NeedsManual {
 		t.Fatal("needs_manual should be false")
 	}
+	// Kalemler (5,00 + 32,50) fis toplamiyla (1.250,75) tutmaz: inceleme istenir.
+	if !r.NeedsReview || r.ItemsTotal == nil || *r.ItemsTotal != 37.50 {
+		t.Fatalf("needs_review = %v, items_total = %v", r.NeedsReview, r.ItemsTotal)
+	}
 	if len(r.Items) != 2 || r.Items[0].Name != "EKMEK" || r.Items[0].Amount != 5.0 || r.Items[1].Name != "SÜT" || r.Items[1].Amount != 32.50 {
 		t.Fatalf("items = %+v", r.Items)
 	}

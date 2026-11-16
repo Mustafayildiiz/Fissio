@@ -30,6 +30,9 @@ class OcrConfig:
     det_limit_side_len: int = 960
     rec_batch_num: int = 6
     drop_score: float = 0.5
+    preprocess: bool = True
+    preprocess_warp: bool = True
+    preprocess_clahe: bool = True
     det_model_dir: str | None = None
     rec_model_dir: str | None = None
     cls_model_dir: str | None = None
@@ -53,6 +56,9 @@ class OcrConfig:
             det_limit_side_len=int(os.getenv("OCR_DET_LIMIT_SIDE_LEN", "960")),
             rec_batch_num=int(os.getenv("OCR_REC_BATCH_NUM", "6")),
             drop_score=float(os.getenv("OCR_DROP_SCORE", "0.5")),
+            preprocess=_env_bool("OCR_PREPROCESS", True),
+            preprocess_warp=_env_bool("OCR_PREPROCESS_WARP", True),
+            preprocess_clahe=_env_bool("OCR_PREPROCESS_CLAHE", True),
             det_model_dir=os.getenv("OCR_DET_MODEL_DIR") or None,
             rec_model_dir=os.getenv("OCR_REC_MODEL_DIR") or None,
             cls_model_dir=os.getenv("OCR_CLS_MODEL_DIR") or None,

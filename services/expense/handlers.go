@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -18,7 +19,10 @@ type handler struct {
 	ocrFactory *OcrEngineFactory
 }
 
-const dateLayout = "2006-01-02"
+const (
+	dateLayout           = "2006-01-02"
+	maxReceiptImageBytes = 15 << 20
+)
 
 func badRequest(c *gin.Context, msg string) { c.JSON(http.StatusBadRequest, gin.H{"error": msg}) }
 func serverError(c *gin.Context) {
@@ -78,20 +82,30 @@ func (h *handler) parseReceipt(c *gin.Context) {
 // scanReceipt: Resolves the active OcrEngine via Strategy Factory, extracts text from
 // the receipt image in memory, and parses structured receipt fields.
 func (h *handler) scanReceipt(c *gin.Context) {
-	var in struct {
-		ImageBase64 string `json:"image_base64"`
-		Engine      string `json:"engine"`
-	}
-	if err := c.ShouldBindJSON(&in); err != nil {
-		badRequest(c, "invalid request body")
+	// multipart/form-data: "file" (gorsel, <= 15MB) ve istege bagli "engine" alani.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxReceiptImageBytes+(1<<20))
+	fh, err := c.FormFile("file")
+	if err != nil {
+		badRequest(c, "multipart field 'file' is required")
 		return
 	}
-	if len(in.ImageBase64) == 0 || len(in.ImageBase64) > 20_000_000 {
-		badRequest(c, "image_base64 is required and must be under 15MB")
+	if fh.Size == 0 || fh.Size > maxReceiptImageBytes {
+		badRequest(c, "file is required and must be under 15MB")
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		badRequest(c, "invalid file")
+		return
+	}
+	image, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
+		badRequest(c, "invalid file")
 		return
 	}
 
-	requestedEngine := in.Engine
+	requestedEngine := c.PostForm("engine")
 	if requestedEngine == "" {
 		requestedEngine = c.Query("engine")
 	}
@@ -109,9 +123,9 @@ func (h *handler) scanReceipt(c *gin.Context) {
 		return
 	}
 
-	ocrRes, err := engine.ExtractText(c.Request.Context(), in.ImageBase64)
+	ocrRes, err := engine.ExtractText(c.Request.Context(), image)
 	// Bellekten goruntu verisini hemen temizle (FR-2.3 / NFR-2)
-	in.ImageBase64 = ""
+	clear(image)
 	if err != nil {
 		if errors.Is(err, ErrInvalidOcrInput) {
 			badRequest(c, "invalid receipt image")

@@ -99,6 +99,10 @@ class _ItemsPageState extends State<ItemsPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  TotalMismatchBanner(
+                    itemsTotal: _total,
+                    receiptTotal: widget.draft.receiptTotal,
+                  ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     decoration: BoxDecoration(

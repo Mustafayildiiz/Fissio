@@ -33,6 +33,9 @@ type ParseResult struct {
 	Items        []expenseItem `json:"items,omitempty"`
 	Confidence   Confidence    `json:"confidence"`
 	NeedsManual  bool          `json:"needs_manual"`
+	// NeedsReview: kalemlerin toplami fis toplamiyla tutmuyor; ItemsTotal hesaplanan kalem toplamidir.
+	NeedsReview bool     `json:"needs_review"`
+	ItemsTotal  *float64 `json:"items_total,omitempty"`
 }
 
 const fallbackCategory = "Diğer"
@@ -77,6 +80,7 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 	res.CategoryID, res.CategoryName, res.Confidence.Category = id, name, conf
 
 	res.Items = extractItems(lines, res.Amount)
+	res.Items, res.NeedsReview, res.ItemsTotal = reconcileItems(res.Items, res.Amount)
 	res.NeedsManual = res.Amount == nil
 	return res
 }
@@ -123,14 +127,14 @@ func extractAmount(lines []string) (float64, float64, bool) {
 	var tier1, tier2 []int
 	for i, l := range lines {
 		f := foldTR(l)
-		if strings.Contains(f, "kdv") || strings.Contains(f, "%") || strings.Contains(f, "ara toplam") {
+		if hasKeyword(l, "kdv", fuzzyMinLen) || strings.Contains(f, "%") || hasKeyword(l, "ara toplam", fuzzyMinLen) {
 			continue
 		}
 		switch {
-		case strings.Contains(f, "toplam") || strings.Contains(f, "odenecek"):
+		case hasKeyword(l, "toplam", fuzzyMinLen) || hasKeyword(l, "odenecek", fuzzyMinLen):
 			tier1 = append(tier1, i)
-		case strings.Contains(f, "tutar") || strings.Contains(f, "tahsil") ||
-			strings.Contains(f, "kredi kart") || strings.Contains(f, "nakit"):
+		case hasKeyword(l, "tutar", fuzzyMinLen) || hasKeyword(l, "tahsil", fuzzyMinLen) ||
+			hasKeyword(l, "kredi kart", fuzzyMinLen) || hasKeyword(l, "nakit", fuzzyMinLen):
 			tier2 = append(tier2, i)
 		}
 	}
@@ -156,7 +160,7 @@ func extractAmount(lines []string) (float64, float64, bool) {
 	best, found := 0.0, false
 	for _, l := range lines {
 		f := foldTR(l)
-		if strings.Contains(f, "kdv") || strings.Contains(f, "%") {
+		if hasKeyword(l, "kdv", fuzzyMinLen) || strings.Contains(f, "%") {
 			continue
 		}
 		for _, a := range amountsIn(l) {
@@ -196,7 +200,7 @@ func extractMerchant(header []string, cats []Category) (string, float64) {
 		f := foldTR(l)
 		for _, c := range cats {
 			for _, kw := range c.Keywords {
-				if containsWord(f, foldTR(kw)) {
+				if containsWordFuzzy(f, foldTR(kw)) {
 					return cleanMerchant(l), 0.8
 				}
 			}
@@ -249,10 +253,10 @@ func categorize(header, all []string, cats []Category) (int, string, float64) {
 		score := 0
 		for _, kw := range c.Keywords {
 			k := foldTR(kw)
-			if containsWord(headerText, k) {
+			if containsWordFuzzy(headerText, k) {
 				score += 3 // Baslikta gecen marka daha guclu sinyaldir.
 			}
-			if containsWord(allText, k) {
+			if containsWordFuzzy(allText, k) {
 				score++
 			}
 		}
@@ -304,13 +308,13 @@ var skipItemKeywords = []string{
 func extractItems(lines []string, totalAmount *float64) []expenseItem {
 	var items []expenseItem
 	for _, l := range lines {
-		f := foldTR(l)
-		if strings.Contains(f, "toplam") && !strings.Contains(f, "ara toplam") {
+		if hasKeyword(l, "toplam", fuzzyMinLen) && !hasKeyword(l, "ara toplam", fuzzyMinLen) {
 			break // Toplam satirindan sonrasi odeme/alt bilgi
 		}
 		skip := false
 		for _, kw := range skipItemKeywords {
-			if strings.Contains(f, kw) {
+			// Urun adlarini yanlislikla atmamak icin bulanik eslesme yalnizca >= 6 harfli etiketlerde.
+			if hasKeyword(l, kw, 6) {
 				skip = true
 				break
 			}

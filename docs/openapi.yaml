@@ -82,6 +82,13 @@ components:
         needs_manual:
           type: boolean
           description: Tutar bulunamadıysa true; istemci manuel giriş modalını gösterir.
+        needs_review:
+          type: boolean
+          description: Kalem fiyatları toplamı fiş toplamıyla tutmuyorsa true; istemci uyuşmazlık uyarısı gösterir.
+        items_total:
+          type: number
+          nullable: true
+          description: Hesaplanan kalem toplamı (yalnızca needs_review true iken).
     OcrResult:
       type: object
       properties:
@@ -200,14 +207,18 @@ paths:
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
+              required: [file]
               properties:
-                image_base64: { type: string }
-                engine: { type: string }
+                file: { type: string, format: binary, description: Fiş görseli (en fazla 15 MB) }
+                engine: { type: string, enum: [paddleocr, custom] }
       responses:
-        '200': { description: OCR ve ayrıştırma sonucu }
+        '200': { description: '`ocr` (OcrResult) ve `parsed` (ParsedReceipt) döner' }
+        '400': { description: Dosya yok, boş veya 15 MB'tan büyük }
+        '401': { description: Token geçersiz }
+        '502': { description: OCR servisi yanıt vermedi }
   /expenses:
     get:
       tags: [expense]

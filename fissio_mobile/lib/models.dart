@@ -104,6 +104,10 @@ class ReceiptDraft {
   String note;
   List<ExpenseItem> items;
 
+  /// OCR ile ayrıştırılan fiş toplamı (kalem toplamıyla karşılaştırmak için). Kaydedilen
+  /// tutar her zaman kalem toplamıdır; ikisi farklıysa kullanıcıya uyarı gösterilir.
+  double? receiptTotal;
+
   ReceiptDraft({
     this.id,
     this.merchant = '',
@@ -111,6 +115,7 @@ class ReceiptDraft {
     DateTime? date,
     this.note = '',
     List<ExpenseItem>? items,
+    this.receiptTotal,
   }) : date = date ?? DateTime.now(),
        items = items ?? [];
 
@@ -127,6 +132,7 @@ class ReceiptDraft {
 
   factory ReceiptDraft.fromParsed(ParsedReceipt p) => ReceiptDraft(
     merchant: p.merchant,
+    receiptTotal: p.amount,
     categoryId: p.categoryId > 0 ? p.categoryId : null,
     date: p.date ?? DateTime.now(),
     items: p.items.isNotEmpty
@@ -146,6 +152,12 @@ class ParsedReceipt {
   final List<ExpenseItem> items;
   final bool needsManual;
 
+  /// Kalem toplamı fiş toplamıyla tutmuyor (sunucu `needs_review`).
+  final bool needsReview;
+
+  /// Sunucunun hesapladığı kalem toplamı (`items_total`).
+  final double? itemsTotal;
+
   const ParsedReceipt({
     required this.merchant,
     this.amount,
@@ -154,6 +166,8 @@ class ParsedReceipt {
     required this.categoryName,
     this.items = const [],
     required this.needsManual,
+    this.needsReview = false,
+    this.itemsTotal,
   });
 
   factory ParsedReceipt.fromJson(Map<String, dynamic> j) => ParsedReceipt(
@@ -166,5 +180,7 @@ class ParsedReceipt {
         .map((e) => ExpenseItem.fromJson(e as Map<String, dynamic>))
         .toList(),
     needsManual: (j['needs_manual'] as bool?) ?? false,
+    needsReview: (j['needs_review'] as bool?) ?? false,
+    itemsTotal: (j['items_total'] as num?)?.toDouble(),
   );
 }

@@ -1,11 +1,11 @@
-import 'dart:typed_data';
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../app_state.dart';
 import '../models.dart';
+import '../ocr/picked_image.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'receipt_form_page.dart';
@@ -27,38 +27,6 @@ class _ScanPageState extends State<ScanPage> {
   void initState() {
     super.initState();
     _selectedEngine = appState.ocrFactory.defaultEngine;
-  }
-
-  /// Test ve doğrulama için bellekte örnek bir fiş görseli (PNG) üretir.
-  Future<Uint8List> _generateSampleReceiptPng() async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    const size = Size(420, 320);
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFFFFFFFF),
-    );
-    final tp = TextPainter(
-      text: const TextSpan(
-        text:
-            'BIM BIRLESIK MAGAZALAR A.S.\n'
-            'TARIH: 09.11.2026\n'
-            'SUT 1L TAM YAGLI      34,50\n'
-            'EKMEK 500G            15,00\n'
-            'TOPLAM               *49,50',
-        style: TextStyle(
-          color: Color(0xFF000000),
-          fontSize: 18,
-          fontFamily: 'monospace',
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: 380);
-    tp.paint(canvas, const Offset(20, 24));
-    final picture = recorder.endRecording();
-    final img = await picture.toImage(size.width.toInt(), size.height.toInt());
-    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
-    return byteData!.buffer.asUint8List();
   }
 
   Future<void> _showUnreadableModal() async {
@@ -98,11 +66,18 @@ class _ScanPageState extends State<ScanPage> {
     }
   }
 
-  Future<void> _runOcrScan() async {
+  Future<void> _runOcrScan(ImageSource source) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final imageBytes = await _generateSampleReceiptPng();
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1800,
+        imageQuality: 85,
+      );
+      if (picked == null) return; // Kullanıcı iptal etti: hata gösterme.
+      // Geçici dosya okunur ve (yalnızca cache dizinindeyse) hemen silinir (FR-2.3).
+      final imageBytes = await readAndDelete(picked.path);
       final res = await appState.scanAndParseReceipt(
         imageBytes,
         engine: _selectedEngine,
@@ -118,6 +93,13 @@ class _ScanPageState extends State<ScanPage> {
           builder: (_) => ReceiptFormPage(initialDraft: draft),
         ),
       );
+    } on PlatformException {
+      if (mounted) {
+        showMessage(
+          context,
+          'Kamera erişimi reddedildi. Ayarlardan izin verin veya galeriden seçin.',
+        );
+      }
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message);
     } finally {
@@ -227,7 +209,7 @@ class _ScanPageState extends State<ScanPage> {
                             PrimaryButton(
                               label: 'Fişi Tara',
                               compact: true,
-                              onPressed: _runOcrScan,
+                              onPressed: () => _runOcrScan(ImageSource.camera),
                             ),
                           ],
                         ),
@@ -247,7 +229,7 @@ class _ScanPageState extends State<ScanPage> {
                 children: [
                   IconButton(
                     tooltip: 'Galeri',
-                    onPressed: _busy ? null : _runOcrScan,
+                    onPressed: _busy ? null : () => _runOcrScan(ImageSource.gallery),
                     icon: const Icon(
                       Icons.image_outlined,
                       size: 32,
@@ -255,7 +237,7 @@ class _ScanPageState extends State<ScanPage> {
                     ),
                   ),
                   InkWell(
-                    onTap: _busy ? null : _runOcrScan,
+                    onTap: _busy ? null : () => _runOcrScan(ImageSource.camera),
                     customBorder: const CircleBorder(),
                     child: Container(
                       width: 64,

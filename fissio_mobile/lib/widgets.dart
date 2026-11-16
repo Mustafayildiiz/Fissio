@@ -316,3 +316,47 @@ void showMessage(BuildContext context, String msg) {
     ..showSnackBar(SnackBar(content: Text(msg)));
 }
 
+/// Kalem toplamı ile fiş toplamı farklıysa uyarı gösterir (fark < 0,01 ise hiçbir şey çizmez).
+/// Kaydedilen tutar kalem toplamıdır; bu yüzden kullanıcı tutarları kontrol etmelidir.
+class TotalMismatchBanner extends StatelessWidget {
+  const TotalMismatchBanner({
+    super.key,
+    required this.itemsTotal,
+    required this.receiptTotal,
+  });
+
+  final double itemsTotal;
+  final double? receiptTotal;
+
+  static bool mismatch(double itemsTotal, double? receiptTotal) =>
+      receiptTotal != null && (itemsTotal - receiptTotal).abs() >= 0.01;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!mismatch(itemsTotal, receiptTotal)) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3CD),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE0A800)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Color(0xFF7A5B00), size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Kalemlerin toplamı (${fmtMoney(itemsTotal)}) fiş toplamından '
+              '(${fmtMoney(receiptTotal!)}) farklı. Kaydedilen tutar kalemlerin toplamıdır; '
+              'lütfen tutarları kontrol edin.',
+              style: const TextStyle(color: Color(0xFF7A5B00), fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

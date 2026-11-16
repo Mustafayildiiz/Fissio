@@ -279,30 +279,16 @@ class AppState extends ChangeNotifier {
     await refresh();
   }
 
-  /// Seçili OCR motoru stratejisini (varsayılan: PaddleOCR PP-OCRv4 Mobile) kullanarak
-  /// fiş görselinden metin çıkarır, görsel belleğini sıfırlar (FR-2.3) ve metni ayrıştırır.
-  Future<({OcrResult ocr, ParsedReceipt parsed})> scanAndParseReceipt(
+  /// Seçili OCR motoru stratejisiyle görseli tek çağrıda (JWT'li expense `/receipts/scan`)
+  /// tarar ve ayrıştırır; ham görsel baytları işlem sonunda sıfırlanır (FR-2.3).
+  Future<ScanResult> scanAndParseReceipt(
     Uint8List imageBytes, {
     String? engine,
   }) async {
     final ocrEngine = ocrFactory.resolve(api, engineName: engine);
     try {
-      final ocrRes = await ocrEngine.extractText(imageBytes);
-      if (ocrRes.isEmpty) {
-        return (
-          ocr: ocrRes,
-          parsed: const ParsedReceipt(
-            merchant: '',
-            categoryId: 0,
-            categoryName: 'Diğer',
-            needsManual: true,
-          ),
-        );
-      }
-      final parsed = await api.parseReceiptText(ocrRes.rawText);
-      return (ocr: ocrRes, parsed: parsed);
+      return await ocrEngine.scan(imageBytes);
     } finally {
-      // FR-2.3: Ham fotoğraf verisi işlendikten hemen sonra bellekten temizlenir.
       imageBytes.fillRange(0, imageBytes.length, 0);
     }
   }

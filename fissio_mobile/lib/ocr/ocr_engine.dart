@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import '../api.dart';
+import '../models.dart';
 
 class OcrTextBlock {
   final String text;
@@ -56,14 +56,19 @@ class OcrResult {
       );
 }
 
+/// OCR + ayrıştırma sonucu (expense `/receipts/scan` yanıtı).
+typedef ScanResult = ({OcrResult ocr, ParsedReceipt parsed});
+
 /// Strategy Interface for OCR Engines in the mobile client.
+///
+/// Motorlar OCR servisine doğrudan gitmez: görsel JWT'li expense servisine
+/// (`/receipts/scan`, multipart) gönderilir, seçilen motor adı `engine` olarak iletilir.
 abstract class OcrEngine {
   String get engineName;
   String get modelVersion;
 
-  /// Extracts text from raw image bytes.
-  /// Implementations must not persist image bytes after extraction completes.
-  Future<OcrResult> extractText(Uint8List imageBytes);
+  /// Görseli tarar ve ayrıştırır. Implementasyonlar görsel baytlarını kalıcı saklamamalıdır.
+  Future<ScanResult> scan(Uint8List imageBytes);
 }
 
 /// Concrete OcrEngine strategy backed by PP-OCRv4 Mobile (`PaddleOCR`).
@@ -79,21 +84,19 @@ class PaddleOcrEngine implements OcrEngine {
   String get modelVersion => 'PP-OCRv4-mobile';
 
   @override
-  Future<OcrResult> extractText(Uint8List imageBytes) async {
+  Future<ScanResult> scan(Uint8List imageBytes) async {
     if (imageBytes.isEmpty) {
       throw ApiException('Görsel verisi boş olamaz.');
     }
-    final b64 = base64Encode(imageBytes);
-    return api.extractOcrText(b64, engine: engineName);
+    return api.scanReceipt(imageBytes, engine: engineName);
   }
 }
 
 /// Placeholder / Stub strategy for a future in-house custom OCR model.
 class CustomOcrEngine implements OcrEngine {
-  CustomOcrEngine({required this.api, this.allowStubFallback = false});
+  CustomOcrEngine({required this.api});
 
   final ApiClient api;
-  final bool allowStubFallback;
 
   @override
   String get engineName => 'custom';
@@ -102,20 +105,11 @@ class CustomOcrEngine implements OcrEngine {
   String get modelVersion => 'fissio-custom-ocr-v1-stub';
 
   @override
-  Future<OcrResult> extractText(Uint8List imageBytes) async {
+  Future<ScanResult> scan(Uint8List imageBytes) async {
     if (imageBytes.isEmpty) {
       throw ApiException('Görsel verisi boş olamaz.');
     }
-    if (allowStubFallback) {
-      return const OcrResult(
-        rawText: '[CUSTOM_OCR_STUB]',
-        confidence: 1.0,
-        engine: 'custom',
-        modelVersion: 'fissio-custom-ocr-v1-stub',
-      );
-    }
-    final b64 = base64Encode(imageBytes);
-    return api.extractOcrText(b64, engine: engineName);
+    return api.scanReceipt(imageBytes, engine: engineName);
   }
 }
 

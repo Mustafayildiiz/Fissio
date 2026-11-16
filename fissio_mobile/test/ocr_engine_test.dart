@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:fissio_mobile/api.dart';
+import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/ocr/ocr_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -12,13 +13,22 @@ class _FakePaddleEngine implements OcrEngine {
   String get modelVersion => 'PP-OCRv4-mobile';
 
   @override
-  Future<OcrResult> extractText(Uint8List imageBytes) async {
-    return const OcrResult(
-      rawText: 'BIM BIRLESIK MAGAZALAR A.S.\nTARIH: 09.11.2026\nTOPLAM 49,50',
-      confidence: 0.97,
-      engine: 'paddleocr',
-      modelVersion: 'PP-OCRv4-mobile',
-      elapsedMs: 112.4,
+  Future<ScanResult> scan(Uint8List imageBytes) async {
+    return (
+      ocr: const OcrResult(
+        rawText: 'BIM BIRLESIK MAGAZALAR A.S.\nTARIH: 09.11.2026\nTOPLAM 49,50',
+        confidence: 0.97,
+        engine: 'paddleocr',
+        modelVersion: 'PP-OCRv4-mobile',
+        elapsedMs: 112.4,
+      ),
+      parsed: const ParsedReceipt(
+        merchant: 'BIM',
+        amount: 49.5,
+        categoryId: 1,
+        categoryName: 'Market',
+        needsManual: false,
+      ),
     );
   }
 }
@@ -43,14 +53,16 @@ void main() {
     );
   });
 
-  test('Custom registered OCR strategy extracts sample receipt text', () async {
+  test('Registered OCR strategy returns OCR text and parsed fields', () async {
     final api = ApiClient();
     final factory = OcrEngineFactory();
     factory.register('paddleocr', (_) => _FakePaddleEngine());
 
     final engine = factory.resolve(api);
     final sampleBytes = Uint8List.fromList([137, 80, 78, 71]);
-    final result = await engine.extractText(sampleBytes);
+    final scanned = await engine.scan(sampleBytes);
+    final result = scanned.ocr;
+    expect(scanned.parsed.amount, 49.5);
 
     expect(result.isEmpty, isFalse);
     expect(result.engine, 'paddleocr');

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
@@ -16,8 +17,13 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// Android emülatöründe host makine 10.0.2.2 adresidir.
-String get _host => (!kIsWeb && Platform.isAndroid) ? '10.0.2.2' : 'localhost';
+/// Gerçek cihazda: `flutter run --dart-define=API_HOST=192.168.x.x`.
+/// Tanımlı değilse Android emülatöründe host makine 10.0.2.2, diğerlerinde localhost.
+const _hostOverride = String.fromEnvironment('API_HOST');
+String get _host {
+  if (_hostOverride.isNotEmpty) return _hostOverride;
+  return (!kIsWeb && Platform.isAndroid) ? '10.0.2.2' : 'localhost';
+}
 
 class ApiClient {
   ApiClient({this.onUnauthorized});
@@ -27,7 +33,6 @@ class ApiClient {
 
   final String _auth = 'http://$_host:8081';
   final String _expense = 'http://$_host:8082';
-  final String _ocr = 'http://$_host:8083';
 
   Future<dynamic> _send(
     String method,
@@ -40,13 +45,19 @@ class ApiClient {
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (token != null) headers['Authorization'] = 'Bearer $token';
 
+    final req = http.Request(method, uri)..headers.addAll(headers);
+    if (body != null) req.body = jsonEncode(body);
+    return _dispatch(req);
+  }
+
+  /// İsteği gönderir; ağ hatası, 401 ve hata gövdesi çevirisini tek yerde işler.
+  Future<dynamic> _dispatch(
+    http.BaseRequest req, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
     http.Response r;
     try {
-      final req = http.Request(method, uri)..headers.addAll(headers);
-      if (body != null) req.body = jsonEncode(body);
-      r = await http.Response.fromStream(
-        await req.send().timeout(const Duration(seconds: 10)),
-      );
+      r = await http.Response.fromStream(await req.send().timeout(timeout));
     } catch (_) {
       // SRS: ağ kesintisinde işlem kuyruğa alınmaz, anlık hata bildirilir.
       throw ApiException(
@@ -137,28 +148,23 @@ class ApiClient {
       _send('DELETE', _expense, '/expenses/$id');
 
   // --- OCR & Receipt Parsing ---
-  Future<OcrResult> extractOcrText(
-    String imageBase64, {
+  /// Tek çağrı: görsel multipart (binary) olarak JWT'li expense servisine gider;
+  /// expense OCR servisini çağırır ve metni ayrıştırır (app -> expense -> ocr).
+  Future<({OcrResult ocr, ParsedReceipt parsed})> scanReceipt(
+    Uint8List imageBytes, {
     String engine = 'paddleocr',
   }) async {
-    final j = await _send(
-      'POST',
-      _ocr,
-      '/ocr/extract',
-      body: {'image_base64': imageBase64, 'engine': engine},
-      query: {'engine': engine},
+    final req = http.MultipartRequest('POST', Uri.parse('$_expense/receipts/scan'))
+      ..fields['engine'] = engine
+      ..files.add(
+        http.MultipartFile.fromBytes('file', imageBytes, filename: 'receipt.jpg'),
+      );
+    if (token != null) req.headers['Authorization'] = 'Bearer $token';
+    final j = await _dispatch(req, timeout: const Duration(seconds: 60))
+        as Map<String, dynamic>;
+    return (
+      ocr: OcrResult.fromJson(j['ocr'] as Map<String, dynamic>),
+      parsed: ParsedReceipt.fromJson(j['parsed'] as Map<String, dynamic>),
     );
-    return OcrResult.fromJson(j as Map<String, dynamic>);
-  }
-
-  Future<ParsedReceipt> parseReceiptText(String rawText) async {
-    final j = await _send(
-      'POST',
-      _expense,
-      '/receipts/parse',
-      body: {'text': rawText},
-    );
-    return ParsedReceipt.fromJson(j as Map<String, dynamic>);
   }
 }
-

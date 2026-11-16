@@ -114,7 +114,7 @@ class OcrSubsystemTestSuite(unittest.TestCase):
         self.assertFalse(result.is_empty)
         self.assertEqual(result.engine, "paddleocr")
         self.assertEqual(result.model_version, "PP-OCRv4-mobile")
-        self.assertEqual(len(result.blocks), 7)  # 8 raw boxes minus 1 low-confidence noise box
+        self.assertEqual(len(result.blocks), 8)  # 9 raw boxes minus 1 low-confidence noise box
         self.assertGreater(result.confidence, 0.95)
 
         expected_lines = [
