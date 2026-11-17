@@ -1,11 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'auth_page.dart';
 import 'info_page.dart';
+import 'preferences_page.dart';
 import 'profile_select_page.dart';
+
+/// Ayarlar'ı alttan açılan tam ekran sayfa olarak gösterir ("Bitti" ile kapanır).
+void openSettings(BuildContext context) {
+  Navigator.of(context).push(
+    MaterialPageRoute(fullscreenDialog: true, builder: (_) => const SettingsPage()),
+  );
+}
+
+/// Başlık satırındaki aktif profil avatarı; dokununca Ayarlar açılır.
+class ProfileAvatar extends StatelessWidget {
+  const ProfileAvatar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: appState,
+      builder: (context, _) =>
+          Avatar(appState.displayName, onTap: () => openSettings(context)),
+    );
+  }
+}
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -16,125 +39,131 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  void _switchProfile(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
-    );
+  void _push(BuildContext context, Widget page) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
-  void _openAuth(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AuthPage()),
-    );
-  }
+  Widget _row(
+    BuildContext context,
+    IconData icon,
+    String title,
+    VoidCallback onTap,
+  ) =>
+      ListRow(
+        leading: IconTile(icon, size: 30, radius: 8),
+        title: title,
+        chevron: true,
+        vertical: 10,
+        onTap: onTap,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final items = <(IconData, String, VoidCallback)>[
-      (Icons.people_outline, 'Profil Değiştir', () => _switchProfile(context)),
-      (Icons.settings_outlined, 'Ayarlar', () => _open(context, 'Ayarlar', InfoTexts.settings)),
-      (Icons.storage_outlined, 'Veri', () => _open(context, 'Veri', InfoTexts.data)),
-      (Icons.support_agent, 'Destek', () => _open(context, 'Destek', InfoTexts.support)),
-      (Icons.info_outline, 'Hakkımızda', () => _open(context, 'Hakkımızda', InfoTexts.about)),
-      (Icons.privacy_tip_outlined, 'Gizlilik Politikası', () => _open(context, 'Gizlilik Politikası', InfoTexts.privacy)),
-      (Icons.description_outlined, 'Kullanım şartları', () => _open(context, 'Kullanım şartları', InfoTexts.terms)),
-      (Icons.login, 'Giriş / Kayıt', () => _openAuth(context)),
-    ];
-    return ListenableBuilder(
-      listenable: appState,
-      builder: (context, _) => Column(
-        children: [
-          const FissioHeader(),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                InkWell(
-                  onTap: () => _switchProfile(context),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppColors.light,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
+    final c = context.c;
+    return Scaffold(
+      body: SafeArea(
+        child: ListenableBuilder(
+          listenable: appState,
+          builder: (context, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TopBar(trailing: BarAction('Bitti', bold: true, onTap: () => Navigator.maybePop(context))),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text('Ayarlar', style: FissioText.title(c)),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+                  children: [
+                    GroupedCard(
                       children: [
-                        const CircleAvatar(
-                          radius: 34,
-                          backgroundColor: Color(0xFFE2E8F0),
-                          child: Icon(Icons.person, size: 36, color: AppColors.darkText),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Aktif profil',
-                                style: TextStyle(color: AppColors.darkText, fontSize: 12),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                appState.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: AppColors.darkText,
-                                  fontSize: 20,
+                        InkWell(
+                          onTap: () => _push(context, const ProfileSelectPage()),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            child: Row(
+                              children: [
+                                Avatar(appState.displayName, size: 60, filled: true),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        appState.displayName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: FissioText.title(c, size: 20),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Aktif profil',
+                                        style: FissioText.body(c, size: 14, color: c.mute),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                                Icon(LucideIcons.chevronRight, size: 16, color: c.mute),
+                              ],
+                            ),
                           ),
                         ),
-                        const Icon(Icons.swap_horiz, color: AppColors.darkText),
+                        ListRow(
+                          leading: Icon(LucideIcons.repeat, size: 20, color: c.accentInk),
+                          title: 'Profil değiştir',
+                          titleColor: c.accentInk,
+                          onTap: () => _push(context, const ProfileSelectPage()),
+                        ),
                       ],
                     ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text('Ayarlar', style: TextStyle(color: Colors.white, fontSize: 16)),
-                const SizedBox(height: 8),
-                for (final it in items)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Material(
-                      color: AppColors.light,
-                      borderRadius: BorderRadius.circular(14),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: it.$3,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: AppColors.accent.withValues(alpha: .15),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(it.$1, size: 18, color: AppColors.accent),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  it.$2,
-                                  style: const TextStyle(color: AppColors.darkText, fontSize: 15),
-                                ),
-                              ),
-                              const Icon(Icons.chevron_right, color: AppColors.darkText),
-                            ],
-                          ),
-                        ),
+                    const Rule2(margin: EdgeInsets.fromLTRB(0, 14, 0, 6)),
+                    GroupedCard(
+                      children: [
+                        _row(context, LucideIcons.slidersHorizontal, 'Tercihler',
+                            () => _push(context, const PreferencesPage())),
+                        _row(context, LucideIcons.database, 'Veri',
+                            () => _open(context, 'Veri', InfoTexts.data)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    GroupedCard(
+                      children: [
+                        _row(context, LucideIcons.lifeBuoy, 'Destek',
+                            () => _open(context, 'Destek', InfoTexts.support)),
+                        _row(context, LucideIcons.info, 'Hakkımızda',
+                            () => _open(context, 'Hakkımızda', InfoTexts.about)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    GroupedCard(
+                      children: [
+                        _row(context, LucideIcons.shieldCheck, 'Gizlilik Politikası',
+                            () => _open(context, 'Gizlilik Politikası', InfoTexts.privacy)),
+                        _row(context, LucideIcons.fileText, 'Kullanım Şartları',
+                            () => _open(context, 'Kullanım Şartları', InfoTexts.terms)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    GroupedCard(
+                      children: [
+                        _row(context, LucideIcons.logIn, 'Giriş / Kayıt',
+                            () => _push(context, const AuthPage())),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 18, 4, 0),
+                      child: Text(
+                        'Fissio · Sürüm 1.0',
+                        style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),
-                  ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

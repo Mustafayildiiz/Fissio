@@ -1,0 +1,158 @@
+import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../theme.dart';
+import '../theme_controller.dart';
+import '../widgets.dart';
+
+/// Tercihler: tema modu, vurgu rengi ve fiş detayı görünümü. Değişiklikler anında uygulanır.
+class PreferencesPage extends StatelessWidget {
+  const PreferencesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Scaffold(
+      body: SafeArea(
+        child: ListenableBuilder(
+          listenable: themeController,
+          builder: (context, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const NavBackBar(label: 'Ayarlar'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: Text('Tercihler', style: FissioText.title(c)),
+              ),
+              const Rule2(margin: EdgeInsets.fromLTRB(20, 16, 20, 20)),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+                  children: [
+                    const SectionLabel('Tema'),
+                    const SizedBox(height: 8),
+                    SegmentedControl<ThemeMode>(
+                      value: themeController.themeMode,
+                      onChanged: themeController.setThemeMode,
+                      items: const [
+                        SegmentItem(ThemeMode.system, 'Sistem'),
+                        SegmentItem(ThemeMode.light, 'Açık'),
+                        SegmentItem(ThemeMode.dark, 'Koyu'),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Vurgu rengi'),
+                    const SizedBox(height: 8),
+                    GroupedCard(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            for (final o in kAccentOptions)
+                              _Swatch(
+                                name: o.name,
+                                color: o.color,
+                                selected: themeController.accent.toARGB32() ==
+                                    o.color.toARGB32(),
+                                onTap: () => themeController.setAccent(o.color),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Fiş detayı'),
+                    const SizedBox(height: 8),
+                    SegmentedControl<ReceiptStyle>(
+                      value: themeController.receiptStyle,
+                      onChanged: themeController.setReceiptStyle,
+                      items: const [
+                        SegmentItem(ReceiptStyle.paper, 'Fiş', icon: LucideIcons.receipt),
+                        SegmentItem(ReceiptStyle.list, 'Liste', icon: LucideIcons.list),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        themeController.receiptStyle == ReceiptStyle.paper
+                            ? 'Fişi kağıt fiş görünümünde gösterir.'
+                            : 'Fiş bilgilerini ve ürünleri liste halinde gösterir.',
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({
+    required this.name,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+  final String name;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: name,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 64,
+          child: Column(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? c.ink : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+                  child: selected
+                      ? const Icon(LucideIcons.check, size: 20, color: Colors.white)
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: FissioText.body(
+                  c,
+                  size: 11,
+                  weight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: selected ? c.ink : c.mute,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

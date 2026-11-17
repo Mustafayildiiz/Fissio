@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
 import '../widgets.dart';
 
 class InfoTexts {
-  static const settings = 'Uygulama ayarları (tema, para birimi, bildirimler) sonraki sürümlerde eklenecek.';
   static const data = 'Harcama kayıtlarınız hesabınıza bağlı olarak veritabanında saklanır. '
       'Fiş fotoğrafları sunucuya yüklenmez ve saklanmaz.';
   static const support = 'Sorun ve önerileriniz için proje deposundaki Issues bölümünü kullanabilirsiniz.';
@@ -23,19 +23,28 @@ class InfoPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Scaffold(
       body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            BackTitle(title),
+            const NavBackBar(label: 'Ayarlar'),
             Padding(
-              padding: const EdgeInsets.all(20),
-              child: DarkCard(
-                child: Text(
-                  body,
-                  style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.5),
-                ),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Text(title, style: FissioText.title(c)),
+            ),
+            const Rule2(margin: EdgeInsets.fromLTRB(20, 16, 20, 16)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: GroupedCard(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    body,
+                    style: FissioText.body(c, size: 15).copyWith(height: 1.5),
+                  ),
+                ],
               ),
             ),
           ],
@@ -44,4 +53,3 @@ class InfoPage extends StatelessWidget {
     );
   }
 }
-

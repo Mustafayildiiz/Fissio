@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../api.dart';
 import '../app_state.dart';
+import '../dialogs.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'items_page.dart';
 import 'photo_picker.dart';
 import 'scan_page.dart';
 
@@ -20,61 +22,48 @@ class ModeSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget tab(String label, IconData icon, bool active, VoidCallback onTap) =>
-        Expanded(
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: active ? AppColors.accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    icon,
-                    size: 16,
-                    color: active ? Colors.white : AppColors.darkText,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: active ? Colors.white : AppColors.darkText,
-                      fontSize: 15,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(5),
-      decoration: BoxDecoration(
-        color: AppColors.light,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          tab('Manuel', Icons.edit, !scanActive, () => onChange(false)),
-          const SizedBox(width: 6),
-          tab(
-            'Tara',
-            Icons.document_scanner_outlined,
-            scanActive,
-            () => onChange(true),
-          ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: SegmentedControl<bool>(
+        value: scanActive,
+        onChanged: onChange,
+        items: const [
+          SegmentItem(false, 'Manuel', icon: LucideIcons.pencil),
+          SegmentItem(true, 'Tara', icon: LucideIcons.scan),
         ],
       ),
     );
   }
 }
 
+/// Ürün satırı için düzenleme denetleyicileri.
+class _Row {
+  _Row(String name, double? amount)
+      : name = TextEditingController(text: name),
+        amount = TextEditingController(
+          text: amount == null || amount == 0
+              ? ''
+              : amount.toStringAsFixed(2).replaceAll('.', ','),
+        );
+  final TextEditingController name;
+  final TextEditingController amount;
+
+  double get value {
+    final s = amount.text.trim().replaceAll(' ', '');
+    if (s.isEmpty) return 0;
+    if (s.contains(',')) {
+      return double.tryParse(s.replaceAll('.', '').replaceAll(',', '.')) ?? 0;
+    }
+    return double.tryParse(s) ?? 0;
+  }
+
+  void dispose() {
+    name.dispose();
+    amount.dispose();
+  }
+}
+
+/// Fiş oluştur / düzenle: bilgiler ve ürünler tek ekranda.
 class ReceiptFormPage extends StatefulWidget {
   const ReceiptFormPage({super.key, this.initial, this.initialDraft});
   final Expense? initial; // doluysa düzenleme
@@ -88,9 +77,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   late final ReceiptDraft _draft;
   late final TextEditingController _merchant;
   late final TextEditingController _note;
-  late final TextEditingController _date;
+  late final List<_Row> _rows;
+  bool _busy = false;
 
   bool get _editing => widget.initial != null;
+
+  double get _total => _rows.fold(0.0, (s, r) => s + r.value);
 
   @override
   void initState() {
@@ -100,7 +92,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         : (widget.initialDraft ?? ReceiptDraft());
     _merchant = TextEditingController(text: _draft.merchant);
     _note = TextEditingController(text: _draft.note);
-    _date = TextEditingController(text: fmtDate(_draft.date));
+    _rows = _draft.items.map((i) => _Row(i.name, i.amount)).toList();
+    if (_rows.isEmpty) _rows.add(_Row('', null));
     if (appState.categories.isEmpty) appState.refresh();
   }
 
@@ -108,7 +101,9 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   void dispose() {
     _merchant.dispose();
     _note.dispose();
-    _date.dispose();
+    for (final r in _rows) {
+      r.dispose();
+    }
     super.dispose();
   }
 
@@ -119,37 +114,30 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
-    if (d != null) {
-      setState(() {
-        _draft.date = d;
-        _date.text = fmtDate(d);
-      });
-    }
+    if (d != null) setState(() => _draft.date = d);
+  }
+
+  Future<void> _pickCategory() async {
+    final id = await showChoiceSheet<int>(
+      context,
+      title: 'Kategori',
+      options: [for (final c in appState.categories) (c.id, c.name)],
+      selected: _draft.categoryId,
+    );
+    if (id != null) setState(() => _draft.categoryId = id);
   }
 
   /// Taslağın fotoğraflarını ve ayrıştırılan alanları kaybetmeden tara ekranına geçer.
   Future<void> _goScan() async {
     if (_draft.pendingImages.isNotEmpty) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Tara ekranına geç'),
-          content: const Text(
+      final ok = await showConfirmDialog(
+        context,
+        title: 'Tara ekranına geç',
+        message:
             'Taranan/girilen alanlar yeniden taranınca değişecek. Fotoğraflar korunur. Devam edilsin mi?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Vazgeç'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Devam'),
-            ),
-          ],
-        ),
+        confirmLabel: 'Devam',
       );
-      if (ok != true || !mounted) return;
+      if (!ok || !mounted) return;
     }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -167,25 +155,56 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     setState(() => _draft.pendingImages.addAll(bytes));
   }
 
-  void _next() {
+  Future<void> _save() async {
     if (_draft.categoryId == null) {
       showMessage(context, 'Lütfen bir kategori seçin.');
       return;
     }
+    final items = [
+      for (final r in _rows)
+        if (r.name.text.trim().isNotEmpty || r.value > 0)
+          ExpenseItem(r.name.text.trim(), r.value),
+    ];
+    if (items.isEmpty || items.fold<double>(0, (s, i) => s + i.amount) <= 0) {
+      showMessage(context, 'En az bir ürün ve tutar girin.');
+      return;
+    }
     _draft
       ..merchant = _merchant.text.trim()
-      ..note = _note.text.trim();
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => ItemsPage(draft: _draft)));
+      ..note = _note.text.trim()
+      ..items = items;
+    setState(() => _busy = true);
+    try {
+      final imagesOk = await appState.saveDraft(_draft);
+      if (!mounted) return;
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      showMessage(
+        context,
+        !imagesOk
+            ? 'Fiş kaydedildi ancak fotoğraflar yüklenemedi; fiş detayından tekrar ekleyin.'
+            : (_draft.id == null ? 'Fiş kaydedildi.' : 'Fiş güncellendi.'),
+      );
+    } on ApiException catch (e) {
+      // Ağ hatasında kuyruğa alınmaz; form ekranda kalır, kullanıcı tekrar dener.
+      if (mounted) showMessage(context, e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       body: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            BackTitle(_editing ? 'Fişi Düzenle' : 'Fiş Oluştur', circle: true),
+            TopBar(
+              leading: BarAction('Vazgeç', onTap: () => Navigator.maybePop(context)),
+              title: _editing ? 'Fişi düzenle' : 'Yeni fiş',
+            ),
             if (!_editing)
               ModeSwitch(
                 scanActive: false,
@@ -195,217 +214,135 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
               ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 children: [
-                  if (!_editing) ...[
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.light,
-                        borderRadius: BorderRadius.circular(16),
+                  GroupedCard(
+                    children: [
+                      if (!_editing) _photoRow(c),
+                      RowField(
+                        label: 'Marka',
+                        controller: _merchant,
+                        hint: 'Marka adı girin',
+                        textInputAction: TextInputAction.next,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Fiş fotoğrafı',
-                            style: TextStyle(
-                              color: AppColors.darkText,
-                              fontSize: 18,
+                      ListenableBuilder(
+                        listenable: appState,
+                        builder: (_, _) {
+                          final name = appState.categories
+                              .where((x) => x.id == _draft.categoryId)
+                              .map((x) => x.name)
+                              .firstOrNull;
+                          return ListRow(
+                            title: 'Kategori',
+                            onTap: _pickCategory,
+                            trailing: Text(
+                              name ?? 'Seçin',
+                              style: FissioText.body(c, color: name == null ? c.mute : c.ink),
                             ),
+                            chevron: true,
+                          );
+                        },
+                      ),
+                      ListRow(
+                        title: 'Tarih',
+                        vertical: 11,
+                        onTap: _pickDate,
+                        trailing: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: c.surf2,
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          const SizedBox(height: 10),
-                          if (_draft.pendingImages.isNotEmpty) ...[
-                            SizedBox(
-                              height: 96,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: _draft.pendingImages.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(width: 8),
-                                itemBuilder: (_, i) => Stack(
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: Image.memory(
-                                        _draft.pendingImages[i],
-                                        width: 72,
-                                        height: 96,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                    Positioned(
-                                      top: 0,
-                                      right: 0,
-                                      child: InkWell(
-                                        onTap: () => setState(
-                                          () =>
-                                              _draft.pendingImages.removeAt(i),
-                                        ),
-                                        child: const CircleAvatar(
-                                          radius: 11,
-                                          backgroundColor: Colors.black54,
-                                          child: Icon(
-                                            Icons.close,
-                                            size: 14,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                          child: Text(
+                            fmtDate(_draft.date),
+                            style: FissioText.body(c, size: 15),
+                          ),
+                        ),
+                      ),
+                      RowField(
+                        controller: _note,
+                        hint: 'Açıklama (isteğe bağlı)',
+                        maxLines: 3,
+                        maxLength: 500,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  SectionLabel('Ürünler · ${_rows.length}'),
+                  const SizedBox(height: 8),
+                  TotalMismatchBanner(
+                    itemsTotal: _total,
+                    receiptTotal: _draft.receiptTotal,
+                  ),
+                  GroupedCard(
+                    children: [
+                      for (var i = 0; i < _rows.length; i++) _itemRow(c, i),
+                      InkWell(
+                        onTap: () => setState(() => _rows.add(_Row('', null))),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: c.accent,
+                                ),
+                                child: Icon(LucideIcons.plus, size: 14, color: c.onAccent),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Ürün ekle',
+                                style: FissioText.body(
+                                  c,
+                                  weight: FontWeight.w600,
+                                  color: c.accentInk,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 10),
-                          ],
-                          InkWell(
-                            onTap: _showAddPhotoSheet,
-                            child: Container(
-                              height: _draft.pendingImages.isEmpty ? 120 : 56,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: AppColors.darkText,
-                                  width: 1.4,
-                                ),
-                              ),
-                              child: _draft.pendingImages.isEmpty
-                                  ? const Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 18,
-                                          backgroundColor: Color(0xFFE2E8F0),
-                                          child: Icon(
-                                            Icons.photo_camera_outlined,
-                                            size: 20,
-                                            color: AppColors.darkText,
-                                          ),
-                                        ),
-                                        SizedBox(height: 8),
-                                        Text(
-                                          'Fotoğraf ekle',
-                                          style: TextStyle(
-                                            color: AppColors.darkText,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : const Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.add_a_photo_outlined,
-                                          size: 20,
-                                          color: AppColors.darkText,
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          'Fotoğraf ekle',
-                                          style: TextStyle(
-                                            color: AppColors.darkText,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.light,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              decoration: BoxDecoration(
+                color: c.bar,
+                border: Border(top: BorderSide(color: c.line)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!keyboard) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
                       children: [
-                        TextField(
-                          controller: _merchant,
-                          style: const TextStyle(color: AppColors.darkText),
-                          decoration: lightField(
-                            'Marka',
-                            hint: 'Marka adı giriniz',
-                          ),
+                        Text(
+                          'Toplam',
+                          style: FissioText.title(c, size: 16).copyWith(letterSpacing: 0),
                         ),
-                        const SizedBox(height: 10),
-                        ListenableBuilder(
-                          listenable: appState,
-                          builder: (_, _) {
-                            final validCat = appState.categories.any(
-                              (c) => c.id == _draft.categoryId,
-                            );
-                            return DropdownButtonFormField<int>(
-                              key: ValueKey(appState.categories.length),
-                              initialValue: validCat ? _draft.categoryId : null,
-                              isExpanded: true,
-                              dropdownColor: AppColors.light,
-                              style: const TextStyle(
-                                color: AppColors.darkText,
-                                fontFamily: fontFamily,
-                              ),
-                              decoration: lightField(
-                                'Kategori',
-                                hint: 'Kategori seçiniz',
-                              ),
-                              items: [
-                                for (final c in appState.categories)
-                                  DropdownMenuItem(
-                                    value: c.id,
-                                    child: Text(
-                                      c.name,
-                                      style: const TextStyle(
-                                        color: AppColors.darkText,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                              onChanged: (v) =>
-                                  setState(() => _draft.categoryId = v),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        InkWell(
-                          onTap: _pickDate,
-                          child: IgnorePointer(
-                            child: TextField(
-                              controller: _date,
-                              style: const TextStyle(color: AppColors.darkText),
-                              decoration: lightField(
-                                'Tarih',
-                                suffix: const Icon(
-                                  Icons.calendar_today,
-                                  size: 18,
-                                  color: AppColors.darkText,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: _note,
-                          maxLines: 2,
-                          maxLength: 500,
-                          style: const TextStyle(color: AppColors.darkText),
-                          decoration: lightField(
-                            'Açıklama',
-                            hint: 'Açıklama giriniz',
-                          ).copyWith(counterText: ''),
+                        const Spacer(),
+                        Text(
+                          fmtMoney(_total),
+                          style: FissioText.money(c, size: 20, weight: FontWeight.w800),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  Center(
-                    child: PrimaryButton(label: 'Ürün Ekle', onPressed: _next),
+                    const SizedBox(height: 10),
+                  ],
+                  PrimaryButton(
+                    label: _editing ? 'Fişi güncelle' : 'Fişi oluştur',
+                    busy: _busy,
+                    onPressed: _save,
                   ),
                 ],
               ),
@@ -413,6 +350,142 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// "Fotoğraf ekle" satırı + bekleyen fotoğrafların küçük resim şeridi.
+  Widget _photoRow(FissioColors c) {
+    final n = _draft.pendingImages.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: _showAddPhotoSheet,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              children: [
+                DashedBox(
+                  radius: kRadiusSm,
+                  color: c.mute,
+                  strokeWidth: 1.5,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(LucideIcons.camera, size: 20, color: c.accentInk),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Fotoğraf ekle',
+                    style: FissioText.body(c, weight: FontWeight.w600, color: c.accentInk),
+                  ),
+                ),
+                Text(
+                  n == 0 ? 'İsteğe bağlı' : '$n/$kMaxReceiptPhotos',
+                  style: FissioText.body(c, size: 13, color: c.mute),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (n > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: SizedBox(
+              height: 96,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: n,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(kRadiusSm),
+                      child: Image.memory(
+                        _draft.pendingImages[i],
+                        width: 72,
+                        height: 96,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: GestureDetector(
+                        onTap: () => setState(() => _draft.pendingImages.removeAt(i)),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Color(0x99000000),
+                          ),
+                          child: const Icon(LucideIcons.x, size: 14, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _itemRow(FissioColors c, int i) {
+    final r = _rows[i];
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: TextField(
+            controller: r.name,
+            textInputAction: TextInputAction.next,
+            cursorColor: c.accentInk,
+            style: FissioText.body(c),
+            decoration: InputDecoration(
+              hintText: 'Ürün adı',
+              hintStyle: FissioText.body(c, color: c.mute),
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 2,
+          child: TextField(
+            controller: r.amount,
+            onChanged: (_) => setState(() {}),
+            textAlign: TextAlign.right,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            cursorColor: c.accentInk,
+            style: FissioText.money(c),
+            decoration: InputDecoration(
+              hintText: '0,00',
+              hintStyle: FissioText.body(c, color: c.mute),
+              suffixText: ' ₺',
+              suffixStyle: FissioText.body(c, color: c.mute),
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Ürünü sil',
+          visualDensity: VisualDensity.compact,
+          icon: Icon(LucideIcons.x, size: 18, color: c.mute),
+          onPressed: () => setState(() {
+            _rows.removeAt(i).dispose();
+            if (_rows.isEmpty) _rows.add(_Row('', null));
+          }),
+        ),
+      ],
     );
   }
 }

@@ -306,38 +306,6 @@ class AppState extends ChangeNotifier {
     final ocrEngine = ocrFactory.resolve(api, engineName: engine);
     return ocrEngine.scan(pages);
   }
-
-  // --- Panel hesapları (son 30 gün) ---
-  List<Expense> get lastMonth {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final from = today.subtract(const Duration(days: 30));
-    return expenses.where((e) => !e.date.isBefore(from)).toList();
-  }
-
-  double get lastMonthTotal => lastMonth.fold(0.0, (s, e) => s + e.amount);
-
-  Expense? get highestExpense {
-    final l = lastMonth;
-    if (l.isEmpty) return null;
-    return l.reduce((a, b) => a.amount >= b.amount ? a : b);
-  }
-
-  ({String name, int id, double total})? get topCategory {
-    final m = <int, ({String name, double total})>{};
-    for (final e in lastMonth) {
-      final cur = m[e.categoryId];
-      m[e.categoryId] = (
-        name: e.categoryName,
-        total: (cur?.total ?? 0) + e.amount,
-      );
-    }
-    if (m.isEmpty) return null;
-    final best = m.entries.reduce(
-      (a, b) => a.value.total >= b.value.total ? a : b,
-    );
-    return (name: best.value.name, id: best.key, total: best.value.total);
-  }
 }
 
 final appState = AppState();

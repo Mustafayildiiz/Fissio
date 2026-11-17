@@ -37,6 +37,7 @@ dependencies:
   http: ^1.6.0
   flutter_secure_storage: ^11.2.0
   image_picker: ^1.2.4
+  lucide_icons_flutter: ^4.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -60,10 +61,14 @@ flutter:
   uses-material-design: true
 
   fonts:
-    - family: RoundedMplus1c
+    - family: Archivo
       fonts:
-        - asset: assets/fonts/RoundedMplus1c-Bold.ttf
-          weight: 700
+        - asset: assets/fonts/Archivo-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Archivo-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Archivo-ExtraBold.ttf
+          weight: 800
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../api.dart';
 import '../app_state.dart';
+import '../dialogs.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -29,46 +31,41 @@ class ReceiptImageStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final ids = expense.imageIds;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.light,
-        borderRadius: BorderRadius.circular(16),
+        color: c.surf,
+        borderRadius: BorderRadius.circular(kRadius),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(
-                ids.isEmpty
-                    ? 'Fiş fotoğrafları'
-                    : 'Fiş fotoğrafları (${ids.length})',
-                style: const TextStyle(color: AppColors.darkText, fontSize: 16),
+              Expanded(
+                child: Text(
+                  ids.isEmpty
+                      ? 'Fiş fotoğrafları'
+                      : 'Fiş fotoğrafları (${ids.length})',
+                  style: FissioText.body(c, weight: FontWeight.w600),
+                ),
               ),
-              const Spacer(),
               if (ids.length < kMaxReceiptPhotos)
                 TextButton.icon(
                   onPressed: () => _add(context),
-                  icon: const Icon(
-                    Icons.add_a_photo_outlined,
-                    size: 18,
-                    color: AppColors.darkText,
-                  ),
-                  label: const Text(
-                    'Fotoğraf ekle',
-                    style: TextStyle(color: AppColors.darkText),
-                  ),
+                  icon: const Icon(LucideIcons.imagePlus, size: 18),
+                  label: const Text('Fotoğraf ekle'),
                 ),
             ],
           ),
           if (ids.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
                 'Bu fişe henüz fotoğraf eklenmemiş.',
-                style: TextStyle(color: AppColors.darkText, fontSize: 12),
+                style: FissioText.body(c, size: 13, color: c.mute),
               ),
             )
           else
@@ -79,7 +76,7 @@ class ReceiptImageStrip extends StatelessWidget {
                 itemCount: ids.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 8),
                 itemBuilder: (context, i) => InkWell(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(kRadiusSm),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => ReceiptImageViewer(
@@ -90,7 +87,7 @@ class ReceiptImageStrip extends StatelessWidget {
                     ),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusSm),
                     child: _NetImage(
                       expenseId: expense.id,
                       imageId: ids[i],
@@ -142,11 +139,8 @@ class _NetImage extends StatelessWidget {
       errorBuilder: (context, error, stack) => Container(
         width: width,
         height: height,
-        color: const Color(0xFFE2E8F0),
-        child: const Icon(
-          Icons.broken_image_outlined,
-          color: AppColors.darkText,
-        ),
+        color: context.c.surf2,
+        child: Icon(LucideIcons.imageOff, color: context.c.mute),
       ),
     );
   }
@@ -186,24 +180,14 @@ class _ReceiptImageViewerState extends State<ReceiptImageViewer> {
   }
 
   Future<void> _delete() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Fotoğrafı sil'),
-        content: const Text('Bu fotoğraf fişten kalıcı olarak silinecek.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Vazgeç'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sil', style: TextStyle(color: AppColors.danger)),
-          ),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Fotoğrafı sil',
+      message: 'Bu fotoğraf fişten kalıcı olarak silinecek.',
+      confirmLabel: 'Sil',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     try {
       await appState.api.deleteImage(widget.expenseId, widget.imageIds[_index]);
       await appState.refresh();
@@ -224,7 +208,7 @@ class _ReceiptImageViewerState extends State<ReceiptImageViewer> {
         actions: [
           IconButton(
             tooltip: 'Fotoğrafı sil',
-            icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+            icon: Icon(LucideIcons.trash2, color: context.c.danger),
             onPressed: _delete,
           ),
         ],

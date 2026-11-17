@@ -1,15 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../app_state.dart';
+import '../dialogs.dart';
 import '../models.dart';
+import '../stats.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'profile_select_page.dart';
 import 'receipt_detail_page.dart';
-import 'receipt_form_page.dart';
-import 'scan_page.dart';
+import 'settings_page.dart';
 
-enum _Sort { dateDesc, dateAsc, amountDesc, amountAsc }
+enum _Sort {
+  dateDesc('En yeni', 'Tarih (yeniden eskiye)'),
+  dateAsc('En eski', 'Tarih (eskiden yeniye)'),
+  amountDesc('En yüksek tutar', 'Tutar (çoktan aza)'),
+  amountAsc('En düşük tutar', 'Tutar (azdan çoğa)');
+
+  const _Sort(this.pill, this.sheet);
+  final String pill;
+  final String sheet;
+
+  bool get byDate => this == dateDesc || this == dateAsc;
+}
 
 class ReceiptsPage extends StatefulWidget {
   const ReceiptsPage({super.key, required this.categoryFilter});
@@ -59,79 +71,38 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
   }
 
   Future<void> _pickSort() async {
-    const labels = {
-      _Sort.dateDesc: 'Tarih (yeniden eskiye)',
-      _Sort.dateAsc: 'Tarih (eskiden yeniye)',
-      _Sort.amountDesc: 'Tutar (çoktan aza)',
-      _Sort.amountAsc: 'Tutar (azdan çoğa)',
-    };
-    final r = await showModalBottomSheet<_Sort>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final e in labels.entries)
-              ListTile(
-                title: Text(e.value),
-                trailing: e.key == _sort
-                    ? const Icon(Icons.check, color: AppColors.accent)
-                    : null,
-                onTap: () => Navigator.pop(context, e.key),
-              ),
-          ],
-        ),
-      ),
+    final r = await showChoiceSheet<_Sort>(
+      context,
+      title: 'Sıralama',
+      options: [for (final s in _Sort.values) (s, s.sheet)],
+      selected: _sort,
     );
     if (r != null) setState(() => _sort = r);
   }
 
   Future<void> _pickCategory() async {
-    final r = await showModalBottomSheet<int>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              title: const Text('Tüm kategoriler'),
-              onTap: () => Navigator.pop(context, -1),
-            ),
-            for (final c in appState.categories)
-              ListTile(
-                title: Text(c.name),
-                trailing: widget.categoryFilter.value == c.id
-                    ? const Icon(Icons.check, color: AppColors.accent)
-                    : null,
-                onTap: () => Navigator.pop(context, c.id),
-              ),
-          ],
-        ),
-      ),
+    final r = await showChoiceSheet<int>(
+      context,
+      title: 'Kategori',
+      options: [
+        (-1, 'Tüm kategoriler'),
+        for (final cat in appState.categories) (cat.id, cat.name),
+      ],
+      selected: widget.categoryFilter.value ?? -1,
     );
     if (r != null) widget.categoryFilter.value = r == -1 ? null : r;
   }
 
   Future<void> _pickRange() async {
     if (_range != null) {
-      final clear = await showDialog<bool>(
-        context: context,
-        builder: (_) => SimpleDialog(
-          title: const Text('Tarih filtresi'),
-          children: [
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Aralığı değiştir'),
-            ),
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Filtreyi temizle'),
-            ),
-          ],
-        ),
+      final action = await showChoiceSheet<bool>(
+        context,
+        title: 'Tarih filtresi',
+        options: const [(false, 'Aralığı değiştir'), (true, 'Filtreyi temizle')],
+        selected: null,
       );
-      if (clear == null) return;
-      if (clear) {
+      if (action == null) return;
+      if (action) {
         setState(() => _range = null);
         return;
       }
@@ -148,124 +119,99 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
+    final c = context.c;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Column(
-          children: [
-            FissioHeader(
-              trailing: InkWell(
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
-                ),
-                customBorder: const CircleBorder(),
-                child: const CircleAvatar(
-                  radius: 18,
-                  backgroundColor: AppColors.accent,
-                  child: Icon(Icons.person_outline, size: 20, color: Colors.white),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: TextField(
-                controller: _search,
-                onChanged: (_) => setState(() {}),
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search, color: AppColors.secondaryText),
-                  hintText: 'Marka veya kategori ara',
-                  hintStyle: const TextStyle(color: Color(0xFF94A3B8)),
-                  filled: true,
-                  fillColor: AppColors.card,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: ValueListenableBuilder<int?>(
-                valueListenable: widget.categoryFilter,
-                builder: (context, catId, _) {
-                  final catName = catId == null
-                      ? 'Kategori'
-                      : appState.categories
-                              .where((c) => c.id == catId)
-                              .map((c) => c.name)
-                              .firstOrNull ??
-                          'Kategori';
-                  return Column(
-                    children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(child: _FilterChip('sıralama', false, _pickSort)),
-                          const SizedBox(width: 8),
-                          Expanded(child: _FilterChip(catName, catId != null, _pickCategory)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _FilterChip(
-                              _range == null
-                                  ? 'Tarih'
-                                  : '${fmtDate(_range!.start)} - ${fmtDate(_range!.end)}',
-                              _range != null,
-                              _pickRange,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: ListenableBuilder(
-                          listenable: appState,
-                          builder: (context, _) => _list(catId),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-        Positioned(
-          right: 16,
-          bottom: 12,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+        const LargeTitleHeader('Fişler', trailing: ProfileAvatar()),
+        Container(
+          height: 40,
+          margin: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: c.surf2,
+            borderRadius: BorderRadius.circular(kRadiusSm),
+          ),
+          child: Row(
             children: [
-              FloatingActionButton(
-                heroTag: 'scan',
-                tooltip: 'Fiş tara',
-                backgroundColor: AppColors.accent,
-                foregroundColor: Colors.white,
-                shape: const CircleBorder(),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ScanPage()),
+              Icon(LucideIcons.search, size: 18, color: c.mute),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _search,
+                  onChanged: (_) => setState(() {}),
+                  cursorColor: c.accentInk,
+                  style: FissioText.body(c),
+                  decoration: InputDecoration(
+                    hintText: 'Marka veya ürün ara',
+                    hintStyle: FissioText.body(c, color: c.mute),
+                    isDense: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
-                child: const Icon(Icons.photo_camera),
               ),
-              const SizedBox(height: 10),
-              FloatingActionButton(
-                heroTag: 'add',
-                tooltip: 'Manuel fiş ekle',
-                backgroundColor: AppColors.secondaryText,
-                foregroundColor: AppColors.darkText,
-                shape: const CircleBorder(),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ReceiptFormPage()),
+              if (_search.text.isNotEmpty)
+                GestureDetector(
+                  onTap: () => setState(_search.clear),
+                  child: Icon(LucideIcons.x, size: 16, color: c.mute),
                 ),
-                child: const Icon(Icons.add),
-              ),
             ],
+          ),
+        ),
+        Expanded(
+          child: ValueListenableBuilder<int?>(
+            valueListenable: widget.categoryFilter,
+            builder: (context, catId, _) {
+              final catName = catId == null
+                  ? 'Kategori'
+                  : appState.categories
+                          .where((x) => x.id == catId)
+                          .map((x) => x.name)
+                          .firstOrNull ??
+                      'Kategori';
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                    child: Row(
+                      children: [
+                        FilterPill(
+                          label: _sort.pill,
+                          icon: LucideIcons.arrowUpDown,
+                          active: true,
+                          onTap: _pickSort,
+                        ),
+                        const SizedBox(width: 8),
+                        FilterPill(
+                          label: catName,
+                          dropdown: true,
+                          active: catId != null,
+                          onTap: _pickCategory,
+                        ),
+                        const SizedBox(width: 8),
+                        FilterPill(
+                          label: _range == null
+                              ? 'Tarih'
+                              : '${fmtDate(_range!.start)} - ${fmtDate(_range!.end)}',
+                          dropdown: true,
+                          active: _range != null,
+                          onTap: _pickRange,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: appState,
+                      builder: (context, _) => _list(catId),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -273,69 +219,78 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
   }
 
   Widget _list(int? catId) {
+    final c = context.c;
     final items = _visible(catId);
+    final now = DateTime.now();
+
+    void open(Expense e) => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: e.id)),
+        );
+
+    final children = <Widget>[];
+    if (_sort.byDate) {
+      for (final g in groupByMonth(items)) {
+        children.add(
+          Container(
+            margin: const EdgeInsets.only(top: 24),
+            padding: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: c.rule, width: 2)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Expanded(
+                  child: Text(
+                    g.title(now),
+                    style: FissioText.title(c, size: 17).copyWith(letterSpacing: 0),
+                  ),
+                ),
+                Text(
+                  fmtMoney(g.total),
+                  style: FissioText.money(c, size: 14, color: c.mute),
+                ),
+              ],
+            ),
+          ),
+        );
+        for (final e in g.items) {
+          children.add(ReceiptTile(expense: e, onTap: () => open(e)));
+        }
+      }
+    } else {
+      children.add(const SizedBox(height: 12));
+      for (final e in items) {
+        children.add(ReceiptTile(expense: e, onTap: () => open(e)));
+      }
+    }
+
     return RefreshIndicator(
       onRefresh: appState.refresh,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 150),
+        padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
         children: [
           if (appState.error != null)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(top: 12),
               child: ErrorBanner(appState.error!, onRetry: appState.refresh),
             ),
           if (items.isEmpty && !appState.loading && appState.error == null)
-            const Padding(
-              padding: EdgeInsets.only(top: 40),
+            Padding(
+              padding: const EdgeInsets.only(top: 48),
               child: Center(
                 child: Text(
-                  'Henüz fiş yok.\nSağ alttaki + ile ekleyin.',
+                  'Henüz fiş yok.\nAlttaki + ile ekleyin.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.secondaryText),
+                  style: FissioText.body(c, color: c.mute).copyWith(height: 1.4),
                 ),
               ),
             ),
-          for (final e in items)
-            ReceiptTile(
-              expense: e,
-              onView: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: e.id)),
-              ),
-            ),
+          ...children,
         ],
       ),
     );
   }
 }
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip(this.label, this.active, this.onTap);
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? AppColors.accent : AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: Colors.white, fontSize: 12),
-        ),
-      ),
-    );
-  }
-}
-

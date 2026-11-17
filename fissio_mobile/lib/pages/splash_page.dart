@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../app_state.dart';
 import '../theme.dart';
+import '../widgets.dart';
 import 'auth_page.dart';
 import 'profile_select_page.dart';
 
@@ -35,31 +37,35 @@ class _SplashPageState extends State<SplashPage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: const BoxDecoration(
-                color: AppColors.accent,
-                shape: BoxShape.circle,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(32, 0, 32, 72),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: c.accent,
+                  borderRadius: BorderRadius.circular(kRadius),
+                ),
+                child: Icon(LucideIcons.receipt, size: 36, color: c.onAccent),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Fissio', style: TextStyle(color: Colors.white, fontSize: 36)),
-            const SizedBox(height: 10),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 36),
-              child: Text(
+              const SizedBox(height: 20),
+              Text('Fissio', style: FissioText.title(c, size: 64).copyWith(height: 1)),
+              const SizedBox(height: 20),
+              const Rule2(margin: EdgeInsets.zero),
+              const SizedBox(height: 20),
+              Text(
                 'Fişleri tarayın, manuel kaydedin ve harcamalarınızı tek ekranda takip edin.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 13),
+                style: FissioText.body(c, size: 18, color: c.mute).copyWith(height: 1.45),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:image_picker/image_picker.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../ocr/picked_image.dart';
 import '../widgets.dart';
@@ -27,20 +28,22 @@ Future<List<Uint8List>> pickReceiptPhotos(
   final source = await showModalBottomSheet<ImageSource>(
     context: context,
     builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.photo_camera_outlined),
-            title: const Text('Kamera'),
-            onTap: () => Navigator.pop(ctx, ImageSource.camera),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Galeriden seç (birden fazla)'),
-            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        child: GroupedCard(
+          children: [
+            ListRow(
+              leading: const IconTile(LucideIcons.camera, size: 30, radius: 8),
+              title: 'Kamera',
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListRow(
+              leading: const IconTile(LucideIcons.images, size: 30, radius: 8),
+              title: 'Galeriden seç (birden fazla)',
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
       ),
     ),
   );

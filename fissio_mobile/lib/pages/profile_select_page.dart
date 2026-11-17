@@ -1,16 +1,16 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../api.dart';
 import '../app_state.dart';
+import '../dialogs.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'shell_page.dart';
 
-/// Görseldeki "Profil Seç" ekranı: 2 sütunlu yuvarlak profil daireleri
-/// ve mor kesikli çizgili "+ Yeni Profil" dairesi.
+/// "Profil seçin": 2'li kare kartlar ve kesikli çerçeveli "Yeni profil" kartı.
+/// Düzenlemek/silmek için karta uzun basılır ya da "Profilleri yönet" açılır.
 class ProfileSelectPage extends StatefulWidget {
   const ProfileSelectPage({super.key});
 
@@ -20,6 +20,7 @@ class ProfileSelectPage extends StatefulWidget {
 
 class _ProfileSelectPageState extends State<ProfileSelectPage> {
   String? _busyId;
+  bool _manage = false;
 
   @override
   void initState() {
@@ -29,16 +30,20 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
     }
   }
 
+  void _openShell() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const ShellPage()),
+      (_) => false,
+    );
+  }
+
   Future<void> _select(UserProfile p) async {
     if (_busyId != null) return;
     setState(() => _busyId = p.id);
     try {
       await appState.selectProfile(p);
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ShellPage()),
-        (_) => false,
-      );
+      _openShell();
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message);
     } finally {
@@ -47,48 +52,18 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
   }
 
   Future<void> _addProfileDialog() async {
-    final ctrl = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Yeni Profil',
-          style: TextStyle(color: Colors.white, fontSize: 20),
-        ),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          style: const TextStyle(color: AppColors.darkText),
-          decoration: lightField('Profil adı', hint: 'Örn: Ev, İş, Kişisel'),
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'Vazgeç',
-              style: TextStyle(color: AppColors.secondaryText),
-            ),
-          ),
-          PrimaryButton(
-            label: 'Oluştur',
-            compact: true,
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-          ),
-        ],
-      ),
+    final name = await showTextPrompt(
+      context,
+      title: 'Yeni profil',
+      hint: 'Örn: Ev, İş, Kişisel',
+      confirmLabel: 'Oluştur',
     );
     if (name == null || name.isEmpty) return;
     setState(() => _busyId = '__new__');
     try {
       await appState.createProfile(name);
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ShellPage()),
-        (_) => false,
-      );
+      _openShell();
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message);
     } finally {
@@ -97,38 +72,12 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
   }
 
   Future<void> _renameDialog(UserProfile p) async {
-    final ctrl = TextEditingController(text: p.name);
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Profili Yeniden Adlandır',
-          style: TextStyle(color: Colors.white, fontSize: 20),
-        ),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          style: const TextStyle(color: AppColors.darkText),
-          decoration: lightField('Profil adı', hint: 'Örn: Ev, İş, Kişisel'),
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'Vazgeç',
-              style: TextStyle(color: AppColors.secondaryText),
-            ),
-          ),
-          PrimaryButton(
-            label: 'Kaydet',
-            compact: true,
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-          ),
-        ],
-      ),
+    final name = await showTextPrompt(
+      context,
+      title: 'Profili yeniden adlandır',
+      hint: 'Örn: Ev, İş, Kişisel',
+      initial: p.name,
+      confirmLabel: 'Kaydet',
     );
     if (name != null && name.isNotEmpty) {
       await appState.renameProfile(p.id, name);
@@ -136,78 +85,51 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
   }
 
   Future<void> _deleteProfile(UserProfile p) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Profili Sil',
-          style: TextStyle(color: Colors.white, fontSize: 20),
-        ),
-        content: Text(
-          '"${p.name}" profilini silmek istediğinize emin misiniz?',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Vazgeç',
-              style: TextStyle(color: AppColors.secondaryText),
-            ),
-          ),
-          PrimaryButton(
-            label: 'Sil',
-            compact: true,
-            onPressed: () => Navigator.pop(ctx, true),
-          ),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Profili sil',
+      message: '"${p.name}" profilini silmek istediğinize emin misiniz?',
+      confirmLabel: 'Sil',
+      destructive: true,
     );
-    if (ok == true) {
-      await appState.deleteProfile(p.id);
-    }
+    if (ok) await appState.deleteProfile(p.id);
   }
 
   void _showProfileOptions(UserProfile p) {
-    showModalBottomSheet(
+    final c = context.c;
+    showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppColors.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                p.name,
-                style: const TextStyle(color: Colors.white, fontSize: 18),
+              Text(p.name, style: FissioText.title(c, size: 22)),
+              const SizedBox(height: 12),
+              GroupedCard(
+                children: [
+                  ListRow(
+                    leading: IconTile(LucideIcons.pencil, size: 30, radius: 8),
+                    title: 'İsmi düzenle',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _renameDialog(p);
+                    },
+                  ),
+                  if (appState.profiles.length > 1)
+                    ListRow(
+                      leading: IconTile(LucideIcons.trash2, size: 30, radius: 8),
+                      title: 'Profili sil',
+                      titleColor: c.danger,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _deleteProfile(p);
+                      },
+                    ),
+                ],
               ),
-              const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.edit, color: AppColors.secondaryText),
-                title: const Text('İsmi Düzenle',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _renameDialog(p);
-                },
-              ),
-              if (appState.profiles.length > 1)
-                ListTile(
-                  leading:
-                      const Icon(Icons.delete_outline, color: AppColors.danger),
-                  title: const Text('Profili Sil',
-                      style: TextStyle(color: AppColors.danger)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _deleteProfile(p);
-                  },
-                ),
             ],
           ),
         ),
@@ -217,6 +139,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(
@@ -224,56 +147,74 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
           builder: (context, _) {
             final items = appState.profiles;
             return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const FissioHeader(),
-                const SizedBox(height: 36),
-                const Text(
-                  'Profil Seç',
-                  style: TextStyle(color: Colors.white, fontSize: 28),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('FISSIO', style: FissioText.label(c)),
+                      const SizedBox(height: 6),
+                      Text('Profil seçin', style: FissioText.title(c)),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Düzenlemek veya silmek için basılı tutun',
-                  style: TextStyle(color: AppColors.secondaryText, fontSize: 13),
-                ),
-                const SizedBox(height: 24),
+                const Rule2(margin: EdgeInsets.fromLTRB(20, 20, 20, 24)),
                 Expanded(
                   child: Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 360),
+                      constraints: const BoxConstraints(maxWidth: 440),
                       child: GridView.builder(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 8,
-                        ),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
-                          mainAxisSpacing: 24,
-                          crossAxisSpacing: 24,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
                           childAspectRatio: 1,
                         ),
                         itemCount: items.length + 1,
                         itemBuilder: (context, i) {
                           if (i < items.length) {
                             final p = items[i];
-                            final active = p.id == appState.activeProfileId;
-                            final busy = _busyId == p.id;
-                            return _ProfileCircle(
-                              label: p.name,
-                              active: active,
-                              busy: busy,
+                            return _ProfileCard(
+                              profile: p,
+                              active: p.id == appState.activeProfileId,
+                              busy: _busyId == p.id,
+                              manage: _manage,
                               onTap: () => _select(p),
-                              onLongPress: () => _showProfileOptions(p),
+                              onOptions: () => _showProfileOptions(p),
                             );
                           }
-                          return _NewProfileCircle(
+                          return _NewProfileCard(
                             busy: _busyId == '__new__',
                             onTap: _addProfileDialog,
                           );
                         },
                       ),
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => setState(() => _manage = !_manage),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _manage ? 'Bitti' : 'Profilleri yönet',
+                            style: FissioText.body(
+                              c,
+                              size: 15,
+                              weight: FontWeight.w600,
+                              color: _manage ? c.accentInk : c.mute,
+                            ),
+                          ),
+                        ),
+                        if (!_manage)
+                          Icon(LucideIcons.chevronRight, size: 18, color: c.mute),
+                      ],
                     ),
                   ),
                 ),
@@ -286,145 +227,129 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
   }
 }
 
-class _ProfileCircle extends StatelessWidget {
-  const _ProfileCircle({
-    required this.label,
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.profile,
     required this.active,
     required this.busy,
+    required this.manage,
     required this.onTap,
-    required this.onLongPress,
+    required this.onOptions,
   });
 
-  final String label;
+  final UserProfile profile;
   final bool active;
   final bool busy;
+  final bool manage;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final VoidCallback onOptions;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: busy ? null : onTap,
-      onLongPress: busy ? null : onLongPress,
-      customBorder: const CircleBorder(),
-      child: Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppColors.card,
-          border: Border.all(
-            color: active
-                ? AppColors.accent
-                : AppColors.secondaryText.withValues(alpha: .35),
-            width: active ? 2.2 : 1.4,
-          ),
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Center(
-          child: busy
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.2,
-                    color: Colors.white,
+    final c = context.c;
+    return Material(
+      color: c.surf,
+      borderRadius: BorderRadius.circular(kRadius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: busy ? null : (manage ? onOptions : onTap),
+        onLongPress: busy ? null : onOptions,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  busy
+                      ? SizedBox(
+                          width: 52,
+                          height: 52,
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                color: c.accentInk,
+                              ),
+                            ),
+                          ),
+                        )
+                      : Avatar(profile.name, size: 52, filled: active),
+                  const Spacer(),
+                  if (manage)
+                    Icon(LucideIcons.ellipsis, size: 22, color: c.mute),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    profile.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: FissioText.body(c, size: 17, weight: FontWeight.w600),
                   ),
-                )
-              : Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 18),
-                ),
+                  if (active)
+                    Text(
+                      'Son kullanılan',
+                      style: FissioText.body(c, size: 13, color: c.mute),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _NewProfileCircle extends StatelessWidget {
-  const _NewProfileCircle({required this.busy, required this.onTap});
+class _NewProfileCard extends StatelessWidget {
+  const _NewProfileCard({required this.busy, required this.onTap});
   final bool busy;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return InkWell(
       onTap: busy ? null : onTap,
-      customBorder: const CircleBorder(),
-      child: CustomPaint(
-        painter: _DashedCirclePainter(color: AppColors.accent),
-        child: Container(
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.card,
-          ),
-          child: Center(
-            child: busy
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.add,
-                        size: 28,
-                        color: Color(0xFF64748B),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Yeni',
-                        style: TextStyle(color: Colors.white, fontSize: 18),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Profil',
-                        style: TextStyle(
-                          color: AppColors.secondaryText,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
+      borderRadius: BorderRadius.circular(kRadius),
+      child: DashedBox(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: c.accentInk, width: 2),
+                ),
+                child: busy
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.2, color: c.accentInk),
+                      )
+                    : Icon(LucideIcons.plus, size: 24, color: c.accentInk),
+              ),
+              Text(
+                'Yeni profil',
+                style: FissioText.body(c, size: 17, weight: FontWeight.w600, color: c.accentInk),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
-}
-
-class _DashedCirclePainter extends CustomPainter {
-  _DashedCirclePainter({required this.color});
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-    final radius = (math.min(size.width, size.height) / 2) - 1;
-    final center = Offset(size.width / 2, size.height / 2);
-    const segments = 36;
-    const step = (2 * math.pi) / segments;
-    for (var i = 0; i < segments; i++) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        i * step,
-        step * 0.55,
-        false,
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedCirclePainter oldDelegate) =>
-      oldDelegate.color != color;
 }
