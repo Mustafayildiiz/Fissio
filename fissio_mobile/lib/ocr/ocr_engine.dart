@@ -108,7 +108,10 @@ class CustomOcrEngine implements OcrEngine {
   }
 }
 
-typedef OcrEngineBuilder = OcrEngine Function(ApiClient api);
+/// Sunucu OCR motorunun kullanıcıya gösterilen adı.
+String ocrEngineLabel(String e) => e == 'paddleocr' ? 'PP-OCRv4 Mobile' : 'Custom OCR';
+
+typedef OcrEngineBuilder =OcrEngine Function(ApiClient api);
 
 /// Extensible Factory & Provider Registry for runtime OCR engine selection.
 class OcrEngineFactory {

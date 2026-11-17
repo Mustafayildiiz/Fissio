@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../app_state.dart';
+import '../ocr/ocr_engine.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets.dart';
@@ -105,6 +107,25 @@ class PreferencesPage extends StatelessWidget {
                           OcrMode.onDevice =>
                             'Cihaz İçi Hızlı OCR: fotoğraf cihazdan çıkmaz, internet gerekmez; doğruluk sunucuya göre daha düşük olabilir.',
                         },
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Sunucu OCR motoru'),
+                    const SizedBox(height: 8),
+                    SegmentedControl<String>(
+                      key: const ValueKey('ocr-engine'),
+                      value: themeController.ocrEngine,
+                      onChanged: themeController.setOcrEngine,
+                      items: [
+                        for (final e in appState.ocrFactory.availableEngines)
+                          SegmentItem(e, ocrEngineLabel(e), icon: LucideIcons.server),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        'Sunucu OCR kullanıldığında fişi okuyacak motor. Tarama ekranında otomatik uygulanır.',
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),

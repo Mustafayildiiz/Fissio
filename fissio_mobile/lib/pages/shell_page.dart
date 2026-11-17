@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../widgets.dart';
 import 'home_page.dart';
-import 'receipt_form_page.dart';
 import 'receipts_page.dart';
+import 'scan_page.dart';
 
 /// Kök sayfa: Özet ve Fişler sekmeleri, ortada yeni fiş "+" eylemi.
 /// (Kaydetme akışı `popUntil(isFirst)` ile buraya döner; bu sayfa ilk route kalmalıdır.)
@@ -38,7 +38,7 @@ class _ShellPageState extends State<ShellPage> {
 
   void _addReceipt() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ReceiptFormPage()),
+      MaterialPageRoute(builder: (_) => const ScanPage()),
     );
   }
 

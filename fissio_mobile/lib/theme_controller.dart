@@ -44,7 +44,10 @@ class ThemeController extends ChangeNotifier {
   static const modeKey = 'pref_theme_mode';
   static const styleKey = 'pref_receipt_style';
   static const ocrModeKey = 'pref_ocr_mode';
+  static const ocrEngineKey = 'pref_ocr_engine';
 
+  /// Sunucu OCR motoru (`OcrEngineFactory` anahtarı); tarama ekranı bunu kullanır.
+  String ocrEngine = 'paddleocr';
   Color accent = kDefaultAccent;
   ThemeMode themeMode = ThemeMode.system;
   ReceiptStyle receiptStyle = ReceiptStyle.paper;
@@ -68,6 +71,8 @@ class ThemeController extends ChangeNotifier {
       );
       final o = await _store.read(ocrModeKey);
       ocrMode = OcrMode.values.firstWhere((e) => e.name == o, orElse: () => OcrMode.auto);
+      final e = await _store.read(ocrEngineKey);
+      if (e != null && e.isNotEmpty) ocrEngine = e;
     } catch (_) {
       // Depolama yoksa (test/ilk açılış) varsayılanlar geçerli.
     }
@@ -96,6 +101,12 @@ class ThemeController extends ChangeNotifier {
     ocrMode = m;
     notifyListeners();
     await _save(ocrModeKey, m.name);
+  }
+
+  Future<void> setOcrEngine(String e) async {
+    ocrEngine = e;
+    notifyListeners();
+    await _save(ocrEngineKey, e);
   }
 
   Future<void> _save(String key, String value) async {

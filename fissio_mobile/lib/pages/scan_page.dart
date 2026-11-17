@@ -9,9 +9,11 @@ import '../api.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../models.dart';
+import '../ocr/ocr_engine.dart';
 import '../ocr/picked_image.dart';
 import '../ocr/scan_session.dart';
 import '../theme.dart';
+import '../theme_controller.dart';
 import '../widgets.dart';
 import 'receipt_form_page.dart';
 
@@ -29,14 +31,12 @@ class ScanPage extends StatefulWidget {
 }
 
 class _ScanPageState extends State<ScanPage> {
-  late String _selectedEngine;
   late final ScanSession _session;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    _selectedEngine = appState.ocrFactory.defaultEngine;
     _session = ScanSession(initial: widget.initialPages);
   }
 
@@ -131,7 +131,7 @@ class _ScanPageState extends State<ScanPage> {
     try {
       final res = await appState.scanAndParseReceipt(
         _session.pages,
-        engine: _selectedEngine,
+        engine: themeController.ocrEngine,
       );
       if (!mounted) return;
       if (res.ocr.isEmpty || res.parsed.needsManual) {
@@ -250,13 +250,9 @@ class _ScanPageState extends State<ScanPage> {
     );
   }
 
-  static String _engineLabel(String e) =>
-      e == 'paddleocr' ? 'PP-OCRv4 Mobile' : 'Custom OCR';
-
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final engines = appState.ocrFactory.availableEngines;
     final pages = _session.pages;
     return Scaffold(
       body: SafeArea(
@@ -266,24 +262,6 @@ class _ScanPageState extends State<ScanPage> {
             TopBar(
               leading: BarAction('Vazgeç', onTap: () => Navigator.maybePop(context)),
               title: 'Yeni fiş',
-              trailing: engines.length < 2
-                  ? null
-                  : PopupMenuButton<String>(
-                      tooltip: 'OCR motoru',
-                      initialValue: _selectedEngine,
-                      onSelected: (v) => setState(() {
-                        _selectedEngine = v;
-                        appState.ocrFactory.defaultEngine = v;
-                      }),
-                      itemBuilder: (_) => [
-                        for (final eng in engines)
-                          PopupMenuItem(value: eng, child: Text(_engineLabel(eng))),
-                      ],
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(LucideIcons.slidersHorizontal, size: 20, color: c.accentInk),
-                      ),
-                    ),
             ),
             ModeSwitch(
               scanActive: true,
@@ -302,7 +280,7 @@ class _ScanPageState extends State<ScanPage> {
                 child: _busy
                     ? const _ScanBusy()
                     : pages.isEmpty
-                        ? _ScanEmpty(engine: _engineLabel(_selectedEngine))
+                        ? _ScanEmpty(engine: ocrEngineLabel(themeController.ocrEngine))
                         : Stack(
                             fit: StackFit.expand,
                             children: [
