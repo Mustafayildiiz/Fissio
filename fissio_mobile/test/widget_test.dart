@@ -1,5 +1,6 @@
 import 'package:fissio_mobile/pages/auth_page.dart';
 import 'package:fissio_mobile/pages/home_page.dart';
+import 'package:fissio_mobile/pages/onboarding_page.dart';
 import 'package:fissio_mobile/pages/preferences_page.dart';
 import 'package:fissio_mobile/pages/profile_select_page.dart';
 import 'package:fissio_mobile/pages/receipt_detail_page.dart';
@@ -45,6 +46,7 @@ void main() {
       await show(const PreferencesPage());
       await show(const ReceiptFormPage());
       await show(const ScanPage());
+      await show(OnboardingPage(onDone: () {}));
       await show(const ReceiptDetailPage(id: 999));
     });
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_state.dart';
+import 'onboarding_controller.dart';
 import 'pages/auth_page.dart';
 import 'pages/splash_page.dart';
 import 'theme.dart';
@@ -13,6 +14,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // İlk kareler doğru tema/vurgu ile çizilsin diye tercihler runApp'ten önce yüklenir.
   await themeController.load();
+  await onboardingController.load();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   runApp(const FissioApp());
 }

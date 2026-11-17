@@ -3,8 +3,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../api.dart';
 import '../app_state.dart';
+import '../onboarding_controller.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'onboarding_page.dart';
 import 'profile_select_page.dart';
 
 class AuthPage extends StatefulWidget {
@@ -45,9 +47,16 @@ class _AuthPageState extends State<AuthPage> {
       } else {
         await appState.login(mail, pass);
       }
+      // Tanıtım yalnızca yeni kayıttan sonra (Profil seçiminden önce); girişte hiç gösterilmez.
+      final showOnboarding =
+          _register && await onboardingController.shouldShowAfterSignUp(appState.email);
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ProfileSelectPage()),
+        MaterialPageRoute(
+          builder: (_) => showOnboarding
+              ? OnboardingPage(email: appState.email)
+              : const ProfileSelectPage(),
+        ),
         (_) => false,
       );
     } on ApiException catch (e) {

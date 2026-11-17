@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../app_state.dart';
+import '../onboarding_controller.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'auth_page.dart';
 import 'info_page.dart';
+import 'onboarding_page.dart';
 import 'preferences_page.dart';
 import 'profile_select_page.dart';
 
@@ -31,7 +33,20 @@ class ProfileAvatar extends StatelessWidget {
 }
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.onboarding});
+
+  /// Verilmezse global [onboardingController] (testlerde sahte depolu denetleyici verilir).
+  final OnboardingController? onboarding;
+
+  /// Tanıtımı bir kez gösterir; satır anında ve kalıcı olarak kaldırılır.
+  void _openOnboarding(BuildContext context, OnboardingController ctrl) {
+    ctrl.markReplayOpened();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OnboardingPage(controller: ctrl, signUp: false),
+      ),
+    );
+  }
 
   void _open(BuildContext context, String title, String body) {
     Navigator.of(context).push(
@@ -60,10 +75,11 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final onb = onboarding ?? onboardingController;
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: appState,
+          listenable: Listenable.merge([appState, onb]),
           builder: (context, _) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -129,6 +145,9 @@ class SettingsPage extends StatelessWidget {
                     const SizedBox(height: 12),
                     GroupedCard(
                       children: [
+                        if (onb.replayAvailable)
+                          _row(context, LucideIcons.bookOpen, 'Tanıtım Rehberini Görüntüle',
+                              () => _openOnboarding(context, onb)),
                         _row(context, LucideIcons.lifeBuoy, 'Destek',
                             () => _open(context, 'Destek', InfoTexts.support)),
                         _row(context, LucideIcons.info, 'Hakkımızda',
