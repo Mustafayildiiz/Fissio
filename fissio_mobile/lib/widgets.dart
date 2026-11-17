@@ -910,6 +910,147 @@ void showMessage(BuildContext context, String msg) {
     ..showSnackBar(SnackBar(content: Text(msg)));
 }
 
+/// Otomatik atanan fiş kategorisi güvenilir değilse ("Diğer"e düşüldü ya da düşük güven) uyarır ve
+/// aday kategorileri tek dokunuşla seçtirir. [candidates] (id, ad) çiftleridir.
+class CategoryReviewBanner extends StatelessWidget {
+  const CategoryReviewBanner({
+    super.key,
+    required this.visible,
+    required this.candidates,
+    required this.onPick,
+  });
+
+  final bool visible;
+  final List<(int, String)> candidates;
+  final ValueChanged<int> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) return const SizedBox.shrink();
+    final c = context.c;
+    final fg = c.isDark ? const Color(0xFFF5D77A) : const Color(0xFF7A5B00);
+    final bg = c.isDark ? const Color(0x26E0A800) : const Color(0xFFFFF3CD);
+    final border = c.isDark ? const Color(0x66E0A800) : const Color(0xFFE0A800);
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(kRadiusSm),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(LucideIcons.triangleAlert, color: fg, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Kategori otomatik olarak emin belirlenemedi. Lütfen kontrol edin; '
+                  'seçiminiz sonraki taramalar için hatırlanır.',
+                  style: TextStyle(color: fg, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          if (candidates.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final cand in candidates)
+                  FilterPill(label: cand.$2, onTap: () => onPick(cand.$1)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Küçük "Otomatik" etiketi: kategori sunucu tarafından atandı ve kullanıcı değiştirmedi.
+class AutoBadge extends StatelessWidget {
+  const AutoBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.surf2,
+        borderRadius: BorderRadius.circular(kRadiusPill),
+      ),
+      child: Text(
+        'Otomatik',
+        style: FissioText.body(c, size: 11, weight: FontWeight.w600, color: c.accentInk),
+      ),
+    );
+  }
+}
+
+/// Ürün satırındaki kategori çipi: kategori adı (atanmamışsa "Kategori seç"); düşük güvenli otomatik
+/// atamada [review] true iken amber nokta gösterir.
+class ItemCategoryChip extends StatelessWidget {
+  const ItemCategoryChip({
+    super.key,
+    required this.name,
+    required this.onTap,
+    this.review = false,
+  });
+
+  final String? name;
+  final VoidCallback onTap;
+  final bool review;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final amber = c.isDark ? const Color(0xFFF5D77A) : const Color(0xFFB07C00);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (review) ...[
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: amber),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Icon(LucideIcons.tag, size: 12, color: name == null ? c.mute : c.accentInk),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                name ?? 'Kategori seç',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: FissioText.body(
+                  c,
+                  size: 12,
+                  weight: FontWeight.w600,
+                  color: name == null ? c.mute : c.accentInk,
+                ),
+              ),
+            ),
+            Icon(LucideIcons.chevronDown, size: 12, color: c.mute),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Kalem toplamı ile fiş toplamı farklıysa uyarı gösterir (fark < 0,01 ise hiçbir şey çizmez).
 /// Kaydedilen tutar kalem toplamıdır (indirim varsa indirim düşülmüş hali; [itemsTotal] bu net
 /// değerdir); bu yüzden kullanıcı tutarları kontrol etmelidir.

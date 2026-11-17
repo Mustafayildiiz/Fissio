@@ -42,6 +42,11 @@ type ParseResult struct {
 	DiscountTotal  *float64        `json:"discount_total,omitempty"`
 	Summary        *ReceiptSummary `json:"summary,omitempty"`
 	Reconciliation *Reconciliation `json:"reconciliation,omitempty"`
+	// Otomatik kategorilendirme (bkz. categorizer.go). CategoryNeedsReview, NeedsReview'dan (toplam
+	// uyusmazligi) AYRIDIR: kategori guveni dusuk / "Diğer"e dusuldu, kullanici kontrol etmeli.
+	CategorySource      string              `json:"category_source,omitempty"`
+	CategoryNeedsReview bool                `json:"category_needs_review"`
+	CategoryCandidates  []CategoryCandidate `json:"category_candidates,omitempty"`
 }
 
 const fallbackCategory = "Diğer"
@@ -77,6 +82,13 @@ func foldTR(s string) string {
 }
 
 func Parse(text string, cats []Category, now time.Time) ParseResult {
+	return ParseWith(text, cats, now, ParseOptions{})
+}
+
+// ParseWith, Parse'in kullanici kurallari gibi istege bagli girdi alan halidir.
+func ParseWith(text string, cats []Category, now time.Time, opts ParseOptions) ParseResult {
+	cats = enrichCats(cats)
+	ci := newCatIndex(cats)
 	lines := splitLines(text)
 	res := ParseResult{CategoryName: fallbackCategory}
 
@@ -95,8 +107,8 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 	}
 	res.Merchant, res.Confidence.Merchant = extractMerchant(header, cats)
 
-	id, name, conf := categorize(header, lines, cats)
-	res.CategoryID, res.CategoryName, res.Confidence.Category = id, name, conf
+	m := ci.classifyMerchant(cats, header, lines, res.Merchant, opts.Rules)
+	res.CategoryID, res.CategoryName, res.Confidence.Category = m.ID, m.Name, m.Conf
 
 	summary, discount := extractSummary(lines)
 	if !summary.empty() {
@@ -117,6 +129,8 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 		res.DiscountTotal = ptr(o.discount)
 	}
 	res.NeedsManual = res.Amount == nil
+	// Kalemler nihai olduktan sonra: kalem kategorileri + fis kategorisi (isletme / oylama / fallback).
+	ci.applyCategories(&res, m, opts.Rules)
 	return res
 }
 
@@ -277,42 +291,6 @@ func cleanMerchant(l string) string {
 		l = string(r[:60])
 	}
 	return l
-}
-
-func categorize(header, all []string, cats []Category) (int, string, float64) {
-	headerText := foldTR(strings.Join(header, "\n"))
-	allText := foldTR(strings.Join(all, "\n"))
-
-	fallbackID := 0
-	for _, c := range cats {
-		if c.Name == fallbackCategory {
-			fallbackID = c.ID
-		}
-	}
-	bestID, bestName, bestScore := fallbackID, fallbackCategory, 0
-	for _, c := range cats {
-		score := 0
-		for _, kw := range c.Keywords {
-			k := foldTR(kw)
-			if containsWordFuzzy(headerText, k) {
-				score += 3 // Baslikta gecen marka daha guclu sinyaldir.
-			}
-			if containsWordFuzzy(allText, k) {
-				score++
-			}
-		}
-		if score > bestScore {
-			bestID, bestName, bestScore = c.ID, c.Name, score
-		}
-	}
-	switch {
-	case bestScore >= 3:
-		return bestID, bestName, 0.9
-	case bestScore > 0:
-		return bestID, bestName, 0.6
-	default:
-		return bestID, bestName, 0
-	}
 }
 
 // containsWord kelime sinirina saygi ile arar ("bp", "abpx" icinde eslesmesin).

@@ -134,12 +134,12 @@ func TestParseMultiLineVatDiscountReceipt(t *testing.T) {
 	if r.Amount == nil || *r.Amount != 180 {
 		t.Fatalf("amount = %v (resolveTotal must not replace it with the subtotal)", r.Amount)
 	}
-	want := []expenseItem{{"KAŞAR PEYNİR 500G", 120}, {"ÇAY", 30}, {"KARTON SÜT 1L", 25}, {"EKMEK", 10}}
+	want := []expenseItem{{Name: "KAŞAR PEYNİR 500G", Amount: 120}, {Name: "ÇAY", Amount: 30}, {Name: "KARTON SÜT 1L", Amount: 25}, {Name: "EKMEK", Amount: 10}}
 	if len(r.Items) != len(want) {
 		t.Fatalf("items = %+v", r.Items)
 	}
 	for i, w := range want {
-		if r.Items[i] != w {
+		if r.Items[i].Name != w.Name || r.Items[i].Amount != w.Amount {
 			t.Fatalf("item %d = %+v, want %+v (all = %+v)", i, r.Items[i], w, r.Items)
 		}
 	}
@@ -213,15 +213,15 @@ func TestQtyLines(t *testing.T) {
 		name, text string
 		want       []expenseItem
 	}{
-		{"unit price below item is info", "ÇAY 30,00\n2 ADET X 15,00\nTOPLAM 30,00", []expenseItem{{"ÇAY", 30}}},
-		{"net below item is info", "ÇAY 30,00\n2 ADET X 15,00 = 30,00\nTOPLAM 30,00", []expenseItem{{"ÇAY", 30}}},
-		{"name above, net on qty line", "ÇAY\n2 ADET X 15,00 = 30,00\nTOPLAM 30,00", []expenseItem{{"ÇAY", 30}}},
-		{"name above, net without equals", "ÇAY\n2 AD X 15,00   30,00\nTOPLAM 30,00", []expenseItem{{"ÇAY", 30}}},
-		{"name above, unit only", "ÇAY\n2 ADET X 15,00\nTOPLAM 30,00", []expenseItem{{"ÇAY", 30}}},
-		{"unit-priced item corrected to net", "ÇAY 15,00\n2 ADET X 15,00 = 30,00\nTOPLAM 30,00", []expenseItem{{"ÇAY", 30}}},
-		{"weighed item", "DOMATES\n0,535 KG X 40,00 = 21,40\nTOPLAM 21,40", []expenseItem{{"DOMATES", 21.40}}},
-		{"BIM qty line before item", "3X1,00\nPOPKEK MUZLU %08 3,00\nTOPLAM 3,00", []expenseItem{{"POPKEK MUZLU", 3}}},
-		{"1L is not a qty line", "1L SUT 34,50\nTOPLAM 34,50", []expenseItem{{"1L SUT", 34.50}}},
+		{"unit price below item is info", "ÇAY 30,00\n2 ADET X 15,00\nTOPLAM 30,00", []expenseItem{{Name: "ÇAY", Amount: 30}}},
+		{"net below item is info", "ÇAY 30,00\n2 ADET X 15,00 = 30,00\nTOPLAM 30,00", []expenseItem{{Name: "ÇAY", Amount: 30}}},
+		{"name above, net on qty line", "ÇAY\n2 ADET X 15,00 = 30,00\nTOPLAM 30,00", []expenseItem{{Name: "ÇAY", Amount: 30}}},
+		{"name above, net without equals", "ÇAY\n2 AD X 15,00   30,00\nTOPLAM 30,00", []expenseItem{{Name: "ÇAY", Amount: 30}}},
+		{"name above, unit only", "ÇAY\n2 ADET X 15,00\nTOPLAM 30,00", []expenseItem{{Name: "ÇAY", Amount: 30}}},
+		{"unit-priced item corrected to net", "ÇAY 15,00\n2 ADET X 15,00 = 30,00\nTOPLAM 30,00", []expenseItem{{Name: "ÇAY", Amount: 30}}},
+		{"weighed item", "DOMATES\n0,535 KG X 40,00 = 21,40\nTOPLAM 21,40", []expenseItem{{Name: "DOMATES", Amount: 21.40}}},
+		{"BIM qty line before item", "3X1,00\nPOPKEK MUZLU %08 3,00\nTOPLAM 3,00", []expenseItem{{Name: "POPKEK MUZLU", Amount: 3}}},
+		{"1L is not a qty line", "1L SUT 34,50\nTOPLAM 34,50", []expenseItem{{Name: "1L SUT", Amount: 34.50}}},
 	}
 	for _, c := range cases {
 		r := Parse("MARKET\n12.05.2026\n"+c.text, testCats, now)
@@ -230,7 +230,7 @@ func TestQtyLines(t *testing.T) {
 			continue
 		}
 		for i := range c.want {
-			if r.Items[i] != c.want[i] {
+			if r.Items[i].Name != c.want[i].Name || r.Items[i].Amount != c.want[i].Amount {
 				t.Errorf("%s: item %d = %+v, want %+v", c.name, i, r.Items[i], c.want[i])
 			}
 		}

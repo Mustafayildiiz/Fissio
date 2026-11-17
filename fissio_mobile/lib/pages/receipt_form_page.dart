@@ -38,8 +38,13 @@ class ModeSwitch extends StatelessWidget {
 
 /// Ürün satırı için düzenleme denetleyicileri.
 class _Row {
-  _Row(String name, double? amount)
-      : name = TextEditingController(text: name),
+  _Row(
+    String name,
+    double? amount, {
+    this.categoryId,
+    this.suggestedCategoryId,
+    this.review = false,
+  })  : name = TextEditingController(text: name),
         amount = TextEditingController(
           text: amount == null || amount == 0
               ? ''
@@ -47,6 +52,12 @@ class _Row {
         );
   final TextEditingController name;
   final TextEditingController amount;
+
+  /// Kalem kategorisi (otomatik atanır; kullanıcı değiştirebilir), taramada önerilen kategori ve
+  /// "güvenilir değil" bayrağı.
+  int? categoryId;
+  final int? suggestedCategoryId;
+  bool review;
 
   double get value {
     final s = amount.text.trim().replaceAll(' ', '');
@@ -95,7 +106,17 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         : (widget.initialDraft ?? ReceiptDraft());
     _merchant = TextEditingController(text: _draft.merchant);
     _note = TextEditingController(text: _draft.note);
-    _rows = _draft.items.map((i) => _Row(i.name, i.amount)).toList();
+    _rows = _draft.items
+        .map(
+          (i) => _Row(
+            i.name,
+            i.amount,
+            categoryId: i.categoryId,
+            suggestedCategoryId: i.suggestedCategoryId,
+            review: i.categoryReview,
+          ),
+        )
+        .toList();
     if (_rows.isEmpty) _rows.add(_Row('', null));
     if (appState.categories.isEmpty) appState.refresh();
   }
@@ -127,7 +148,32 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (final c in appState.categories) (c.id, c.name)],
       selected: _draft.categoryId,
     );
-    if (id != null) setState(() => _draft.categoryId = id);
+    if (id != null) _setCategory(id);
+  }
+
+  /// Fiş kategorisini kullanıcı seçti: "kontrol edin" uyarısı kalkar. Otomatik öneriden farklıysa
+  /// kayıtta sunucu bunu işletme için kişisel kural olarak öğrenir.
+  void _setCategory(int id) => setState(() {
+        _draft.categoryId = id;
+        _draft.categoryNeedsReview = false;
+      });
+
+  String? _categoryName(int? id) =>
+      appState.categories.where((x) => x.id == id).map((x) => x.name).firstOrNull;
+
+  Future<void> _pickItemCategory(int i) async {
+    final id = await showChoiceSheet<int>(
+      context,
+      title: 'Ürün kategorisi',
+      options: [for (final c in appState.categories) (c.id, c.name)],
+      selected: _rows[i].categoryId,
+    );
+    if (id != null) {
+      setState(() {
+        _rows[i].categoryId = id;
+        _rows[i].review = false;
+      });
+    }
   }
 
   /// Taslağın fotoğraflarını ve ayrıştırılan alanları kaybetmeden tara ekranına geçer.
@@ -166,7 +212,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     final items = [
       for (final r in _rows)
         if (r.name.text.trim().isNotEmpty || r.value > 0)
-          ExpenseItem(r.name.text.trim(), r.value),
+          ExpenseItem(
+            r.name.text.trim(),
+            r.value,
+            categoryId: r.categoryId,
+            suggestedCategoryId: r.suggestedCategoryId,
+          ),
     ];
     if (items.isEmpty || items.fold<double>(0, (s, i) => s + i.amount) <= 0) {
       showMessage(context, 'En az bir ürün ve tutar girin.');
@@ -239,9 +290,20 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                           return ListRow(
                             title: 'Kategori',
                             onTap: _pickCategory,
-                            trailing: Text(
-                              name ?? 'Seçin',
-                              style: FissioText.body(c, color: name == null ? c.mute : c.ink),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (name != null &&
+                                    _draft.categoryAutoAssigned &&
+                                    !_draft.categoryNeedsReview) ...[
+                                  const AutoBadge(),
+                                  const SizedBox(width: 8),
+                                ],
+                                Text(
+                                  name ?? 'Seçin',
+                                  style: FissioText.body(c, color: name == null ? c.mute : c.ink),
+                                ),
+                              ],
                             ),
                             chevron: true,
                           );
@@ -270,6 +332,14 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         maxLength: 500,
                       ),
                     ],
+                  ),
+                  CategoryReviewBanner(
+                    visible: _draft.categoryNeedsReview,
+                    candidates: [
+                      for (final cand in _draft.categoryCandidates)
+                        if (cand.id != _draft.categoryId) (cand.id, cand.name),
+                    ],
+                    onPick: _setCategory,
                   ),
                   const SizedBox(height: 22),
                   SectionLabel('Ürünler · ${_rows.length}'),
@@ -453,6 +523,24 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   }
 
   Widget _itemRow(FissioColors c, int i) {
+    final r = _rows[i];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _itemFields(c, i),
+        ListenableBuilder(
+          listenable: appState,
+          builder: (_, _) => ItemCategoryChip(
+            name: _categoryName(r.categoryId),
+            review: r.review,
+            onTap: () => _pickItemCategory(i),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _itemFields(FissioColors c, int i) {
     final r = _rows[i];
     return Row(
       children: [

@@ -87,7 +87,7 @@ KREDI KARTI  37,50`
 }
 
 func TestShortBrandNotFuzzy(t *testing.T) {
-	r := Parse("BIN MARKET\n12.05.2026\nTOPLAM 10,00", testCats, now)
+	r := Parse("BIN TICARET\n12.05.2026\nTOPLAM 10,00", testCats, now)
 	if r.CategoryName == "Market" {
 		t.Fatalf("'bin' must not match brand 'bim' (got %s)", r.CategoryName)
 	}

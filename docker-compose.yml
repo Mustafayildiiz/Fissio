@@ -54,6 +54,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev_only_change_me}
       OCR_SERVICE_URL: ${OCR_SERVICE_URL:-http://ocr:8080}
       OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+      CATEGORY_MIN_CONFIDENCE: ${CATEGORY_MIN_CONFIDENCE:-0.5}
     depends_on:
       postgres:
         condition: service_healthy

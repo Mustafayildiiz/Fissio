@@ -126,6 +126,15 @@ class ApiClient {
     return j.map((e) => Category.fromJson(e)).toList();
   }
 
+  /// Kullanıcının kategori düzeltmelerinden öğrenilen kişisel kurallar (yönetim arayüzü için altyapı).
+  Future<List<CategoryRule>> categoryRules() async {
+    final j = await _send('GET', _expense, '/category-rules') as List;
+    return j.map((e) => CategoryRule.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<void> deleteCategoryRule(int id) =>
+      _send('DELETE', _expense, '/category-rules/$id');
+
   Future<List<Expense>> expenses() async {
     final j = await _send(
       'GET',

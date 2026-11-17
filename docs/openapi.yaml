@@ -32,9 +32,33 @@ components:
         password: { type: string }
     Item:
       type: object
+      description: >-
+        Fiş kalemi. Kalem kategorisi opsiyoneldir (0/yok = atanmamış); kayıtta yalnızca
+        name, amount ve category_id saklanır. category_confidence / category_source /
+        category_review yalnızca `ParsedReceipt` içinde döner; suggested_category_id yalnızca
+        istekte kullanılır.
       properties:
         name: { type: string }
         amount: { type: number }
+        category_id: { type: integer, description: Kalem kategorisi (otomatik atanır, kullanıcı değiştirebilir) }
+        category_name: { type: string }
+        category_confidence:
+          type: number
+          description: Otomatik kalem kategorisi güveni (0-1); yalnızca ayrıştırma çıktısında.
+        category_source:
+          type: string
+          enum: [rule, keyword, merchant, fallback]
+          description: >-
+            rule = kullanıcının önceki düzeltmesi, keyword = ürün sözlüğü, merchant = sözlükte yok,
+            işletme kategorisi miras alındı, fallback = güven yetersiz ("Diğer").
+        category_review:
+          type: boolean
+          description: true ise kalem kategorisi güvenilir değil ("Diğer"e düşüldü); istemci kontrol ettirmeli.
+        suggested_category_id:
+          type: integer
+          description: >-
+            İstek: tarama sırasında önerilen kalem kategorisi. category_id'den farklıysa düzeltme
+            sayılır ve kullanıcının kişisel kuralı olarak öğrenilir.
     ExpenseInput:
       type: object
       properties:
@@ -42,6 +66,11 @@ components:
         amount: { type: number }
         date: { type: string, format: date }
         category_id: { type: integer }
+        suggested_category_id:
+          type: integer
+          description: >-
+            Tarama sırasında önerilen fiş kategorisi. category_id'den farklıysa kullanıcı düzeltmesi
+            sayılır ve işletme adı için kişisel kural olarak saklanır (sonraki taramalarda uygulanır).
         note: { type: string }
         items:
           type: array
@@ -57,6 +86,16 @@ components:
               type: array
               description: Fişe bağlı fotoğraf kimlikleri (sıralı); yoksa [].
               items: { type: integer, format: int64 }
+    CategoryRule:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { type: string, enum: [merchant, item] }
+        pattern: { type: string, description: Normalize edilmiş anahtar (küçük harf, ASCII, rakam/birim ayıklanmış) }
+        category_id: { type: integer }
+        category_name: { type: string }
+        hits: { type: integer, description: Kuralın kaç kez doğrulandığı/güncellendiği }
+        updated_at: { type: string, format: date-time }
     Category:
       type: object
       properties:
@@ -73,6 +112,26 @@ components:
         date: { type: string, nullable: true }
         category_id: { type: integer }
         category_name: { type: string }
+        category_source:
+          type: string
+          enum: [rule, merchant, keyword, items, fallback]
+          description: >-
+            rule = kullanıcı kuralı, merchant = fiş başlığında tanınan işletme, keyword = yalnızca fiş
+            gövdesinde zayıf eşleşme, items = kalemlerin ağırlıklı oylaması, fallback = güven yetersiz → "Diğer".
+        category_needs_review:
+          type: boolean
+          description: >-
+            Kategori güveni düşük ya da "Diğer"e düşüldü; istemci kategoriyi varsayılan seçili getirir ama
+            kullanıcıya kontrol ettirir. `needs_review`'dan (toplam uyuşmazlığı) bağımsızdır.
+        category_candidates:
+          type: array
+          description: Hızlı seçim için en fazla 3 aday kategori (puana göre azalan).
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              score: { type: number }
         items:
           type: array
           items: { $ref: '#/components/schemas/Item' }
@@ -209,6 +268,9 @@ paths:
     get:
       tags: [expense]
       summary: Kategori listesi
+      description: >-
+        Sabit taksonomi: Market / Gıda, Restoran / Kafe, Akaryakıt / Ulaşım, Giyim, Elektronik,
+        Sağlık / Eczane, Fatura / Abonelik, Ev / Yaşam, Kişisel Bakım, Eğlence / Hobi, Diğer.
       security: [{ bearer: [] }]
       responses:
         '200':
@@ -218,6 +280,32 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Category' }
+  /category-rules:
+    get:
+      tags: [expense]
+      summary: Öğrenilen kişisel kategori kuralları
+      description: >-
+        Kullanıcının, önerilen kategoriyi değiştirerek kaydettiği fiş/kalemlerden öğrenilen kurallar
+        (işletme adı ya da kalem adı → kategori). Sonraki tarama/ayrıştırmalarda sözlüğe göre önceliklidir.
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: En yeni önce, en fazla 500 kural
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CategoryRule' }
+  /category-rules/{id}:
+    delete:
+      tags: [expense]
+      summary: Kişisel kuralı sil
+      security: [{ bearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Silindi }
+        '404': { description: Kural yok ya da başkasına ait }
   /receipts/parse:
     post:
       tags: [expense]
@@ -262,7 +350,15 @@ paths:
                   items: { type: string, format: binary }
                 engine: { type: string, enum: [paddleocr, custom] }
       responses:
-        '200': { description: '`ocr` (OcrResult) ve `parsed` (ParsedReceipt) döner' }
+        '200':
+          description: OCR sonucu ve ayrıştırılmış fiş (fiş + kalem kategorileri dahil)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ocr: { $ref: '#/components/schemas/OcrResult' }
+                  parsed: { $ref: '#/components/schemas/ParsedReceipt' }
         '400': { description: Dosya yok, boş veya 15 MB'tan büyük }
         '401': { description: Token geçersiz }
         '502': { description: OCR servisi yanıt vermedi }

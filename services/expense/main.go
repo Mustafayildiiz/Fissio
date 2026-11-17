@@ -53,6 +53,8 @@ func main() {
 	api.GET("/expenses/:id/images/:imageId", h.getImage)
 	api.DELETE("/expenses/:id/images/:imageId", h.deleteImage)
 	api.GET("/reports/summary", h.summary)
+	api.GET("/category-rules", h.listRules)
+	api.DELETE("/category-rules/:id", h.deleteRule)
 
 	port := os.Getenv("PORT")
 	if port == "" {

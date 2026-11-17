@@ -260,17 +260,7 @@ class AppState extends ChangeNotifier {
   /// başarısız olsa da korunur; fotoğraflar yüklenebildiyse true döner (yüklenemediyse çağıran
   /// kullanıcıya "fotoğraflar yüklenemedi, detaydan tekrar ekleyin" der).
   Future<bool> saveDraft(ReceiptDraft d) async {
-    final body = {
-      'merchant': d.merchant,
-      'amount': d.savedAmount,
-      'date':
-          '${d.date.year.toString().padLeft(4, '0')}-'
-          '${d.date.month.toString().padLeft(2, '0')}-'
-          '${d.date.day.toString().padLeft(2, '0')}',
-      'category_id': d.categoryId,
-      'note': d.note,
-      'items': d.items.map((i) => i.toJson()).toList(),
-    };
+    final body = d.toRequestBody();
     final saved = d.id == null
         ? await api.createExpense(body)
         : await api.updateExpense(d.id!, body);

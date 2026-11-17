@@ -73,7 +73,12 @@ func (h *handler) parseReceipt(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	c.JSON(http.StatusOK, Parse(in.Text, cats, time.Now()))
+	rules, err := loadRules(h.db, c.GetInt64("userID"))
+	if err != nil {
+		serverError(c)
+		return
+	}
+	c.JSON(http.StatusOK, ParseWith(in.Text, cats, time.Now(), ParseOptions{Rules: rules}))
 }
 
 // scanReceipt: Resolves the active OcrEngine via Strategy Factory, extracts text from
@@ -162,16 +167,32 @@ func (h *handler) scanReceipt(c *gin.Context) {
 		return
 	}
 
-	parsed := Parse(agg.RawText, cats, time.Now())
+	rules, err := loadRules(h.db, c.GetInt64("userID"))
+	if err != nil {
+		serverError(c)
+		return
+	}
+	parsed := ParseWith(agg.RawText, cats, time.Now(), ParseOptions{Rules: rules})
 	c.JSON(http.StatusOK, gin.H{
 		"ocr":    agg,
 		"parsed": parsed,
 	})
 }
 
+// expenseItem hem ayristirma ciktisinin hem istegin hem de JSONB'nin kalem tipidir. Kategori alanlari
+// opsiyoneldir (eski satirlar sifir degerle okunur). Yalnizca {name, amount, category_id} saklanir
+// (bkz. itemsForStorage); guven/kaynak/inceleme alanlari ayristirma ciktisina, suggested_category_id
+// yalnizca istege aittir (kullanici duzeltmesinden kural ogrenmek icin).
 type expenseItem struct {
-	Name   string  `json:"name"`
-	Amount float64 `json:"amount"`
+	Name               string  `json:"name"`
+	Amount             float64 `json:"amount"`
+	CategoryID         int     `json:"category_id,omitempty"`
+	CategoryName       string  `json:"category_name,omitempty"`
+	CategoryConfidence float64 `json:"category_confidence,omitempty"`
+	CategorySource     string  `json:"category_source,omitempty"`
+	CategoryReview     bool    `json:"category_review,omitempty"`
+
+	SuggestedCategoryID int `json:"suggested_category_id,omitempty"`
 }
 
 type expenseInput struct {
@@ -181,6 +202,61 @@ type expenseInput struct {
 	CategoryID int           `json:"category_id"`
 	Note       string        `json:"note"`
 	Items      []expenseItem `json:"items"`
+	// SuggestedCategoryID: tarama sirasinda otomatik onerilen fis kategorisi. Secilenden farkliysa
+	// kullanici duzeltmesi sayilir ve kisisel kural olarak ogrenilir.
+	SuggestedCategoryID int `json:"suggested_category_id"`
+}
+
+// itemsForStorage kalemleri kalici biciminde ({name, amount, category_id}) dondurur.
+func itemsForStorage(items []expenseItem) []expenseItem {
+	out := make([]expenseItem, len(items))
+	for i, it := range items {
+		out[i] = expenseItem{Name: it.Name, Amount: it.Amount, CategoryID: it.CategoryID}
+	}
+	return out
+}
+
+// itemCategoriesValid: kalem kategori id'leri (0 = atanmamis) mevcut kategorilerden biri olmali.
+func itemCategoriesValid(items []expenseItem, cats []Category) bool {
+	known := map[int]bool{}
+	for _, c := range cats {
+		known[c.ID] = true
+	}
+	for _, it := range items {
+		if it.CategoryID != 0 && !known[it.CategoryID] {
+			return false
+		}
+	}
+	return true
+}
+
+// fillItemCategories kalemlerin category_name alanini kategori tablosundan doldurur.
+func (h *handler) fillItemCategories(out []expenseOut) error {
+	need := false
+	for _, e := range out {
+		for _, it := range e.Items {
+			if it.CategoryID != 0 {
+				need = true
+			}
+		}
+	}
+	if !need {
+		return nil
+	}
+	cats, err := h.loadCategories()
+	if err != nil {
+		return err
+	}
+	names := map[int]string{}
+	for _, c := range cats {
+		names[c.ID] = c.Name
+	}
+	for i := range out {
+		for j := range out[i].Items {
+			out[i].Items[j].CategoryName = names[out[i].Items[j].CategoryID]
+		}
+	}
+	return nil
 }
 
 type expenseOut struct {
@@ -218,7 +294,8 @@ func (in *expenseInput) validate() (time.Time, string) {
 	}
 	for i := range in.Items {
 		it := &in.Items[i]
-		if len([]rune(it.Name)) > 100 || math.IsNaN(it.Amount) || math.IsInf(it.Amount, 0) || it.Amount < 0 || it.Amount >= 1e10 {
+		if len([]rune(it.Name)) > 100 || math.IsNaN(it.Amount) || math.IsInf(it.Amount, 0) || it.Amount < 0 || it.Amount >= 1e10 ||
+			it.CategoryID < 0 || it.SuggestedCategoryID < 0 {
 			return time.Time{}, "invalid item"
 		}
 		it.Amount = math.Round(it.Amount*100) / 100
@@ -270,9 +347,18 @@ func (h *handler) createExpense(c *gin.Context) {
 		badRequest(c, msg)
 		return
 	}
-	itemsJSON, _ := json.Marshal(in.Items)
+	if !h.itemCategoriesOK(c, in.Items) {
+		return
+	}
+	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
+	tx, err := h.db.Begin()
+	if err != nil {
+		serverError(c)
+		return
+	}
+	defer tx.Rollback()
 	var id int64
-	err := h.db.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO expense.expenses (user_id, merchant, amount, spent_at, category_id, note, items)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
 		c.GetInt64("userID"), in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON)).Scan(&id)
@@ -281,6 +367,10 @@ func (h *handler) createExpense(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		serverError(c)
+		return
+	}
+	if err := saveRules(tx, c.GetInt64("userID"), collectRuleUpdates(in)); err != nil || tx.Commit() != nil {
 		serverError(c)
 		return
 	}
@@ -297,7 +387,26 @@ func (h *handler) respondExpense(c *gin.Context, status int, id int64) {
 		serverError(c)
 		return
 	}
-	c.JSON(status, e)
+	one := []expenseOut{e}
+	if h.fillItemCategories(one) != nil {
+		serverError(c)
+		return
+	}
+	c.JSON(status, one[0])
+}
+
+// itemCategoriesOK kalem kategori id'lerini dogrular; gecersizse 400 yazar ve false doner.
+func (h *handler) itemCategoriesOK(c *gin.Context, items []expenseItem) bool {
+	cats, err := h.loadCategories()
+	if err != nil {
+		serverError(c)
+		return false
+	}
+	if !itemCategoriesValid(items, cats) {
+		badRequest(c, "unknown category_id")
+		return false
+	}
+	return true
 }
 
 func (h *handler) getExpense(c *gin.Context) {
@@ -348,7 +457,7 @@ func (h *handler) listExpenses(c *gin.Context) {
 		}
 		out = append(out, e)
 	}
-	if rows.Err() != nil {
+	if rows.Err() != nil || h.fillItemCategories(out) != nil {
 		serverError(c)
 		return
 	}
@@ -371,8 +480,17 @@ func (h *handler) updateExpense(c *gin.Context) {
 		badRequest(c, msg)
 		return
 	}
-	itemsJSON, _ := json.Marshal(in.Items)
-	res, err := h.db.Exec(
+	if !h.itemCategoriesOK(c, in.Items) {
+		return
+	}
+	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
+	tx, err := h.db.Begin()
+	if err != nil {
+		serverError(c)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6
 		 WHERE id=$7 AND user_id=$8`,
 		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"))
@@ -386,6 +504,10 @@ func (h *handler) updateExpense(c *gin.Context) {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "expense not found"})
+		return
+	}
+	if err := saveRules(tx, c.GetInt64("userID"), collectRuleUpdates(in)); err != nil || tx.Commit() != nil {
+		serverError(c)
 		return
 	}
 	h.respondExpense(c, http.StatusOK, id)

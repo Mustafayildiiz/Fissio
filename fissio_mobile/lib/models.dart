@@ -8,6 +8,32 @@ class Category {
       Category(j['id'] as int, j['name'] as String);
 }
 
+/// Kullanıcının bir düzeltmesinden öğrenilen kişisel kategori kuralı (işletme ya da kalem adı → kategori).
+class CategoryRule {
+  final int id;
+  final String kind; // 'merchant' | 'item'
+  final String pattern;
+  final int categoryId;
+  final String categoryName;
+  final int hits;
+  const CategoryRule({
+    required this.id,
+    required this.kind,
+    required this.pattern,
+    required this.categoryId,
+    required this.categoryName,
+    required this.hits,
+  });
+  factory CategoryRule.fromJson(Map<String, dynamic> j) => CategoryRule(
+    id: (j['id'] as num).toInt(),
+    kind: (j['kind'] as String?) ?? 'item',
+    pattern: (j['pattern'] as String?) ?? '',
+    categoryId: (j['category_id'] as num).toInt(),
+    categoryName: (j['category_name'] as String?) ?? '',
+    hits: (j['hits'] as num?)?.toInt() ?? 1,
+  );
+}
+
 class UserProfile {
   final String id;
   final String name;
@@ -53,13 +79,63 @@ class UserProfile {
   };
 }
 
+/// Otomatik kategorilendirmede aday kategori (sunucu `category_candidates`); hızlı seçim için.
+class CategoryCandidate {
+  final int id;
+  final String name;
+  final double score;
+  const CategoryCandidate(this.id, this.name, this.score);
+  factory CategoryCandidate.fromJson(Map<String, dynamic> j) => CategoryCandidate(
+    (j['id'] as num).toInt(),
+    (j['name'] as String?) ?? '',
+    (j['score'] as num?)?.toDouble() ?? 0,
+  );
+}
+
 class ExpenseItem {
   String name;
   double amount;
-  ExpenseItem(this.name, this.amount);
-  factory ExpenseItem.fromJson(Map<String, dynamic> j) =>
-      ExpenseItem(j['name'] as String, (j['amount'] as num).toDouble());
-  Map<String, dynamic> toJson() => {'name': name, 'amount': amount};
+
+  /// Kalem kategorisi (otomatik atanır, kullanıcı değiştirebilir); null = atanmamış.
+  int? categoryId;
+  String? categoryName;
+
+  /// Taramada otomatik önerilen kalem kategorisi. Kayıtta `categoryId`'den farklıysa sunucu bunu
+  /// kullanıcının düzeltmesi sayıp kişisel kural olarak öğrenir.
+  int? suggestedCategoryId;
+
+  /// Otomatik atamanın güveni (0-1) ve "güvenilir değil" bayrağı (yalnızca tarama sonucunda).
+  double? categoryConfidence;
+  bool categoryReview;
+
+  ExpenseItem(
+    this.name,
+    this.amount, {
+    this.categoryId,
+    this.categoryName,
+    this.suggestedCategoryId,
+    this.categoryConfidence,
+    this.categoryReview = false,
+  });
+
+  factory ExpenseItem.fromJson(Map<String, dynamic> j) {
+    final cid = (j['category_id'] as num?)?.toInt();
+    return ExpenseItem(
+      j['name'] as String,
+      (j['amount'] as num).toDouble(),
+      categoryId: cid != null && cid > 0 ? cid : null,
+      categoryName: j['category_name'] as String?,
+      categoryConfidence: (j['category_confidence'] as num?)?.toDouble(),
+      categoryReview: (j['category_review'] as bool?) ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'amount': amount,
+    if (categoryId != null) 'category_id': categoryId,
+    if (suggestedCategoryId != null) 'suggested_category_id': suggestedCategoryId,
+  };
 }
 
 class Expense {
@@ -92,8 +168,8 @@ class Expense {
     merchant: j['merchant'] as String,
     amount: (j['amount'] as num).toDouble(),
     date: DateTime.parse(j['date'] as String),
-    categoryId: j['category_id'] as int,
-    categoryName: j['category_name'] as String,
+    categoryId: (j['category_id'] as num?)?.toInt() ?? 0,
+    categoryName: (j['category_name'] as String?) ?? 'Diğer',
     note: (j['note'] as String?) ?? '',
     items: ((j['items'] as List?) ?? [])
         .map((e) => ExpenseItem.fromJson(e))
@@ -116,6 +192,16 @@ class ReceiptDraft {
   int? id; // null ise yeni fiş
   String merchant;
   int? categoryId;
+
+  /// Taramada otomatik önerilen fiş kategorisi; kayıtta `categoryId`'den farklıysa kullanıcı düzeltmesi
+  /// sayılır ve sunucuda işletme için kişisel kural olarak saklanır.
+  int? suggestedCategoryId;
+
+  /// Otomatik kategori güvenilir değil / "Diğer"e düşüldü (sunucu `category_needs_review`). Kullanıcı bir
+  /// kategori seçince false olur. [categorySource]: rule | merchant | keyword | items | fallback.
+  bool categoryNeedsReview;
+  String? categorySource;
+  List<CategoryCandidate> categoryCandidates;
   DateTime date;
   String note;
   List<ExpenseItem> items;
@@ -135,6 +221,10 @@ class ReceiptDraft {
     this.id,
     this.merchant = '',
     this.categoryId,
+    this.suggestedCategoryId,
+    this.categoryNeedsReview = false,
+    this.categorySource,
+    this.categoryCandidates = const [],
     DateTime? date,
     this.note = '',
     List<ExpenseItem>? items,
@@ -150,10 +240,38 @@ class ReceiptDraft {
   /// Sunucuya gönderilen fiş tutarı.
   double get savedAmount => netTotal(itemsTotal, discount);
 
+  /// Kategori otomatik atandı ve kullanıcı henüz değiştirmedi.
+  bool get categoryAutoAssigned =>
+      categorySource != null && suggestedCategoryId != null && categoryId == suggestedCategoryId;
+
+  /// POST/PUT /expenses gövdesi. Fiş ve kalem `suggested_category_id`'leri, kullanıcı otomatik
+  /// kategoriyi değiştirdiyse sunucunun kişisel kural öğrenmesi içindir.
+  Map<String, dynamic> toRequestBody() => {
+    'merchant': merchant,
+    'amount': savedAmount,
+    'date':
+        '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}',
+    'category_id': categoryId,
+    if (suggestedCategoryId != null) 'suggested_category_id': suggestedCategoryId,
+    'note': note,
+    'items': items.map((i) => i.toJson()).toList(),
+  };
+
   factory ReceiptDraft.from(Expense e) {
     final items = e.items.isEmpty
         ? [ExpenseItem(e.merchant.isEmpty ? 'Toplam' : e.merchant, e.amount)]
-        : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList();
+        : e.items
+              .map(
+                (i) => ExpenseItem(
+                  i.name,
+                  i.amount,
+                  categoryId: i.categoryId,
+                  categoryName: i.categoryName,
+                ),
+              )
+              .toList();
     // İndirim ayrı saklanmaz: kayıtlı tutar kalem toplamından küçükse fark indirimdir.
     final gross = items.fold<double>(0, (s, i) => s + i.amount);
     final diff = ((gross - e.amount) * 100).round() / 100;
@@ -173,10 +291,28 @@ class ReceiptDraft {
     receiptTotal: p.amount,
     // Kalem yoksa tek satır zaten fiş toplamıdır; indirim yalnızca kalemlerden düşülür.
     discount: p.items.isNotEmpty ? p.discountTotal : 0,
+    // Otomatik atanan kategori varsayılan seçili gelir; kullanıcı değiştirebilir.
     categoryId: p.categoryId > 0 ? p.categoryId : null,
+    suggestedCategoryId: p.categoryId > 0 ? p.categoryId : null,
+    categoryNeedsReview: p.categoryNeedsReview,
+    categorySource: p.categorySource,
+    categoryCandidates: p.categoryCandidates,
     date: p.date ?? DateTime.now(),
     items: p.items.isNotEmpty
-        ? p.items.map((i) => ExpenseItem(i.name, i.amount)).toList()
+        ? p.items
+              .map(
+                (i) => ExpenseItem(
+                  i.name,
+                  i.amount,
+                  categoryId: i.categoryId,
+                  categoryName: i.categoryName,
+                  // Kalem kategorisi de öneridir: değiştirilirse kişisel kural olarak öğrenilir.
+                  suggestedCategoryId: i.categoryId,
+                  categoryConfidence: i.categoryConfidence,
+                  categoryReview: i.categoryReview,
+                ),
+              )
+              .toList()
         : (p.amount != null && p.amount! > 0
               ? [
                   ExpenseItem(
@@ -206,6 +342,12 @@ class ParsedReceipt {
   /// Kalem toplamından düşülecek indirim (`discount_total`; yoksa 0).
   final double discountTotal;
 
+  /// Otomatik fiş kategorisi: kaynak (rule|merchant|keyword|items|fallback), "kontrol edin" bayrağı
+  /// (`needsReview`'dan, yani toplam uyuşmazlığından AYRI) ve hızlı seçim adayları.
+  final String? categorySource;
+  final bool categoryNeedsReview;
+  final List<CategoryCandidate> categoryCandidates;
+
   const ParsedReceipt({
     required this.merchant,
     this.amount,
@@ -217,6 +359,9 @@ class ParsedReceipt {
     this.needsReview = false,
     this.itemsTotal,
     this.discountTotal = 0,
+    this.categorySource,
+    this.categoryNeedsReview = false,
+    this.categoryCandidates = const [],
   });
 
   factory ParsedReceipt.fromJson(Map<String, dynamic> j) => ParsedReceipt(
@@ -232,5 +377,10 @@ class ParsedReceipt {
     needsReview: (j['needs_review'] as bool?) ?? false,
     itemsTotal: (j['items_total'] as num?)?.toDouble(),
     discountTotal: (j['discount_total'] as num?)?.toDouble() ?? 0,
+    categorySource: j['category_source'] as String?,
+    categoryNeedsReview: (j['category_needs_review'] as bool?) ?? false,
+    categoryCandidates: ((j['category_candidates'] as List?) ?? [])
+        .map((e) => CategoryCandidate.fromJson(e as Map<String, dynamic>))
+        .toList(),
   );
 }

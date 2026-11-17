@@ -370,7 +370,18 @@ class _ListReceipt extends StatelessWidget {
         GroupedCard(
           children: [
             if (e.items.isEmpty) _row(c, 'Toplam kalem', e.amount),
-            for (final it in e.items) _row(c, _itemName(it), it.amount),
+            for (final it in e.items)
+              _row(
+                c,
+                _itemName(it),
+                it.amount,
+                // Kalem kategorisi fiş kategorisinden farklıysa (karma fiş) küçük etiket olarak göster.
+                category: it.categoryName != null &&
+                        it.categoryId != null &&
+                        it.categoryId != e.categoryId
+                    ? it.categoryName
+                    : null,
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 14),
               child: Row(
@@ -418,15 +429,31 @@ class _ListReceipt extends StatelessWidget {
     );
   }
 
-  Widget _row(FissioColors c, String name, double amount) => Padding(
+  Widget _row(
+    FissioColors c,
+    String name,
+    double amount, {
+    String? category,
+  }) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 13),
     child: Row(
       children: [
         Expanded(
-          child: Text(
-            name,
-            overflow: TextOverflow.ellipsis,
-            style: FissioText.body(c),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                overflow: TextOverflow.ellipsis,
+                style: FissioText.body(c),
+              ),
+              if (category != null)
+                Text(
+                  category,
+                  overflow: TextOverflow.ellipsis,
+                  style: FissioText.body(c, size: 12, color: c.mute),
+                ),
+            ],
           ),
         ),
         const SizedBox(width: 12),
