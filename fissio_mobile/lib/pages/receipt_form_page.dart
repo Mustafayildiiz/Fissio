@@ -84,6 +84,9 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
 
   double get _total => _rows.fold(0.0, (s, r) => s + r.value);
 
+  /// Kaydedilecek tutar: kalemler − fişteki indirim.
+  double get _net => netTotal(_total, _draft.discount);
+
   @override
   void initState() {
     super.initState();
@@ -272,8 +275,9 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                   SectionLabel('Ürünler · ${_rows.length}'),
                   const SizedBox(height: 8),
                   TotalMismatchBanner(
-                    itemsTotal: _total,
+                    itemsTotal: _net,
                     receiptTotal: _draft.receiptTotal,
+                    discount: _draft.discount,
                   ),
                   GroupedCard(
                     children: [
@@ -322,6 +326,19 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (!keyboard) ...[
+                    if (_draft.discount > 0) ...[
+                      Row(
+                        children: [
+                          Text('İndirim', style: FissioText.body(c, size: 14, color: c.mute)),
+                          const Spacer(),
+                          Text(
+                            '−${fmtMoney(_draft.discount)}',
+                            style: FissioText.body(c, size: 14, color: c.mute),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                    ],
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.baseline,
                       textBaseline: TextBaseline.alphabetic,
@@ -332,7 +349,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         ),
                         const Spacer(),
                         Text(
-                          fmtMoney(_total),
+                          fmtMoney(_net),
                           style: FissioText.money(c, size: 20, weight: FontWeight.w800),
                         ),
                       ],

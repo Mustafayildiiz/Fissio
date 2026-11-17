@@ -33,36 +33,127 @@ func sameItem(a, b expenseItem) bool {
 	return levenshtein(na, nb) <= limit
 }
 
-// reconcileItems, kalem fiyatlari toplamini fis toplamiyla karsilastirir.
+// Reconciliation, kalemler toplami ile fis toplaminin mutabakat sonucudur.
+type Reconciliation struct {
+	Status string `json:"status"` // ok | discount_applied | duplicate_removed | mismatch
+	// Diff: (kalemler - indirim) - fis toplami, duzeltmelerden SONRA (0 = tutarli).
+	Diff float64 `json:"diff"`
+	// SuspectIndex: farki tek basina aciklayan (ama kanit olmadigi icin silinmeyen) kalem.
+	SuspectIndex *int   `json:"suspect_index,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+const (
+	recOK        = "ok"
+	recDiscount  = "discount_applied"
+	recDuplicate = "duplicate_removed"
+	recMismatch  = "mismatch"
+)
+
+type reconcileOutcome struct {
+	items       []expenseItem
+	needsReview bool
+	itemsTotal  *float64
+	discount    float64 // kalemlerden dusulecek indirim (0 = yok / kalemlere zaten yansimis)
+	info        *Reconciliation
+}
+
+// reconcileItems, indirimsiz mutabakatin kisa yoludur.
+func reconcileItems(items []expenseItem, total *float64) ([]expenseItem, bool, *float64) {
+	o := reconcile(items, total, 0, nil)
+	return o.items, o.needsReview, o.itemsTotal
+}
+
+// reconcile, kalem fiyatlari toplamini (indirim dusulerek) fis toplamiyla karsilastirir.
 //
-//   - Fark yoksa (veya karsilastirilacak kalem/toplam yoksa) bayrak yok.
-//   - Kalemler fazla ve fark bir kalemin fiyatina esitse, YALNIZCA bitisik, ayni fiyatli ve benzer
-//     adli (cift okuma kaniti olan) kalem silinir. Kanit yoksa silinmez; okunamayan bir kalem
-//     ya da indirim satiri yuzunden gercek bir kalem sessizce kaybolmasin.
+//   - Fark yoksa bayrak yok (indirim kullanildiysa status=discount_applied).
+//   - Kalemler fazla ve fark TEK bir kalemin fiyatina esitse, yalnizca cift okuma kaniti varsa
+//     silinir: bitisik, ayni fiyatli, benzer adli kalem ya da adi ozet etiketine benzeyen sizinti.
+//     Kanit yoksa silinmez (okunamayan bir kalem ya da indirim yuzunden gercek kalem kaybolmasin),
+//     supheli kalem SuspectIndex ile raporlanir.
+//   - Kalemler eksikse ve fark atlanan bir etiketli satira ya da tek bir kalemin fiyatina
+//     (gozden kacan ikinci adet) esitse gerekce raporlanir; tahminle kalem eklenmez.
 //   - Fark kapanmazsa needsReview=true ve hesaplanan kalem toplami doner.
-func reconcileItems(items []expenseItem, total *float64) (out []expenseItem, needsReview bool, itemsTotal *float64) {
+func reconcile(items []expenseItem, total *float64, discount float64, skipped []expenseItem) reconcileOutcome {
+	o := reconcileOutcome{items: items, discount: discount}
 	if total == nil || len(items) == 0 {
-		return items, false, nil
+		return o
 	}
 	sum := sumItems(items)
-	diff := round2(sum - *total)
-	if math.Abs(diff) < 0.005 {
-		return items, false, nil
+	if discount > 0 && approxEq(sum, *total) {
+		// Indirim satirlari kalem tutarlarina zaten yansitilmis (kalemler net yazilmis).
+		o.discount = 0
+		o.info = &Reconciliation{Status: recOK, Reason: "discount_already_in_items"}
+		return o
 	}
+	diff := round2(sum - discount - *total)
+	if approxEq(diff, 0) {
+		status := recOK
+		if discount > 0 {
+			status = recDiscount
+		}
+		o.info = &Reconciliation{Status: status}
+		return o
+	}
+	info := &Reconciliation{Status: recMismatch, Diff: diff}
 	if diff > 0 {
-		for i := 1; i < len(items); i++ {
-			if math.Abs(items[i].Amount-diff) < 0.005 && sameItem(items[i], items[i-1]) {
-				cleaned := append(append([]expenseItem{}, items[:i]...), items[i+1:]...)
-				newSum := sumItems(cleaned)
-				if math.Abs(round2(newSum-*total)) < 0.005 {
-					return cleaned, false, nil
-				}
-				items, sum = cleaned, newSum
+		if i := duplicateToRemove(items, diff); i >= 0 {
+			removed := items[i].Name
+			o.items = append(append([]expenseItem{}, items[:i]...), items[i+1:]...)
+			o.info = &Reconciliation{Status: recDuplicate, Reason: "removed_duplicate: " + removed}
+			return o
+		}
+		if i := uniqueAmountIndex(items, diff); i >= 0 {
+			info.SuspectIndex = &i
+			info.Reason = "excess_equals_item"
+		}
+	} else {
+		missing := -diff
+		for _, s := range skipped {
+			if approxEq(s.Amount, missing) {
+				info.Reason = "missing_equals_skipped_line: " + s.Name
 				break
 			}
 		}
+		if info.Reason == "" {
+			if i := uniqueAmountIndex(items, missing); i >= 0 {
+				info.SuspectIndex = &i
+				info.Reason = "missing_equals_item"
+			}
+		}
 	}
-	return items, true, &sum
+	o.needsReview, o.itemsTotal, o.info = true, &sum, info
+	return o
+}
+
+// duplicateToRemove, fiyati diff'e esit ve cift okuma kaniti olan kalemin indeksini dondurur (-1: yok).
+func duplicateToRemove(items []expenseItem, diff float64) int {
+	for i := range items {
+		if !approxEq(items[i].Amount, diff) {
+			continue
+		}
+		if i > 0 && sameItem(items[i], items[i-1]) {
+			return i
+		}
+		if strong, _ := nonItemLabel(items[i].Name); strong {
+			return i // ozet satiri kalem olarak sizmis
+		}
+	}
+	return -1
+}
+
+// uniqueAmountIndex, fiyati v olan TEK kalemin indeksini dondurur (yoksa ya da birden fazlaysa -1).
+func uniqueAmountIndex(items []expenseItem, v float64) int {
+	found := -1
+	for i, it := range items {
+		if approxEq(it.Amount, v) {
+			if found >= 0 {
+				return -1
+			}
+			found = i
+		}
+	}
+	return found
 }
 
 // resolveTotal, fisin alt blogundaki tutarlardan tutarli bir toplam bulur ve etiket/tutar sutunlari
@@ -71,13 +162,15 @@ func reconcileItems(items []expenseItem, total *float64) (out []expenseItem, nee
 //   - kalemlerin toplami alt blokta bir tutara esitse o tutar toplamdir.
 //
 // Mevcut toplam zaten tutarliysa degismez. Yalnizca toplam/KDV etiketli ilk satirdan itibaren olan odeme blogu kullanilir.
-func resolveTotal(lines []string, items []expenseItem, current *float64) (float64, bool) {
+// ARA TOPLAM ve INDIRIM satirlarinin tutarlari havuza girmez: indirimli fiste kalem toplami ara
+// toplama esittir ve dogru (indirimli) toplami ezerdi. Kalem toplami indirim dusulerek karsilastirilir.
+func resolveTotal(lines []string, items []expenseItem, discount float64, current *float64) (float64, bool) {
 	// Yalnizca toplam/KDV etiketli ilk satirdan itibaren olan odeme blogu: kalem fiyatlari
 	// tesadufen odenen-para ustu iliskisini saglayabilir (5,00 + 32,50 = 37,50).
 	start := -1
 	for i, l := range lines {
 		f := foldTR(l)
-		if hasKeyword(l, "toplam", fuzzyMinLen) || hasToken(l, "top") || isKDVLine(l) || strings.Contains(f, "topk") {
+		if isTotalLabel(l) || isKDVLine(l) || strings.Contains(f, "topk") {
 			start = i
 			break
 		}
@@ -87,6 +180,9 @@ func resolveTotal(lines []string, items []expenseItem, current *float64) (float6
 	}
 	var pool []float64
 	for _, l := range lines[start:] {
+		if isSubtotalLine(l) || isDiscountLine(l) {
+			continue
+		}
 		pool = append(pool, amountsIn(l)...)
 	}
 	has := func(v float64) bool {
@@ -101,7 +197,7 @@ func resolveTotal(lines []string, items []expenseItem, current *float64) (float6
 
 	// 1) Kalem toplami alt blokta bir tutara esit
 	if len(items) >= 2 {
-		sum := sumItems(items)
+		sum := round2(sumItems(items) - discount)
 		if has(sum) && !same(sum) {
 			return sum, true
 		}
@@ -145,11 +241,11 @@ func countLetters(s string) int {
 // recoverBareAmounts, kalem toplami fis toplaminin altindaysa ve eksik fark TAM OLARAK bir aday
 // alt kumesinin toplamina esitse (en fazla 8 aday), o kalemleri yerlerine ekler. Fark kapanmiyorsa
 // hicbir sey eklenmez (tahmini tutarlarla kalem uydurulmaz).
-func recoverBareAmounts(items []expenseItem, cands []bareCandidate, total *float64) []expenseItem {
+func recoverBareAmounts(items []expenseItem, cands []bareCandidate, total *float64, discount float64) []expenseItem {
 	if total == nil || len(cands) == 0 || len(cands) > 8 {
 		return items
 	}
-	diff := round2(*total - sumItems(items))
+	diff := round2(*total + discount - sumItems(items))
 	if diff <= 0.005 {
 		return items
 	}

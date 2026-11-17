@@ -39,6 +39,10 @@ class OcrConfig:
     det_model_dir: str | None = None
     rec_model_dir: str | None = None
     cls_model_dir: str | None = None
+    # Türkçe harfleri (ş ğ İ) içeren özel/ince ayarlı bir tanıma modeli kullanılacaksa onun
+    # sözlüğü. Sözlük modelin çıktı sınıflarıyla eşleşmek ZORUNDA; yalnızca rec_model_dir ile
+    # birlikte geçerlidir (varsayılan latin modelinin sözlüğü değiştirilemez).
+    rec_char_dict_path: str | None = None
 
     # Custom OCR Engine settings
     custom_model_path: str | None = None
@@ -68,6 +72,7 @@ class OcrConfig:
             det_model_dir=os.getenv("OCR_DET_MODEL_DIR") or None,
             rec_model_dir=os.getenv("OCR_REC_MODEL_DIR") or None,
             cls_model_dir=os.getenv("OCR_CLS_MODEL_DIR") or None,
+            rec_char_dict_path=os.getenv("OCR_REC_CHAR_DICT_PATH") or None,
             custom_model_path=os.getenv("CUSTOM_OCR_MODEL_PATH") or None,
             custom_device=os.getenv("CUSTOM_OCR_DEVICE", "cpu").strip(),
             custom_confidence_threshold=float(

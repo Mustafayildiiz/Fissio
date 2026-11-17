@@ -104,6 +104,13 @@ class Expense {
   );
 }
 
+/// Kalem toplamından indirim düşülmüş, kaydedilecek fiş tutarı. İndirim yoksa ya da kalemlerden
+/// büyükse (kullanıcı kalemleri silmiş/düzeltmiş) kalem toplamı aynen döner.
+double netTotal(double itemsTotal, double discount) {
+  final net = ((itemsTotal - discount) * 100).round() / 100;
+  return discount > 0 && net > 0 ? net : itemsTotal;
+}
+
 /// Fiş formu ile ürün ekranı arasında taşınan taslak.
 class ReceiptDraft {
   int? id; // null ise yeni fiş
@@ -117,6 +124,10 @@ class ReceiptDraft {
   /// tutar her zaman kalem toplamıdır; ikisi farklıysa kullanıcıya uyarı gösterilir.
   double? receiptTotal;
 
+  /// Fişteki indirim satırlarının toplamı (kalem değildir; sunucu `discount_total`). Kaydedilen
+  /// tutar `kalemler − indirim`dir.
+  double discount;
+
   /// Henüz sunucuya yüklenmemiş fiş fotoğrafları (tarama/çekimden gelir); kayıtta yüklenir.
   List<Uint8List> pendingImages;
 
@@ -128,25 +139,40 @@ class ReceiptDraft {
     this.note = '',
     List<ExpenseItem>? items,
     this.receiptTotal,
+    this.discount = 0,
     List<Uint8List>? pendingImages,
   }) : date = date ?? DateTime.now(),
        items = items ?? [],
        pendingImages = pendingImages ?? [];
 
-  factory ReceiptDraft.from(Expense e) => ReceiptDraft(
-    id: e.id,
-    merchant: e.merchant,
-    categoryId: e.categoryId,
-    date: e.date,
-    note: e.note,
-    items: e.items.isEmpty
+  double get itemsTotal => items.fold<double>(0, (s, i) => s + i.amount);
+
+  /// Sunucuya gönderilen fiş tutarı.
+  double get savedAmount => netTotal(itemsTotal, discount);
+
+  factory ReceiptDraft.from(Expense e) {
+    final items = e.items.isEmpty
         ? [ExpenseItem(e.merchant.isEmpty ? 'Toplam' : e.merchant, e.amount)]
-        : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList(),
-  );
+        : e.items.map((i) => ExpenseItem(i.name, i.amount)).toList();
+    // İndirim ayrı saklanmaz: kayıtlı tutar kalem toplamından küçükse fark indirimdir.
+    final gross = items.fold<double>(0, (s, i) => s + i.amount);
+    final diff = ((gross - e.amount) * 100).round() / 100;
+    return ReceiptDraft(
+      id: e.id,
+      merchant: e.merchant,
+      categoryId: e.categoryId,
+      date: e.date,
+      note: e.note,
+      items: items,
+      discount: diff > 0 ? diff : 0,
+    );
+  }
 
   factory ReceiptDraft.fromParsed(ParsedReceipt p) => ReceiptDraft(
     merchant: p.merchant,
     receiptTotal: p.amount,
+    // Kalem yoksa tek satır zaten fiş toplamıdır; indirim yalnızca kalemlerden düşülür.
+    discount: p.items.isNotEmpty ? p.discountTotal : 0,
     categoryId: p.categoryId > 0 ? p.categoryId : null,
     date: p.date ?? DateTime.now(),
     items: p.items.isNotEmpty
@@ -177,6 +203,9 @@ class ParsedReceipt {
   /// Sunucunun hesapladığı kalem toplamı (`items_total`).
   final double? itemsTotal;
 
+  /// Kalem toplamından düşülecek indirim (`discount_total`; yoksa 0).
+  final double discountTotal;
+
   const ParsedReceipt({
     required this.merchant,
     this.amount,
@@ -187,6 +216,7 @@ class ParsedReceipt {
     required this.needsManual,
     this.needsReview = false,
     this.itemsTotal,
+    this.discountTotal = 0,
   });
 
   factory ParsedReceipt.fromJson(Map<String, dynamic> j) => ParsedReceipt(
@@ -201,5 +231,6 @@ class ParsedReceipt {
     needsManual: (j['needs_manual'] as bool?) ?? false,
     needsReview: (j['needs_review'] as bool?) ?? false,
     itemsTotal: (j['items_total'] as num?)?.toDouble(),
+    discountTotal: (j['discount_total'] as num?)?.toDouble() ?? 0,
   );
 }

@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
 
 from ocr.base import OcrTextBlock
 from ocr.paddle_engine import PaddleOcrEngine
-from ocr.postprocess import dedupe_blocks, local_slope_fn
+from ocr.postprocess import dedupe_blocks, fix_turkish_glyphs, local_slope_fn
 
 if HAS_CV:
     from ocr.preprocess import apply_clahe, preprocess_receipt, upscale_if_small
@@ -102,6 +102,63 @@ class DedupeTests(unittest.TestCase):
         a = OcrTextBlock("TOPLAM", 0.9, None)
         b = OcrTextBlock("TOPLAM", 0.9, None)
         self.assertEqual(len(dedupe_blocks([a, b])), 2)
+
+    def test_contained_fragment_after_full_line_is_dropped(self) -> None:
+        full = OcrTextBlock("EKMEK 5,00", 0.90, _box(40, 100, 300, 118))
+        part = OcrTextBlock("5,00", 0.99, _box(245, 101, 298, 117))
+        out = dedupe_blocks([full, part])
+        self.assertEqual([b.text for b in out], ["EKMEK 5,00"])
+
+    def test_full_line_absorbs_earlier_fragments(self) -> None:
+        name = OcrTextBlock("EKMEK", 0.97, _box(42, 101, 120, 117))
+        price = OcrTextBlock("5,00", 0.99, _box(245, 101, 298, 117))
+        full = OcrTextBlock("EKMEK 5,00", 0.90, _box(40, 100, 300, 118))
+        other = OcrTextBlock("SUT 1L", 0.95, _box(40, 140, 120, 158))
+        out = dedupe_blocks([name, price, other, full])
+        self.assertEqual([b.text for b in out], ["EKMEK 5,00", "SUT 1L"])
+
+    def test_different_text_inside_box_is_kept(self) -> None:
+        # Kutu içinde ama metin alt dize değil (farklı içerik): korunur.
+        full = OcrTextBlock("EKMEK 5,00", 0.90, _box(40, 100, 300, 118))
+        other = OcrTextBlock("%08", 0.90, _box(200, 101, 235, 117))
+        self.assertEqual(len(dedupe_blocks([full, other])), 2)
+
+    def test_same_fragment_on_another_row_is_kept(self) -> None:
+        full = OcrTextBlock("EKMEK 5,00", 0.90, _box(40, 100, 300, 118))
+        price = OcrTextBlock("5,00", 0.99, _box(245, 140, 298, 158))
+        self.assertEqual(len(dedupe_blocks([full, price])), 2)
+
+
+class TurkishGlyphTests(unittest.TestCase):
+    # expense/accuracy_test.go TestFixTurkishGlyphs ile aynı vektörler.
+    CASES = {
+        "Fİ$": "FİŞ",
+        "Fİ$ NO:0298": "FİŞ NO:0298",
+        "PE$İN": "PEŞİN",
+        "KA$AR PEYNİR": "KAŞAR PEYNİR",
+        "$EKER 1KG": "ŞEKER 1KG",
+        "BİM A.$.": "BİM A.Ş.",
+        "MİGROS TİCARET A.$": "MİGROS TİCARET A.Ş",
+        "ABC LTD.$Tİ.": "ABC LTD.ŞTİ.",
+        "TE$EKKÜRLER": "TEŞEKKÜRLER",
+        "pe$in fiyatına": "peşin fiyatına",
+        "KA$AR %08 *120,00": "KAŞAR %08 *120,00",
+        "$12,50": "$12,50",
+        "EKMEK %08 $3,95": "EKMEK %08 $3,95",
+        "TOPLAM $45,00": "TOPLAM $45,00",
+        "KEK 35 G %08 *$070": "KEK 35 G %08 *$070",
+        "SUT %08 $": "SUT %08 $",
+        "US$ 1,00": "US$ 1,00",
+        "FIYAT US$": "FIYAT US$",
+        "KU$ YEMİ": "KUŞ YEMİ",
+        "BU$AN 5,00": "BUŞAN 5,00",
+    }
+
+    def test_vectors(self) -> None:
+        for raw, want in self.CASES.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(fix_turkish_glyphs(raw), want)
+                self.assertEqual(fix_turkish_glyphs(want), want)  # idempotent
 
 
 class TiltedRowsTests(unittest.TestCase):

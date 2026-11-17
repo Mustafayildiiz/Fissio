@@ -911,16 +911,19 @@ void showMessage(BuildContext context, String msg) {
 }
 
 /// Kalem toplamı ile fiş toplamı farklıysa uyarı gösterir (fark < 0,01 ise hiçbir şey çizmez).
-/// Kaydedilen tutar kalem toplamıdır; bu yüzden kullanıcı tutarları kontrol etmelidir.
+/// Kaydedilen tutar kalem toplamıdır (indirim varsa indirim düşülmüş hali; [itemsTotal] bu net
+/// değerdir); bu yüzden kullanıcı tutarları kontrol etmelidir.
 class TotalMismatchBanner extends StatelessWidget {
   const TotalMismatchBanner({
     super.key,
     required this.itemsTotal,
     required this.receiptTotal,
+    this.discount = 0,
   });
 
   final double itemsTotal;
   final double? receiptTotal;
+  final double discount;
 
   static bool mismatch(double itemsTotal, double? receiptTotal) =>
       receiptTotal != null && (itemsTotal - receiptTotal).abs() >= 0.01;
@@ -947,9 +950,14 @@ class TotalMismatchBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Kalemlerin toplamı (${fmtMoney(itemsTotal)}) fiş toplamından '
-              '(${fmtMoney(receiptTotal!)}) farklı. Kaydedilen tutar kalemlerin toplamıdır; '
-              'lütfen tutarları kontrol edin.',
+              discount > 0
+                  ? 'Kalemlerin indirimli toplamı (${fmtMoney(itemsTotal)}) fiş toplamından '
+                        '(${fmtMoney(receiptTotal!)}) farklı. Kaydedilen tutar kalemlerin '
+                        'toplamı eksi indirimdir (−${fmtMoney(discount)}); '
+                        'lütfen tutarları kontrol edin.'
+                  : 'Kalemlerin toplamı (${fmtMoney(itemsTotal)}) fiş toplamından '
+                        '(${fmtMoney(receiptTotal!)}) farklı. Kaydedilen tutar kalemlerin '
+                        'toplamıdır; lütfen tutarları kontrol edin.',
               style: TextStyle(color: fg, fontSize: 13),
             ),
           ),

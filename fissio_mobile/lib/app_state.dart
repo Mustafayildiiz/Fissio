@@ -262,7 +262,7 @@ class AppState extends ChangeNotifier {
   Future<bool> saveDraft(ReceiptDraft d) async {
     final body = {
       'merchant': d.merchant,
-      'amount': d.items.fold<double>(0, (s, i) => s + i.amount),
+      'amount': d.savedAmount,
       'date':
           '${d.date.year.toString().padLeft(4, '0')}-'
           '${d.date.month.toString().padLeft(2, '0')}-'

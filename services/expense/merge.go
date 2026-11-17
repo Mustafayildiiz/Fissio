@@ -63,23 +63,50 @@ func seamOverlap(prev, next []string) int {
 	return bestDrop
 }
 
-// fuzzyLineEqual, ayni satirin iki farkli fotografta okunmus halini eslestirir: harf farklari
-// (AR0MALI/AROMALI gibi rakam-harf karisikliklari dahil) birkac duzenlemeye kadar tolere edilir,
-// ancak satirdaki TUTARLAR birebir ayni olmalidir.
+const (
+	seamJaroWinkler  = 0.92 // ayni tutarli satirlar icin Jaro-Winkler esigi
+	seamCropMinChars = 6    // soldan kirpilmis satirda kalan parcanin en az harf sayisi
+)
+
+// fuzzyLineEqual, ayni satirin iki farkli fotografta okunmus halini eslestirir. Kosul iki
+// parcalidir:
+//
+//   - Fiyat: satirdaki TUTARLAR birebir ayni olmalidir (farkli fiyatli benzer adlar asla eslesmez).
+//   - Metin (biri yeterli): (1) Levenshtein mesafesi uzunlugun ~1/6'si icinde (AR0MALI/AROMALI);
+//     (2) uzunluklari yakin satirlarda Jaro-Winkler >= seamJaroWinkler (bosluk/harf kaymalari);
+//     (3) kadraj satirin solunu kesmis: kisa metin uzun metnin SONEKI ve tutar iceriyor
+//     ("ETI KARAM GURME 50 G 1,75" / "RAM GURME 50 G 1,75").
 func fuzzyLineEqual(a, b string) bool {
 	fa := strings.ReplaceAll(foldTR(a), " ", "")
 	fb := strings.ReplaceAll(foldTR(b), " ", "")
 	if fa == "" || fb == "" {
 		return false
 	}
-	if !sameAmounts(amountsIn(a), amountsIn(b)) {
+	amtA, amtB := amountsIn(a), amountsIn(b)
+	if !sameAmounts(amtA, amtB) {
 		return false
 	}
-	limit := len([]rune(fa)) / 6
+	la, lb := len([]rune(fa)), len([]rune(fb))
+	limit := la / 6
 	if limit < 1 {
 		limit = 1
 	}
-	return levenshtein(fa, fb) <= limit
+	if levenshtein(fa, fb) <= limit {
+		return true
+	}
+	if min(la, lb)*5 >= max(la, lb)*4 && jaroWinkler(fa, fb) >= seamJaroWinkler {
+		return true
+	}
+	if len(amtA) > 0 {
+		short, long := fa, fb
+		if lb < la {
+			short, long = fb, fa
+		}
+		if strings.HasSuffix(long, short) && countLetters(short) >= seamCropMinChars {
+			return true
+		}
+	}
+	return false
 }
 
 func sameAmounts(a, b []float64) bool {

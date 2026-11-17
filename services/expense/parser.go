@@ -36,6 +36,12 @@ type ParseResult struct {
 	// NeedsReview: kalemlerin toplami fis toplamiyla tutmuyor; ItemsTotal hesaplanan kalem toplamidir.
 	NeedsReview bool     `json:"needs_review"`
 	ItemsTotal  *float64 `json:"items_total,omitempty"`
+	// DiscountTotal: kalem toplamindan dusulmesi gereken indirim (kalemler - indirim = fis toplami).
+	// Istemci kaydedilen tutari buna gore hesaplar. Indirim yoksa ya da kalemlere zaten
+	// yansitilmissa alan yoktur.
+	DiscountTotal  *float64        `json:"discount_total,omitempty"`
+	Summary        *ReceiptSummary `json:"summary,omitempty"`
+	Reconciliation *Reconciliation `json:"reconciliation,omitempty"`
 }
 
 const fallbackCategory = "Diğer"
@@ -52,8 +58,11 @@ var (
 	dateRe = regexp.MustCompile(`(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$)`)
 	// OCR ondalik ayiraci sonrasina bosluk koyabilir ("+24, 90" -> "24,90").
 	spacedDecimalRe = regexp.MustCompile(`(\d[.,])\s(\d{2})\b`)
-	// Adet satiri: "4Adt X 0,90", "3 X 1,00", "4AdtX0.90", OCR bozugu "3A0.25". Kalemden ONCE gelir.
-	qtyPrefixRe = regexp.MustCompile(`(?i)^\s*\d+\s*(?:(?:adt|ad|ag|a)\s*x?|x)\s*\d+[.,]\d{2}`)
+	// Adet/miktar satiri: "4Adt X 0,90", "3 X 1,00", "4AdtX0.90", OCR bozugu "3A0.25",
+	// "2 ADET X 15,00 = 30,00", "0,535 KG X 89,90". Grup 1 = miktar, grup 2 = birim fiyat.
+	// BIM'de kalemden ONCE, bircok fiste ad satirinin ALTINDA gelir. Birimli (KG/GR/LT) ve "*"
+	// bicimlerinde carpi isareti zorunludur ("1L SUT", "08 *3,95" adet satiri sanilmasin).
+	qtyPrefixRe = regexp.MustCompile(`(?i)^\s*(\d+(?:[.,]\d{1,3})?)\s*(?:(?:adet|adt|ad|ag|a)\.?\s*[x×*]?|(?:kg|kq|gr|g|lt|l)\.?\s*[x×*]|[x×])\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})`)
 	// Kalem adi sonundaki KDV orani ve sutun kalintilari (%08, 08, 808, 80%, %18, *).
 	trailingXRe = regexp.MustCompile(`(?i)\s+x$`)
 	// Ondalik ayiraci dusmus tutar: "%08 *070" -> 0,70; "%08 100" -> 1,00 (satirsonu, 3-4 hane).
@@ -89,22 +98,34 @@ func Parse(text string, cats []Category, now time.Time) ParseResult {
 	id, name, conf := categorize(header, lines, cats)
 	res.CategoryID, res.CategoryName, res.Confidence.Category = id, name, conf
 
+	summary, discount := extractSummary(lines)
+	if !summary.empty() {
+		res.Summary = &summary
+	}
+
 	var bare []bareCandidate
-	res.Items, bare = extractItemsWithBare(lines, res.Amount)
-	if t, ok := resolveTotal(lines, res.Items, res.Amount); ok {
+	var skipped []expenseItem
+	res.Items, bare, skipped = extractItemsWithBare(lines, res.Amount)
+	if t, ok := resolveTotal(lines, res.Items, discount, res.Amount); ok {
 		res.Amount = &t
 		res.Confidence.Amount = 0.85
 	}
-	res.Items = recoverBareAmounts(res.Items, bare, res.Amount)
-	res.Items, res.NeedsReview, res.ItemsTotal = reconcileItems(res.Items, res.Amount)
+	res.Items = recoverBareAmounts(res.Items, bare, res.Amount, discount)
+	o := reconcile(res.Items, res.Amount, discount, skipped)
+	res.Items, res.NeedsReview, res.ItemsTotal, res.Reconciliation = o.items, o.needsReview, o.itemsTotal, o.info
+	if o.discount > 0 {
+		res.DiscountTotal = ptr(o.discount)
+	}
 	res.NeedsManual = res.Amount == nil
 	return res
 }
 
+// splitLines, metni bos olmayan satirlara boler; ondalik bosluklarini ve OCR glif hatalarini
+// (`$` -> S-cedilla, bkz. fixTurkishGlyphs) duzeltir. Parse ve mergePageTexts'in tek girisidir.
 func splitLines(text string) []string {
 	var out []string
 	for _, l := range strings.Split(strings.ReplaceAll(text, "\r", ""), "\n") {
-		if l = strings.TrimSpace(spacedDecimalRe.ReplaceAllString(l, "$1$2")); l != "" {
+		if l = strings.TrimSpace(fixTurkishGlyphs(spacedDecimalRe.ReplaceAllString(l, "$1$2"))); l != "" {
 			out = append(out, l)
 		}
 	}
@@ -143,7 +164,7 @@ func extractAmount(lines []string) (float64, float64, bool) {
 	var tier1, tier2 []int
 	for i, l := range lines {
 		f := foldTR(l)
-		if isKDVLine(l) || strings.Contains(f, "%") || hasKeyword(l, "ara toplam", fuzzyMinLen) {
+		if isKDVLine(l) || strings.Contains(f, "%") || isSubtotalLine(l) || isDiscountLine(l) {
 			continue
 		}
 		switch {
@@ -319,38 +340,93 @@ func isAlnum(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
-var skipItemKeywords = []string{
-	"toplam", "topkdv", "kdv", "odenecek", "tutar", "nakit",
-	"kredi", "kart", "para ustu", "fis no", "tarih", "saat",
-	"vkn", "mersis", "vergi", "tesekkur", "banka", "onay",
-}
-
 func extractItems(lines []string, totalAmount *float64) []expenseItem {
-	items, _ := extractItemsWithBare(lines, totalAmount)
+	items, _, _ := extractItemsWithBare(lines, totalAmount)
 	return items
 }
 
-// extractItemsWithBare, kalemleri cikarir; ayrica ondalik ayiraci OCR'da dusmus ("*070", "100")
-// satirlari ADAY olarak doner. Adaylar yalnizca toplamla dogrulaninca eklenir (recoverBareAmounts).
-func extractItemsWithBare(lines []string, totalAmount *float64) ([]expenseItem, []bareCandidate) {
+func approxEq(a, b float64) bool { return math.Abs(a-b) < 0.005 }
+
+// applyQtyLine, net satir tutari tasiyan bir adet satirini ("2 ADET X 15,00 = 30,00") isler.
+// Net tutar satirin EN SAGINDAKI tutardir: OCR servisi satir bloklarini x_min'e gore soldan saga
+// dizer, dolayisiyla metindeki son tutar en buyuk X'li tutardir. Birim fiyat asla ayri kalem olmaz.
+//   - Ustteki satir yalnizca ad tasiyorsa (pending): ad + net tutar = tek kalem.
+//   - Onceki kalem zaten net tutardaysa satir bilgi satiridir.
+//   - Onceki kalem birim fiyatla yazilmissa ve miktar x birim = net ise kalem net tutara cekilir.
+func applyQtyLine(items []expenseItem, pending string, qty, unit, net float64) []expenseItem {
+	switch {
+	case pending != "":
+		return append(items, expenseItem{Name: pending, Amount: net})
+	case len(items) == 0:
+		return items
+	case approxEq(items[len(items)-1].Amount, net):
+		return items
+	case qty > 1 && approxEq(items[len(items)-1].Amount, unit) && approxEq(round2(qty*unit), net):
+		items[len(items)-1].Amount = net
+	}
+	return items
+}
+
+// nextLineIsItemOf, lines[i] adli ve tutari net olan bir kalem satiri mi (BIM: adet satiri
+// kalemin ustunde, "3X1,00" + "POPKEK MUZLU %08 3,00")?
+func nextLineIsItemOf(lines []string, i int, net float64) bool {
+	if i >= len(lines) || isTotalLabel(lines[i]) {
+		return false
+	}
+	if strong, weak := nonItemLabel(lines[i]); strong || weak {
+		return false
+	}
+	m := amountRe.FindAllStringIndex(maskDates(lines[i]), -1)
+	if len(m) == 0 {
+		return false
+	}
+	v, ok := parseAmount(lines[i][m[len(m)-1][0]:m[len(m)-1][1]])
+	return ok && approxEq(v, net) && countLetters(cleanItemName(lines[i][:m[len(m)-1][0]])) >= 2
+}
+
+// extractItemsWithBare, kalemleri cikarir. Ayrica:
+//   - ondalik ayiraci OCR'da dusmus ("*070", "100") satirlari ADAY olarak doner; adaylar yalnizca
+//     toplamla dogrulaninca eklenir (recoverBareAmounts);
+//   - yalnizca kisa bir etiket kelimesi yuzunden atlanan tutarli satirlari (skipped) doner;
+//     mutabakat eksik farki bunlarla karsilastirip "atlanan satir" supheli olarak raporlar.
+//
+// Ozet satirlari (TOPLAM, ARA TOPLAM, KDV, INDIRIM, NAKIT, KREDI KARTI, PARA USTU...) kalem olmaz;
+// extractSummary bunlari metadata'ya ayirir.
+func extractItemsWithBare(lines []string, totalAmount *float64) ([]expenseItem, []bareCandidate, []expenseItem) {
 	var items []expenseItem
 	var cands []bareCandidate
-	for _, l := range lines {
-		if (hasKeyword(l, "toplam", fuzzyMinLen) || hasToken(l, "top")) && !hasKeyword(l, "ara toplam", fuzzyMinLen) {
+	var skipped []expenseItem
+	pendingName := "" // ustteki satir yalnizca urun adi (alttaki adet satirinin kalemi olabilir)
+	for li, l := range lines {
+		if isTotalLabel(l) {
 			break // Toplam satirindan sonrasi odeme/alt bilgi
 		}
-		if loc := qtyPrefixRe.FindStringIndex(l); loc != nil {
-			l = strings.TrimSpace(l[loc[1]:]) // adet satiri kalem degildir; kalan (varsa) islenir
-		}
-		skip := isKDVLine(l) // KDV/KDU satiri kalem degildir
-		for _, kw := range skipItemKeywords {
-			// Urun adlarini yanlislikla atmamak icin bulanik eslesme yalnizca >= 6 harfli etiketlerde.
-			if hasKeyword(l, kw, 6) {
-				skip = true
-				break
+		pending := pendingName
+		pendingName = ""
+		if q := qtyPrefixRe.FindStringSubmatchIndex(l); q != nil {
+			qty, _ := strconv.ParseFloat(strings.ReplaceAll(l[q[2]:q[3]], ",", "."), 64)
+			unit, _ := parseAmount(l[q[4]:q[5]])
+			rest := strings.TrimSpace(l[q[1]:])
+			if m := amountRe.FindAllStringIndex(maskDates(rest), -1); len(m) > 0 &&
+				countLetters(cleanItemName(rest[:m[len(m)-1][0]])) < 2 {
+				net, _ := parseAmount(rest[m[len(m)-1][0]:m[len(m)-1][1]])
+				items = applyQtyLine(items, pending, qty, unit, net)
+				continue
 			}
+			if rest == "" && pending != "" && qty > 0 && !nextLineIsItemOf(lines, li+1, round2(qty*unit)) {
+				// "CAY" + "2 ADET X 15,00": net yazilmamis, ad satirinin tutari yok -> miktar x birim.
+				// (BIM duzeninde adet satiri ALTTAKI kaleme aittir; o durumda ustteki ad kullanilmaz.)
+				items = append(items, expenseItem{Name: pending, Amount: round2(qty * unit)})
+				continue
+			}
+			l = rest // adet satiri kalem degildir; kalan (BIM: "3A0.25 ALISVERISPOSET %18 0.75") islenir
 		}
-		if skip {
+		if strong, weak := nonItemLabel(l); strong || weak {
+			if weak {
+				if a := amountsIn(l); len(a) > 0 {
+					skipped = append(skipped, expenseItem{Name: cleanItemName(l), Amount: a[len(a)-1]})
+				}
+			}
 			continue
 		}
 		masked := maskDates(l)
@@ -363,6 +439,10 @@ func extractItemsWithBare(lines []string, totalAmount *float64) ([]expenseItem, 
 						cands = append(cands, bareCandidate{Pos: len(items), Item: expenseItem{Name: name, Amount: float64(n) / 100}})
 					}
 				}
+				continue
+			}
+			if name := cleanItemName(l); countLetters(name) >= 3 && !isStarBanner(l) {
+				pendingName = name
 			}
 			continue
 		}
@@ -390,7 +470,7 @@ func extractItemsWithBare(lines []string, totalAmount *float64) ([]expenseItem, 
 			items = append(items, expenseItem{Name: namePart, Amount: val})
 		}
 	}
-	return items, cands
+	return items, cands, skipped
 }
 
 // cleanItemName, kalem adindaki KDV orani ve sutun kalintilarini temizler. Fiyatin onunde "*"

@@ -16,6 +16,56 @@ def _fold(text: str) -> str:
     ).strip()
 
 
+# `$` ile yazılan döviz kodları (US$ 1,00); tek harfli kodlar (A$) "A.$" şirket sonekiyle karışır.
+_CURRENCY_PREFIXES = frozenset({"US", "CA", "AU", "NZ", "HK", "SG"})
+
+
+def fix_turkish_glyphs(text: str) -> str:
+    """
+    OCR'ın Türkçe harf yerine okuduğu `$` glifini bağlama göre `Ş`/`ş`'ye çevirir.
+
+    Kök neden: PaddleOCR `lang=tr` isteğini `latin` tanıma modeline yönlendirir; bu modelin
+    karakter sözlüğünde (latin_dict.txt) ş/Ş, ğ/Ğ ve İ YOKTUR, `$` ise vardır. Model sözlükte
+    olmayan harfi en yakın glife eşler (FİŞ -> Fİ$, PEŞİN -> PE$İN). Kurallar expense servisindeki
+    `fixTurkishGlyphs` ile birebir aynıdır:
+      - `$` hemen ardından rakam geliyorsa fiyat işaretidir, dokunulmaz ($12,50, *$070).
+      - Aksi halde yanlarından en az biri harfse `Ş` (komşu harf küçükse `ş`).
+      - Şirket soneki: tek harf + nokta + `$` (A.$.) -> A.Ş.
+      - Para birimi: `$`'dan önceki harf dizisi bir döviz kodu (US$, CA$...) ve ardından harf
+        gelmiyorsa dokunulmaz.
+    İdempotenttir.
+    """
+    if "$" not in text:
+        return text
+    chars = list(text)
+
+    def at(i: int) -> str:
+        return chars[i] if 0 <= i < len(chars) else ""
+
+    for i, c in enumerate(chars):
+        if c != "$":
+            continue
+        prev, nxt = at(i - 1), at(i + 1)
+        if nxt.isdigit():
+            continue
+        if not nxt.isalpha():
+            start = i
+            while start > 0 and chars[start - 1].isalpha():
+                start -= 1
+            if "".join(chars[start:i]).upper() in _CURRENCY_PREFIXES:
+                continue
+        if nxt.isalpha():
+            ref = nxt
+        elif prev.isalpha():
+            ref = prev
+        elif prev == "." and at(i - 2).isalpha() and not at(i - 3).isalpha():
+            ref = at(i - 2)
+        else:
+            continue
+        chars[i] = "ş" if ref.islower() else "Ş"
+    return "".join(chars)
+
+
 def _extent(block: OcrTextBlock) -> tuple[float, float, float, float] | None:
     if not block.bbox:
         return None
@@ -33,17 +83,60 @@ def _overlap_ratio(a_min: float, a_max: float, b_min: float, b_max: float) -> fl
     return inter / shorter if shorter > 0 else 0.0
 
 
+def _area(ext: tuple[float, float, float, float]) -> float:
+    return max(0.0, ext[1] - ext[0]) * max(0.0, ext[3] - ext[2])
+
+
+def _intersection(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    w = min(a[1], b[1]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[2], b[2])
+    return w * h if w > 0 and h > 0 else 0.0
+
+
+def _compact(text: str) -> str:
+    return _fold(text).replace(" ", "")
+
+
+def _is_contained_duplicate(
+    small: OcrTextBlock,
+    s_ext: tuple[float, float, float, float],
+    big: OcrTextBlock,
+    b_ext: tuple[float, float, float, float],
+    min_inside: float,
+) -> bool:
+    """
+    Kısa blok, uzun bloğun parçasının ikinci kez tespit edilmiş hali mi? Kutusu büyük ölçüde
+    (kesişim / kendi alanı >= min_inside) uzun kutunun içinde VE katlanmış metni uzun metnin
+    alt dizesi olmalı ("5,00" ⊂ "EKMEK 5,00"). İçerdeki farklı metin (alt dize değil) korunur.
+    """
+    st, bt = _compact(small.text), _compact(big.text)
+    if not st or len(st) >= len(bt) or st not in bt:
+        return False
+    area = _area(s_ext)
+    return area > 0 and _intersection(s_ext, b_ext) / area >= min_inside
+
+
 def dedupe_blocks(
     blocks: list[OcrTextBlock],
     *,
     y_overlap: float = 0.6,
     x_overlap: float = 0.5,
     text_similarity: float = 0.85,
+    containment: float = 0.8,
 ) -> list[OcrTextBlock]:
     """
-    Aynı dikey hizada üst üste binen ve metni benzer olan mükerrer tespitleri tekilleştirir;
-    yüksek güvenli olan korunur. Farklı satırlardaki (farklı Y) aynı metinli kalemlere dokunmaz.
-    bbox'ı olmayan bloklar olduğu gibi bırakılır. Girdi sırası korunur.
+    Tek görseldeki mükerrer tespitleri NMS mantığıyla tekilleştirir:
+
+    1. Aynı hizada üst üste binen (her eksende kısa aralığa göre örtüşme: IoMin; IoU'dan daha
+       kapsayıcı, küçük kaymalı çift kutuları da yakalar) ve metni benzer kutulardan yüksek
+       güvenli olan korunur.
+    2. Bir kutunun içine düşen ve metni o kutunun alt dizesi olan parça tespitler ("5,00" ve
+       "EKMEK 5,00") atılır; tam metinli kutu korunur. Aksi halde satır "EKMEK 5,00 5,00" olur.
+
+    Farklı satırlardaki (farklı Y) aynı metinli kalemlere dokunmaz. bbox'ı olmayan bloklar olduğu
+    gibi bırakılır. Girdi sırası korunur.
     """
     kept: list[OcrTextBlock] = []
     for block in blocks:
@@ -52,10 +145,14 @@ def dedupe_blocks(
             kept.append(block)
             continue
         dup_index = None
+        inside_existing = False
         for i, other in enumerate(kept):
             oext = _extent(other)
             if oext is None:
                 continue
+            if _is_contained_duplicate(block, ext, other, oext, containment):
+                inside_existing = True
+                break
             if _overlap_ratio(ext[2], ext[3], oext[2], oext[3]) < y_overlap:
                 continue
             if _overlap_ratio(ext[0], ext[1], oext[0], oext[1]) < x_overlap:
@@ -64,10 +161,25 @@ def dedupe_blocks(
             if ratio >= text_similarity:
                 dup_index = i
                 break
-        if dup_index is None:
+        if inside_existing:
+            continue
+        if dup_index is not None:
+            if block.confidence > kept[dup_index].confidence:
+                kept[dup_index] = block
+            continue
+        # Yeni blok, daha önce tutulmuş parça tespitleri kapsıyorsa onların yerini alır.
+        absorbed = [
+            i
+            for i, other in enumerate(kept)
+            if (oext := _extent(other)) is not None
+            and _is_contained_duplicate(other, oext, block, ext, containment)
+        ]
+        if absorbed:
+            kept[absorbed[0]] = block
+            for i in reversed(absorbed[1:]):
+                del kept[i]
+        else:
             kept.append(block)
-        elif block.confidence > kept[dup_index].confidence:
-            kept[dup_index] = block
     return kept
 
 

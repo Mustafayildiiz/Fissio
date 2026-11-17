@@ -126,6 +126,58 @@ class OcrSubsystemTestSuite(unittest.TestCase):
         ]
         self.assertEqual(result.raw_text.splitlines(), expected_lines)
 
+    def test_extraction_fixes_dollar_glyph_and_drops_contained_duplicate(self) -> None:
+        class _Predictor:
+            def ocr(self, img: Any, cls: bool = True) -> list[list[Any]]:
+                return [
+                    [
+                        [[[40, 15], [220, 15], [220, 35], [40, 35]], ("BIM A.$.", 0.98)],
+                        [[[40, 50], [180, 50], [180, 68], [40, 68]], ("Fİ$ NO:0298", 0.96)],
+                        # Tam satır kutusu + aynı satırın fiyat parçasının ikinci tespiti
+                        [[[40, 92], [300, 92], [300, 110], [40, 110]], ("KA$AR PEYNIR 45,00", 0.95)],
+                        [[[242, 93], [298, 93], [298, 109], [242, 109]], ("45,00", 0.97)],
+                        [[[40, 122], [130, 122], [130, 140], [40, 140]], ("TOPLAM", 0.99)],
+                        [[[230, 123], [300, 123], [300, 141], [230, 141]], ("*$45,00", 0.98)],
+                    ]
+                ]
+
+        engine = PaddleOcrEngine(config=OcrConfig(lang="tr"), predictor=_Predictor())
+        with patch.object(PaddleOcrEngine, "_decode_image_to_ndarray", return_value=[[0, 0, 0]]):
+            result = engine.extract_text(b"fake")
+        self.assertEqual(
+            result.raw_text.splitlines(),
+            ["BIM A.Ş.", "FİŞ NO:0298", "KAŞAR PEYNIR 45,00", "TOPLAM *$45,00"],
+        )
+        self.assertEqual(len(result.blocks), 5)
+        # Yalnızca rakama bitişik fiyat işareti `$` kalır.
+        self.assertEqual([b.text for b in result.blocks if "$" in b.text], ["*$45,00"])
+
+    def test_recognizer_charset_turkish_letter_check(self) -> None:
+        from ocr.paddle_engine import missing_turkish_letters, recognizer_charset
+
+        class _Post:
+            character = ["blank", *"abcçgıioöpsuüABCÇGIOÖSUÜ$"]
+
+        class _Rec:
+            postprocess_op = _Post()
+
+        class _Pred:
+            text_recognizer = _Rec()
+
+        # PaddleOCR latin_dict.txt durumu: ş Ş ğ Ğ İ eksik.
+        self.assertEqual(missing_turkish_letters(recognizer_charset(_Pred())), "ğşĞİŞ")
+        self.assertEqual(missing_turkish_letters(list("çğıöşüÇĞİÖŞÜ")), "")
+        self.assertIsNone(missing_turkish_letters(recognizer_charset(object())))
+
+    def test_rec_char_dict_path_requires_rec_model_dir(self) -> None:
+        only_dict = PaddleOcrEngine(config=OcrConfig(rec_char_dict_path="/m/tr_dict.txt"), predictor=object())
+        self.assertNotIn("rec_char_dict_path", only_dict._build_paddle_kwargs("tr"))
+        both = PaddleOcrEngine(
+            config=OcrConfig(rec_char_dict_path="/m/tr_dict.txt", rec_model_dir="/m/rec"),
+            predictor=object(),
+        )
+        self.assertEqual(both._build_paddle_kwargs("tr")["rec_char_dict_path"], "/m/tr_dict.txt")
+
     def test_custom_ocr_engine_stub_and_extensibility(self) -> None:
         # 1. Unconfigured stub raises NotImplementedError cleanly
         unconfigured = CustomOcrEngine(allow_stub_fallback=False)

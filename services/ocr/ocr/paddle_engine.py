@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import inspect
+import logging
 import io
 import threading
 import time
@@ -18,8 +20,28 @@ from .base import (
     OcrTextBlock,
 )
 from .config import OcrConfig
-from .postprocess import dedupe_blocks, local_slope_fn
+from .postprocess import dedupe_blocks, fix_turkish_glyphs, local_slope_fn
 from .preprocess import preprocess_receipt, upscale_if_small
+
+logger = logging.getLogger(__name__)
+
+# Türkçe fişte doğru tanınması gereken, Latin temel alfabede olmayan harfler.
+TURKISH_LETTERS = "çğıöşüÇĞİÖŞÜ"
+
+
+def recognizer_charset(predictor: Any) -> list[str] | None:
+    """Yüklenen tanıma modelinin çıktı alfabesi (PaddleOCR 2.x CTC decoder); okunamazsa None."""
+    rec = getattr(predictor, "text_recognizer", None)
+    chars = getattr(getattr(rec, "postprocess_op", None), "character", None)
+    return list(chars) if chars else None
+
+
+def missing_turkish_letters(charset: list[str] | None) -> str | None:
+    """Alfabede olmayan Türkçe harfler ("" = tamam, None = bilinmiyor)."""
+    if charset is None:
+        return None
+    present = set(charset)
+    return "".join(c for c in TURKISH_LETTERS if c not in present)
 
 
 class PaddleOcrEngine(OcrEngine):
@@ -40,6 +62,7 @@ class PaddleOcrEngine(OcrEngine):
         self._config = config or OcrConfig.from_env()
         self._predictor = predictor
         self._lock = threading.Lock()
+        self._rec_info: dict[str, Any] = {}
 
     @property
     def engine_name(self) -> str:
@@ -78,7 +101,44 @@ class PaddleOcrEngine(OcrEngine):
             desired["rec_model_dir"] = self._config.rec_model_dir
         if self._config.cls_model_dir:
             desired["cls_model_dir"] = self._config.cls_model_dir
+        if self._config.rec_char_dict_path:
+            if self._config.rec_model_dir:
+                desired["rec_char_dict_path"] = self._config.rec_char_dict_path
+            else:
+                logger.warning(
+                    "OCR_REC_CHAR_DICT_PATH yok sayıldı: sözlük yalnızca OCR_REC_MODEL_DIR ile "
+                    "eşleşen bir modelle kullanılabilir"
+                )
         return desired
+
+    def _inspect_recognizer(self, requested_lang: str, loaded_lang: str) -> None:
+        """
+        Gerçekte yüklenen tanıma modelini ve alfabesini kaydeder/loglar. PaddleOCR 2.x `tr`'yi
+        `latin` modeline yönlendirir; o modelin sözlüğünde ş/ğ/İ yoktur ve bu harfler `$`/`g`/`I`
+        olarak okunur. Bunu hiçbir çalışma zamanı bayrağı düzeltemez: ya Türkçe harfli bir
+        rec modeli (OCR_REC_MODEL_DIR + OCR_REC_CHAR_DICT_PATH) ya da post-processing gerekir.
+        """
+        charset = recognizer_charset(self._predictor)
+        missing = missing_turkish_letters(charset)
+        args = getattr(self._predictor, "args", None)
+        self._rec_info = {
+            "rec_lang_requested": requested_lang,
+            "rec_lang_loaded": loaded_lang,
+            "rec_model_dir": getattr(args, "rec_model_dir", None),
+            "rec_char_dict_path": getattr(args, "rec_char_dict_path", None),
+            "rec_missing_turkish_letters": missing,
+        }
+        if loaded_lang != requested_lang:
+            logger.warning("OCR dili %r yüklenemedi, %r kullanılıyor", requested_lang, loaded_lang)
+        if missing:
+            logger.warning(
+                "Tanıma modeli alfabesinde Türkçe harfler yok: %s (dict=%s). Bu harfler yanlış "
+                "glif olarak okunur; postprocess.fix_turkish_glyphs `$` -> `Ş` düzeltmesini yapar.",
+                missing,
+                self._rec_info["rec_char_dict_path"],
+            )
+        else:
+            logger.info("OCR tanıma modeli: %s", self._rec_info)
 
     def _get_or_create_predictor(self) -> Any:
         if self._predictor is not None:
@@ -109,13 +169,18 @@ class PaddleOcrEngine(OcrEngine):
                 return {k: v for k, v in kw.items() if k in sig.parameters}
 
             primary_lang = self._config.lang
+            loaded_lang = primary_lang
             try:
                 self._predictor = PaddleOCR(**_filter(self._build_paddle_kwargs(primary_lang)))
             except (ValueError, AssertionError, KeyError):
                 # In some PaddleOCR releases 'tr' is grouped under 'latin'
-                fallback_lang = "latin" if primary_lang == "tr" else "en"
-                self._predictor = PaddleOCR(**_filter(self._build_paddle_kwargs(fallback_lang)))
+                loaded_lang = "latin" if primary_lang == "tr" else "en"
+                self._predictor = PaddleOCR(**_filter(self._build_paddle_kwargs(loaded_lang)))
 
+            try:
+                self._inspect_recognizer(primary_lang, loaded_lang)
+            except Exception:  # pragma: no cover - teşhis asla motoru durdurmamalı
+                logger.exception("OCR tanıma modeli incelenemedi")
             return self._predictor
 
     @staticmethod
@@ -332,6 +397,12 @@ class PaddleOcrEngine(OcrEngine):
             blocks = self._parse_raw_paddle_output(
                 raw_output, drop_score=self._config.drop_score
             )
+            # Tanıma sözlüğünde olmayan Türkçe harflerin glif hataları (Fİ$ -> FİŞ); dedupe'dan
+            # önce ki metin benzerliği ve dönen blocks/raw_text tutarlı olsun.
+            blocks = [
+                b if "$" not in b.text else dataclasses.replace(b, text=fix_turkish_glyphs(b.text))
+                for b in blocks
+            ]
             if self._config.dedupe:
                 blocks = dedupe_blocks(blocks)
             raw_text, ordered_blocks = self._reconstruct_receipt_lines(blocks)
@@ -354,6 +425,7 @@ class PaddleOcrEngine(OcrEngine):
                     "lang": self._config.lang,
                     "line_count": len(raw_text.splitlines()) if raw_text else 0,
                     "block_count": len(ordered_blocks),
+                    **self._rec_info,
                 },
             )
         except OcrEngineError:

@@ -93,6 +93,45 @@ components:
           type: number
           nullable: true
           description: Hesaplanan kalem toplamı (yalnızca needs_review true iken).
+        discount_total:
+          type: number
+          description: >-
+            Kalem toplamından düşülecek indirim (İNDİRİM/İSKONTO satırları kalem değildir).
+            Kaydedilecek tutar = kalemler − discount_total. İndirim yoksa ya da kalemlere zaten
+            yansımışsa alan yoktur.
+        summary:
+          type: object
+          description: Fişin özet satırları (kalem değildir); toplam doğrulaması için metadata.
+          properties:
+            subtotal: { type: number, description: ARA TOPLAM }
+            discounts:
+              type: array
+              description: Kalem bölgesindeki indirim satırlarının tutarları (pozitif).
+              items: { type: number }
+            vat_total: { type: number, description: TOPKDV / TOPLAM KDV }
+            paid_cash: { type: number, description: NAKİT }
+            paid_card: { type: number, description: KREDİ / BANKA KARTI }
+            change: { type: number, description: PARA ÜSTÜ }
+        reconciliation:
+          type: object
+          description: Kalemler toplamı (− indirim) ile fiş toplamının mutabakat sonucu.
+          properties:
+            status:
+              type: string
+              enum: [ok, discount_applied, duplicate_removed, mismatch]
+            diff:
+              type: number
+              description: (kalemler − indirim) − fiş toplamı, düzeltmelerden sonra (0 = tutarlı).
+            suspect_index:
+              type: integer
+              description: >-
+                Farkı tek başına açıklayan, ama çift okuma kanıtı olmadığı için silinmeyen kalemin
+                items içindeki sırası.
+            reason:
+              type: string
+              description: >-
+                removed_duplicate: <ad> | excess_equals_item | missing_equals_item |
+                missing_equals_skipped_line: <satır> | discount_already_in_items
     OcrResult:
       type: object
       properties:
