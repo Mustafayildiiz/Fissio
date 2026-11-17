@@ -431,6 +431,29 @@ class ApiClient {
 
   Future<void> deleteProfile(int serverId) => _send('DELETE', _expense, '/profiles/$serverId');
 
+  // --- Profil fotoğrafı (profile bağlı, sunucuda saklanır) ---
+  /// Avatarı yükler/değiştirir; yeni `avatar_version` döner.
+  Future<int> uploadAvatar(int profileServerId, Uint8List bytes) async {
+    final j = await _dispatch(
+      () {
+        final req = http.MultipartRequest('PUT', Uri.parse('$_expense/profiles/$profileServerId/avatar'));
+        req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: 'avatar.jpg'));
+        final t = _tokens?.access;
+        if (t != null) req.headers['Authorization'] = 'Bearer $t';
+        return req;
+      },
+      timeout: const Duration(seconds: 30),
+    ) as Map<String, dynamic>;
+    return (j['avatar_version'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> deleteAvatar(int profileServerId) =>
+      _send('DELETE', _expense, '/profiles/$profileServerId/avatar');
+
+  /// `Image.network` adresi; [version] değişince adres değişir ve önbellek kırılır. JWT başlığı [authHeaders].
+  String avatarUrl(int profileServerId, int version) =>
+      '$_expense/profiles/$profileServerId/avatar?v=$version';
+
   // --- Expense ---
   Future<List<Category>> categories() async {
     final j = await _send('GET', _expense, '/categories') as List;

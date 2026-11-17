@@ -6,6 +6,7 @@ import 'package:fissio_mobile/app_state.dart';
 import 'package:fissio_mobile/data/connectivity.dart';
 import 'package:fissio_mobile/data/local_store.dart';
 import 'package:fissio_mobile/device_info.dart';
+import 'package:fissio_mobile/ocr/ocr_engine.dart';
 import 'package:fissio_mobile/theme_controller.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -26,6 +27,8 @@ class FakeBackend {
   final Set<String> _expiredAccess = {};
   int _seq = 0;
   int refreshCalls = 0;
+  int avatarUploads = 0;
+  int scanCalls = 0;
   String lastCode = '123456';
   final Set<String> failPaths = {}; // "METHOD /path" -> 500
   bool rejectRefresh = false;
@@ -193,6 +196,34 @@ class FakeBackend {
       u.profiles.add(p);
       return _json(201, p);
     }
+    if (path == '/receipts/scan' && m == 'POST') {
+      scanCalls++;
+      return _json(200, {
+        'ocr': {'raw_text': 'SUNUCU OCR', 'engine': 'paddleocr'},
+        'parsed': {
+          'merchant': 'SUNUCU MARKET',
+          'amount': 10.0,
+          'category_id': 1,
+          'category_name': 'Market / Gıda',
+          'needs_manual': false,
+        },
+      });
+    }
+    final am = RegExp(r'^/profiles/(\d+)/avatar$').firstMatch(path);
+    if (am != null) {
+      final id = int.parse(am[1]!);
+      final p = u.profiles.where((p) => p['id'] == id).firstOrNull;
+      if (p == null) return _err(404, 'not_found', 'profile not found');
+      if (m == 'PUT') {
+        avatarUploads++;
+        p['avatar_version'] = ((p['avatar_version'] as int?) ?? 0) + 1;
+        return _json(200, {'avatar_version': p['avatar_version']});
+      }
+      if (m == 'DELETE') {
+        p['avatar_version'] = 0;
+        return _json(200, {'avatar_version': 0});
+      }
+    }
     final pm = RegExp(r'^/profiles/(\d+)$').firstMatch(path);
     if (pm != null) {
       final id = int.parse(pm[1]!);
@@ -323,8 +354,9 @@ class FakeConnectivity implements ConnectivityMonitor {
   final _ctrl = StreamController<bool>.broadcast();
   @override
   Stream<bool> get onChanged => _ctrl.stream;
+  bool online = true;
   @override
-  Future<bool> isOnline() async => true;
+  Future<bool> isOnline() async => online;
   void emit(bool online) => _ctrl.add(online);
 }
 
@@ -341,7 +373,13 @@ class Harness {
   final FakeConnectivity connectivity;
   final AppState app;
 
-  factory Harness({FakeBackend? backend, MemPrefs? prefs, MemoryLocalStore? local}) {
+  factory Harness({
+    FakeBackend? backend,
+    MemPrefs? prefs,
+    MemoryLocalStore? local,
+    OcrEngine? onDeviceOcr,
+    OcrMode Function()? ocrMode,
+  }) {
     final b = backend ?? FakeBackend();
     final p = prefs ?? MemPrefs();
     final l = local ?? MemoryLocalStore();
@@ -353,6 +391,8 @@ class Harness {
       local: l,
       connectivity: c,
       backgroundInterval: const Duration(hours: 1),
+      onDeviceOcr: onDeviceOcr,
+      ocrMode: ocrMode,
     );
     return Harness._(b, p, l, c, app);
   }

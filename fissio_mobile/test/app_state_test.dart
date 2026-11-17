@@ -29,6 +29,7 @@ Future<void> _until(bool Function() cond, {String? reason}) async {
 }
 
 void main() {
+  _avatarTests();
   late Harness h;
 
   setUp(() => h = Harness());
@@ -389,6 +390,106 @@ void main() {
       await h.app.verifyEmail('yeni@x.co', h.backend.lastCode);
       expect(h.app.loggedIn, isTrue);
       expect(h.app.profiles.map((p) => p.name), ['Kişisel']);
+    });
+  });
+}
+
+void _avatarTests() {
+  late Harness h;
+  setUp(() => h = Harness());
+
+  group('profil avatarı', () {
+    test('senkron açık + çevrimiçi: sunucuya yüklenir, sürüm profile yazılır, yerel dosya tutulmaz', () async {
+      await h.signIn('ali@x.co');
+      final id = h.app.activeProfile!.id;
+      expect(h.app.activeProfile!.hasAvatar, isFalse);
+
+      await h.app.setProfileAvatar(id, _img());
+      final p = h.app.activeProfile!;
+      expect(h.backend.avatarUploads, 1);
+      expect(p.avatarVersion, 1);
+      expect(p.localAvatarPath, isNull);
+      expect(p.hasAvatar, isTrue);
+      expect(h.local.images, isEmpty);
+
+      // Sunucudan yeniden yüklemede de görünür kalır.
+      await h.app.refresh();
+      expect(h.app.activeProfile!.avatarVersion, 1);
+    });
+
+    test('senkron kapalı: yalnızca cihazda tutulur, sunucuya hiçbir şey gitmez; açınca yüklenir', () async {
+      await h.signIn('ali@x.co');
+      await h.app.setSyncEnabled(false);
+      final id = h.app.activeProfile!.id;
+
+      await h.app.setProfileAvatar(id, _img());
+      var p = h.app.activeProfile!;
+      expect(h.backend.avatarUploads, 0);
+      expect(p.localAvatarPath, isNotNull);
+      expect(p.hasAvatar, isTrue);
+      expect(await h.app.readLocalImage(p.localAvatarPath!), _img());
+
+      await h.app.refresh();
+      expect(h.app.activeProfile!.localAvatarPath, isNotNull, reason: 'bulut yenilemesi yerel avatarı ezmez');
+
+      await h.app.setSyncEnabled(true);
+      await _until(() => h.backend.avatarUploads == 1, reason: 'bekleyen avatar yüklenmeli');
+      await _until(() => h.app.activeProfile!.localAvatarPath == null);
+      expect(h.app.activeProfile!.avatarVersion, 1);
+      expect(h.local.images, isEmpty, reason: 'yüklenen avatarın yerel dosyası silinir');
+    });
+
+    test('çevrimdışı: cihazda bekler, bağlantı gelince otomatik yüklenir', () async {
+      await h.signIn('ali@x.co');
+      final id = h.app.activeProfile!.id;
+      h.backend.offline = true;
+      await h.app.setProfileAvatar(id, _img());
+      expect(h.app.activeProfile!.localAvatarPath, isNotNull);
+      expect(h.backend.avatarUploads, 0);
+
+      h.backend.offline = false;
+      await h.app.flushNow(force: true);
+      await _until(() => h.backend.avatarUploads == 1);
+      expect(h.app.activeProfile!.localAvatarPath, isNull);
+      expect(h.app.activeProfile!.avatarVersion, 1);
+    });
+
+    test('kaldır: sunucu ve cihaz avatarı silinir; sync kapalıyken bulut avatarı salt okunur', () async {
+      await h.signIn('ali@x.co');
+      final id = h.app.activeProfile!.id;
+      await h.app.setProfileAvatar(id, _img());
+      await h.app.setSyncEnabled(false);
+      await expectLater(h.app.removeProfileAvatar(id), throwsA(isA<ApiException>()));
+      expect(h.app.activeProfile!.avatarVersion, 1);
+
+      await h.app.setSyncEnabled(true);
+      await h.app.removeProfileAvatar(id);
+      expect(h.app.activeProfile!.hasAvatar, isFalse);
+      expect(h.app.activeProfile!.avatarVersion, 0);
+    });
+
+    test('profil silinince yerel avatar dosyası da silinir; çıkışta başka hesaba sızmaz', () async {
+      await h.signIn('ali@x.co');
+      await h.app.setSyncEnabled(false);
+      await h.app.createProfile('Ev');
+      final home = h.app.activeProfile!;
+      await h.app.setProfileAvatar(home.id, _img());
+      expect(h.local.images, isNotEmpty);
+      await h.app.deleteProfile(home.id);
+      expect(h.local.images, isEmpty);
+
+      await h.app.logout();
+      await h.signIn('veli@x.co');
+      expect(h.app.profiles.any((p) => p.hasAvatar), isFalse);
+    });
+
+    test('Profile JSON turu: avatar alanları yerel kayıtta korunur', () {
+      final p = Profile(id: 'u', name: 'A', serverId: 3, avatarVersion: 4, localAvatarPath: 'x/y.jpg');
+      final back = Profile.fromLocalJson(p.toLocalJson());
+      expect(back.avatarVersion, 4);
+      expect(back.localAvatarPath, 'x/y.jpg');
+      expect(Profile.fromServerJson({'id': 1, 'name': 'B', 'client_uid': 'c', 'avatar_version': 2}).avatarVersion, 2);
+      expect(Profile.fromServerJson({'id': 1, 'name': 'B', 'client_uid': 'c'}).avatarVersion, 0);
     });
   });
 }

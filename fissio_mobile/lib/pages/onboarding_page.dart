@@ -90,7 +90,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
         (_) => false,
       );
     } else {
-      await Navigator.of(context).maybePop();
+      // pop(): PopScope'u (adım geri) atlar; rehber her adımdan doğrudan Ayarlar'a döner.
+      Navigator.of(context).pop();
     }
   }
 

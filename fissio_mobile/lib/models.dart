@@ -74,24 +74,45 @@ class Profile {
   final int? serverId;
   final SyncState state;
 
+  /// Sunucudaki avatar sürümü; 0 = sunucuda avatar yok. Görsel `api.avatarUrl` ile okunur.
+  final int avatarVersion;
+
+  /// Cihazdaki avatar dosyası (yerel depo yolu). Doluysa görüntülenen odur: senkron kapalıyken ya da
+  /// çevrimdışıyken seçilen avatar burada bekler ve senkron açıkken yüklenip temizlenir.
+  final String? localAvatarPath;
+
   const Profile({
     required this.id,
     required this.name,
     this.serverId,
     this.state = SyncState.synced,
+    this.avatarVersion = 0,
+    this.localAvatarPath,
   });
 
-  Profile copyWith({String? name, int? serverId, SyncState? state}) => Profile(
+  bool get hasAvatar => localAvatarPath != null || (serverId != null && avatarVersion > 0);
+
+  Profile copyWith({
+    String? name,
+    int? serverId,
+    SyncState? state,
+    int? avatarVersion,
+    String? localAvatarPath,
+    bool clearLocalAvatar = false,
+  }) => Profile(
     id: id,
     name: name ?? this.name,
     serverId: serverId ?? this.serverId,
     state: state ?? this.state,
+    avatarVersion: avatarVersion ?? this.avatarVersion,
+    localAvatarPath: clearLocalAvatar ? null : (localAvatarPath ?? this.localAvatarPath),
   );
 
   factory Profile.fromServerJson(Map<String, dynamic> j) => Profile(
     id: j['client_uid'] as String,
     name: j['name'] as String,
     serverId: (j['id'] as num).toInt(),
+    avatarVersion: (j['avatar_version'] as num?)?.toInt() ?? 0,
   );
 
   factory Profile.fromLocalJson(Map<String, dynamic> j) => Profile(
@@ -99,6 +120,8 @@ class Profile {
     name: j['name'] as String,
     serverId: (j['server_id'] as num?)?.toInt(),
     state: syncStateFrom(j['state'] as String?),
+    avatarVersion: (j['avatar_version'] as num?)?.toInt() ?? 0,
+    localAvatarPath: j['local_avatar'] as String?,
   );
 
   Map<String, dynamic> toLocalJson() => {
@@ -106,6 +129,8 @@ class Profile {
     'name': name,
     if (serverId != null) 'server_id': serverId,
     'state': state.name,
+    if (avatarVersion > 0) 'avatar_version': avatarVersion,
+    if (localAvatarPath != null) 'local_avatar': localAvatarPath,
   };
 }
 

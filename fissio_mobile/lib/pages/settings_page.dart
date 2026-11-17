@@ -7,14 +7,18 @@ import '../dialogs.dart';
 import '../onboarding_controller.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../profile_avatar.dart';
 import 'account_widgets.dart';
+import 'avatar_picker.dart';
 import 'auth_page.dart';
 import 'data_management_page.dart';
 import 'info_page.dart';
 import 'onboarding_page.dart';
+import '../app_info.dart';
 import 'preferences_page.dart';
 import 'profile_select_page.dart';
 import 'sessions_page.dart';
+import 'support_page.dart';
 
 /// Ayarlar'ı alttan açılan tam ekran sayfa olarak gösterir ("Bitti" ile kapanır).
 void openSettings(BuildContext context) {
@@ -32,7 +36,11 @@ class ProfileAvatar extends StatelessWidget {
     return ListenableBuilder(
       listenable: appState,
       builder: (context, _) =>
-          Avatar(appState.displayName, onTap: () => openSettings(context)),
+          ProfileAvatarView(
+            name: appState.displayName,
+            profile: appState.activeProfile,
+            onTap: () => openSettings(context),
+          ),
     );
   }
 }
@@ -43,9 +51,8 @@ class SettingsPage extends StatelessWidget {
   /// Verilmezse global [onboardingController] (testlerde sahte depolu denetleyici verilir).
   final OnboardingController? onboarding;
 
-  /// Tanıtımı bir kez gösterir; satır anında ve kalıcı olarak kaldırılır.
+  /// Tanıtımı açar; bitince/kapatınca Ayarlar'a döner, satır görünür kalır.
   void _openOnboarding(BuildContext context, OnboardingController ctrl) {
-    ctrl.markReplayOpened();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OnboardingPage(controller: ctrl, signUp: false),
@@ -53,9 +60,9 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  void _open(BuildContext context, String title, String body) {
+  void _open(BuildContext context, String title, List<InfoSection> sections) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => InfoPage(title: title, body: body)),
+      MaterialPageRoute(builder: (_) => InfoPage(title: title, sections: sections)),
     );
   }
 
@@ -160,7 +167,12 @@ class SettingsPage extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             child: Row(
                               children: [
-                                Avatar(appState.displayName, size: 60, filled: true),
+                                ProfileAvatarView(
+                                  name: appState.displayName,
+                                  profile: appState.activeProfile,
+                                  size: 60,
+                                  filled: true,
+                                ),
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
@@ -185,6 +197,14 @@ class SettingsPage extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (appState.activeProfile != null)
+                          ListRow(
+                            key: const ValueKey('change-avatar'),
+                            leading: Icon(LucideIcons.camera, size: 20, color: c.accentInk),
+                            title: 'Profil fotoğrafını değiştir',
+                            titleColor: c.accentInk,
+                            onTap: () => changeProfileAvatar(context, appState.activeProfile!),
+                          ),
                         ListRow(
                           leading: Icon(LucideIcons.repeat, size: 20, color: c.accentInk),
                           title: 'Profil değiştir',
@@ -205,11 +225,10 @@ class SettingsPage extends StatelessWidget {
                     const SizedBox(height: 12),
                     GroupedCard(
                       children: [
-                        if (onb.replayAvailable)
-                          _row(context, LucideIcons.bookOpen, 'Tanıtım Rehberini Görüntüle',
-                              () => _openOnboarding(context, onb)),
+                        _row(context, LucideIcons.bookOpen, 'Tanıtım Rehberini Görüntüle',
+                            () => _openOnboarding(context, onb)),
                         _row(context, LucideIcons.lifeBuoy, 'Destek',
-                            () => _open(context, 'Destek', InfoTexts.support)),
+                            () => _push(context, const SupportPage())),
                         _row(context, LucideIcons.info, 'Hakkımızda',
                             () => _open(context, 'Hakkımızda', InfoTexts.about)),
                       ],
@@ -229,7 +248,13 @@ class SettingsPage extends StatelessWidget {
                       children: [
                         if (appState.email != null)
                           ListRow(
-                            leading: IconTile(LucideIcons.mail, size: 34, radius: 10),
+                            leading: ProfileAvatarView(
+                              key: const ValueKey('account-avatar'),
+                              name: appState.displayName,
+                              profile: appState.activeProfile,
+                              size: 34,
+                              filled: true,
+                            ),
                             title: appState.email!,
                             subtitle: 'Giriş yapılan hesap',
                           ),
@@ -247,9 +272,12 @@ class SettingsPage extends StatelessWidget {
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(4, 18, 4, 0),
-                      child: Text(
-                        'Fissio · Sürüm 1.0',
-                        style: FissioText.body(c, size: 13, color: c.mute),
+                      child: FutureBuilder<String>(
+                        future: appVersionLoader(),
+                        builder: (context, snap) => Text(
+                          (snap.data ?? '').isEmpty ? 'Fissio' : 'Fissio · Sürüm ${snap.data}',
+                          style: FissioText.body(c, size: 13, color: c.mute),
+                        ),
                       ),
                     ),
                   ],

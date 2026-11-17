@@ -133,7 +133,10 @@ CREATE TABLE IF NOT EXISTS expense.profiles (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	UNIQUE (user_id, client_uid)
 );
-CREATE INDEX IF NOT EXISTS idx_profiles_user ON expense.profiles (user_id);`); err != nil {
+CREATE INDEX IF NOT EXISTS idx_profiles_user ON expense.profiles (user_id);
+ALTER TABLE expense.profiles ADD COLUMN IF NOT EXISTS avatar BYTEA;
+ALTER TABLE expense.profiles ADD COLUMN IF NOT EXISTS avatar_type TEXT;
+ALTER TABLE expense.profiles ADD COLUMN IF NOT EXISTS avatar_version INT NOT NULL DEFAULT 0;`); err != nil {
 		return err
 	}
 

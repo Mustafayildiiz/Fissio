@@ -57,6 +57,13 @@ class SyncService {
         s.profiles.where((p) => p.state == SyncState.pending).length;
   }
 
+  /// Yüklenmeyi bekleyen yerel avatarlar (profil sunucuda var, cihazda avatar dosyası var).
+  int get pendingAvatarCount =>
+      snapshot().profiles.where((p) => p.localAvatarPath != null && p.serverId != null).length;
+
+  /// Kuyrukta (fiş/profil/avatar) gönderilecek bir şey var mı?
+  bool get hasWork => pendingCount > 0 || pendingAvatarCount > 0;
+
   Future<void> _persist() async {
     final id = userId();
     if (id != null) await local.save(id, snapshot());
@@ -69,7 +76,7 @@ class SyncService {
       _rerun = true;
       return FlushOutcome.busy;
     }
-    if (userId() == null || pendingCount == 0) return FlushOutcome.nothing;
+    if (userId() == null || !hasWork) return FlushOutcome.nothing;
     _flushing = true;
     var outcome = FlushOutcome.done;
     try {
@@ -103,6 +110,25 @@ class SyncService {
       } on ApiException catch (e) {
         if (e.network) rethrow;
         partial = true; // örn. profil sınırı; fişler bu profile bağlıysa atlanır
+      }
+    }
+
+    // 1b) Avatarlar: cihazda bekleyen profil fotoğrafı (senkron kapalıyken/çevrimdışıyken seçilmiş) yüklenir.
+    for (final p in List<Profile>.of(snap.profiles)) {
+      final path = p.localAvatarPath;
+      if (path == null || p.serverId == null) continue;
+      if (!enabled()) return FlushOutcome.disabled;
+      final bytes = await local.readImage(path);
+      try {
+        final version = bytes == null ? p.avatarVersion : await api.uploadAvatar(p.serverId!, bytes);
+        final i = snap.profiles.indexWhere((x) => x.id == p.id);
+        if (i >= 0) snap.profiles[i] = p.copyWith(avatarVersion: version, clearLocalAvatar: true);
+        await local.deleteImage(path);
+        await _persist();
+        onChanged?.call();
+      } on ApiException catch (e) {
+        if (e.network) rethrow;
+        partial = true;
       }
     }
 

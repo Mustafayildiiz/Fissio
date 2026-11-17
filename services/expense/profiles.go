@@ -29,6 +29,8 @@ type profileOut struct {
 	Name      string    `json:"name"`
 	ClientUID string    `json:"client_uid"`
 	CreatedAt time.Time `json:"created_at"`
+	// AvatarVersion 0 = avatar yok; her yuklemede artar (istemci onbellegi icin ?v= parametresi).
+	AvatarVersion int `json:"avatar_version"`
 }
 
 func newUID() string {
@@ -72,7 +74,7 @@ func (h *handler) ensureProfiles(userID int64) ([]profileOut, error) {
 }
 
 func queryProfiles(q queryer, userID int64) ([]profileOut, error) {
-	rows, err := q.Query(`SELECT id, name, client_uid, created_at FROM expense.profiles WHERE user_id = $1 ORDER BY id`, userID)
+	rows, err := q.Query(`SELECT id, name, client_uid, created_at, (CASE WHEN avatar IS NULL THEN 0 ELSE avatar_version END) FROM expense.profiles WHERE user_id = $1 ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +82,7 @@ func queryProfiles(q queryer, userID int64) ([]profileOut, error) {
 	out := []profileOut{}
 	for rows.Next() {
 		var p profileOut
-		if err := rows.Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt, &p.AvatarVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -149,8 +151,8 @@ func (h *handler) createProfile(c *gin.Context) {
 		return
 	}
 	var existing profileOut
-	err = tx.QueryRow(`SELECT id, name, client_uid, created_at FROM expense.profiles WHERE user_id=$1 AND client_uid=$2`, userID, uid).
-		Scan(&existing.ID, &existing.Name, &existing.ClientUID, &existing.CreatedAt)
+	err = tx.QueryRow(`SELECT id, name, client_uid, created_at, (CASE WHEN avatar IS NULL THEN 0 ELSE avatar_version END) FROM expense.profiles WHERE user_id=$1 AND client_uid=$2`, userID, uid).
+		Scan(&existing.ID, &existing.Name, &existing.ClientUID, &existing.CreatedAt, &existing.AvatarVersion)
 	if err == nil {
 		c.JSON(http.StatusOK, existing)
 		return
@@ -170,8 +172,8 @@ func (h *handler) createProfile(c *gin.Context) {
 	}
 	var p profileOut
 	if err := tx.QueryRow(
-		`INSERT INTO expense.profiles (user_id, name, client_uid) VALUES ($1,$2,$3) RETURNING id, name, client_uid, created_at`,
-		userID, name, uid).Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt); err != nil {
+		`INSERT INTO expense.profiles (user_id, name, client_uid) VALUES ($1,$2,$3) RETURNING id, name, client_uid, created_at, (CASE WHEN avatar IS NULL THEN 0 ELSE avatar_version END)`,
+		userID, name, uid).Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt, &p.AvatarVersion); err != nil {
 		serverError(c)
 		return
 	}
@@ -202,8 +204,8 @@ func (h *handler) renameProfile(c *gin.Context) {
 	}
 	var p profileOut
 	err = h.db.QueryRow(
-		`UPDATE expense.profiles SET name=$1 WHERE id=$2 AND user_id=$3 RETURNING id, name, client_uid, created_at`,
-		name, id, c.GetInt64("userID")).Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt)
+		`UPDATE expense.profiles SET name=$1 WHERE id=$2 AND user_id=$3 RETURNING id, name, client_uid, created_at, (CASE WHEN avatar IS NULL THEN 0 ELSE avatar_version END)`,
+		name, id, c.GetInt64("userID")).Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt, &p.AvatarVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
 		return

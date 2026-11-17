@@ -3,6 +3,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'theme.dart';
 
+/// Fiş okuma motoru tercihi: otomatik (bağlantı + senkron durumuna göre), sunucu OCR ya da cihaz içi OCR.
+enum OcrMode { auto, server, onDevice }
+
 /// Küçük anahtar-değer deposu (testlerde sahtesi verilebilir).
 abstract class PrefsStore {
   Future<String?> read(String key);
@@ -40,10 +43,12 @@ class ThemeController extends ChangeNotifier {
   static const accentKey = 'pref_accent';
   static const modeKey = 'pref_theme_mode';
   static const styleKey = 'pref_receipt_style';
+  static const ocrModeKey = 'pref_ocr_mode';
 
   Color accent = kDefaultAccent;
   ThemeMode themeMode = ThemeMode.system;
   ReceiptStyle receiptStyle = ReceiptStyle.paper;
+  OcrMode ocrMode = OcrMode.auto;
 
   /// `runApp` öncesi çağrılır; depolama okunamazsa varsayılanlarla devam eder.
   Future<void> load() async {
@@ -61,6 +66,8 @@ class ThemeController extends ChangeNotifier {
         (e) => e.name == s,
         orElse: () => ReceiptStyle.paper,
       );
+      final o = await _store.read(ocrModeKey);
+      ocrMode = OcrMode.values.firstWhere((e) => e.name == o, orElse: () => OcrMode.auto);
     } catch (_) {
       // Depolama yoksa (test/ilk açılış) varsayılanlar geçerli.
     }
@@ -83,6 +90,12 @@ class ThemeController extends ChangeNotifier {
     receiptStyle = s;
     notifyListeners();
     await _save(styleKey, s.name);
+  }
+
+  Future<void> setOcrMode(OcrMode m) async {
+    ocrMode = m;
+    notifyListeners();
+    await _save(ocrModeKey, m.name);
   }
 
   Future<void> _save(String key, String value) async {

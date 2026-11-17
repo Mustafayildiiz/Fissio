@@ -5,8 +5,10 @@ import '../api.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../models.dart';
+import '../profile_avatar.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'avatar_picker.dart';
 import 'shell_page.dart';
 
 /// "Profil seçin": 2'li kare kartlar ve kesikli çerçeveli "Yeni profil" kartı.
@@ -111,6 +113,14 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
               const SizedBox(height: 12),
               GroupedCard(
                 children: [
+                  ListRow(
+                    leading: IconTile(LucideIcons.camera, size: 30, radius: 8),
+                    title: 'Fotoğrafı değiştir',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      changeProfileAvatar(context, p);
+                    },
+                  ),
                   ListRow(
                     leading: IconTile(LucideIcons.pencil, size: 30, radius: 8),
                     title: 'İsmi düzenle',
@@ -286,7 +296,7 @@ class _ProfileCard extends StatelessWidget {
                             ),
                           ),
                         )
-                      : Avatar(profile.name, size: 52, filled: active),
+                      : ProfileAvatarView(name: profile.name, profile: profile, size: 52, filled: active),
                   const Spacer(),
                   if (manage)
                     Icon(LucideIcons.ellipsis, size: 22, color: c.mute),

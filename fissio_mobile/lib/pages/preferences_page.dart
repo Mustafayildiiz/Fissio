@@ -81,6 +81,33 @@ class PreferencesPage extends StatelessWidget {
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Fiş okuma'),
+                    const SizedBox(height: 8),
+                    SegmentedControl<OcrMode>(
+                      key: const ValueKey('ocr-mode'),
+                      value: themeController.ocrMode,
+                      onChanged: themeController.setOcrMode,
+                      items: const [
+                        SegmentItem(OcrMode.auto, 'Otomatik', icon: LucideIcons.sparkles),
+                        SegmentItem(OcrMode.server, 'Sunucu', icon: LucideIcons.cloud),
+                        SegmentItem(OcrMode.onDevice, 'Cihaz', icon: LucideIcons.smartphone),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        switch (themeController.ocrMode) {
+                          OcrMode.auto =>
+                            'Bağlantı varken ve bulut senkronu açıkken yüksek doğruluklu sunucu OCR kullanılır, aksi halde cihaz içi OCR kullanılır.',
+                          OcrMode.server =>
+                            'Fotoğraf okunmak üzere sunucuya gönderilir (saklanmaz). Bağlantı yoksa ya da bulut senkronu kapalıyken cihaz içi OCR kullanılır.',
+                          OcrMode.onDevice =>
+                            'Cihaz İçi Hızlı OCR: fotoğraf cihazdan çıkmaz, internet gerekmez; doğruluk sunucuya göre daha düşük olabilir.',
+                        },
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
+                    ),
                   ],
                 ),
               ),

@@ -11,6 +11,7 @@ import 'data/sync_service.dart';
 import 'data/uid.dart';
 import 'models.dart';
 import 'ocr/ocr_engine.dart';
+import 'ocr/on_device_ocr_engine.dart';
 import 'theme_controller.dart';
 
 /// [AppState.saveDraft] sonucu.
@@ -44,10 +45,14 @@ class AppState extends ChangeNotifier {
     ConnectivityMonitor? connectivity,
     this.backgroundInterval = const Duration(seconds: 60),
     DateTime Function()? clock,
+    OcrEngine? onDeviceOcr,
+    OcrMode Function()? ocrMode,
   }) : _store = store ?? const SecurePrefsStore(),
        _local = local ?? FileLocalStore(),
        _connectivity = connectivity ?? PluginConnectivity(),
-       _clock = clock ?? DateTime.now {
+       _clock = clock ?? DateTime.now,
+       _ocrMode = ocrMode ?? (() => themeController.ocrMode) {
+    _onDeviceOcr = onDeviceOcr ?? OnDeviceOcrEngine(otherCategoryId: _otherCategoryId);
     this.api = api ?? ApiClient();
     this.api.onUnauthorized = _handleUnauthorized;
     this.api.onTokensChanged = _persistTokens;
@@ -69,6 +74,8 @@ class AppState extends ChangeNotifier {
   final ConnectivityMonitor _connectivity;
   final DateTime Function() _clock;
   final Duration backgroundInterval;
+  final OcrMode Function() _ocrMode;
+  late final OcrEngine _onDeviceOcr;
   final OcrEngineFactory ocrFactory = OcrEngineFactory(defaultEngine: 'paddleocr');
 
   static const _tokensKey = 'auth_tokens';
@@ -355,7 +362,7 @@ class AppState extends ChangeNotifier {
 
   /// Her başarılı API isteğinden sonra, kuyrukta kayıt varsa boşaltmayı dener (bağlantı geri geldi demektir).
   void _onApiSuccess() {
-    if (_syncEnabled && !_sync.flushing && _sync.pendingCount > 0) {
+    if (_syncEnabled && !_sync.flushing && _sync.hasWork) {
       scheduleMicrotask(() => flushNow());
     }
   }
@@ -425,7 +432,13 @@ class AppState extends ChangeNotifier {
     final serverUids = {for (final p in serverProfiles) p.id};
     // Sunucuda artık var olan yerel (pending) profil çift görünmesin; sunucu kazanır.
     final local = _snap.profiles.where((p) => p.state != SyncState.synced && !serverUids.contains(p.id));
-    _snap.profiles = [...serverProfiles, ...local];
+    // Cihazdaki (henüz yüklenmemiş) avatar yolu sunucu yanıtıyla ezilmesin.
+    final localAvatars = {for (final p in _snap.profiles) p.id: p.localAvatarPath};
+    _snap.profiles = [
+      for (final p in serverProfiles)
+        localAvatars[p.id] == null ? p : p.copyWith(localAvatarPath: localAvatars[p.id]),
+      ...local,
+    ];
     _cloudExpenses = [
       for (final e in serverExpenses) e.copyWith(profileUid: byServerId[e.profileServerId] ?? ''),
     ];
@@ -482,6 +495,52 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Profil fotoğrafını ayarlar ([bytes] istemcide ~512px JPEG'e küçültülmüş olmalı). Senkron açık ve
+  /// çevrimiçiyse sunucuya yüklenir; senkron kapalı / çevrimdışı / profil henüz yüklenmemişse cihazda tutulur
+  /// ve senkron açıkken otomatik yüklenir.
+  Future<void> setProfileAvatar(String id, Uint8List bytes) async {
+    final p = _profile(id);
+    final uid = user?.id;
+    if (p == null || uid == null || bytes.isEmpty) return;
+    Profile next;
+    var uploaded = false;
+    if (_syncEnabled && p.serverId != null) {
+      try {
+        final v = await api.uploadAvatar(p.serverId!, bytes);
+        next = p.copyWith(avatarVersion: v, clearLocalAvatar: true);
+        uploaded = true;
+      } on ApiException catch (e) {
+        if (!e.network) rethrow;
+        next = p;
+      }
+    } else {
+      next = p;
+    }
+    if (!uploaded) {
+      next = p.copyWith(localAvatarPath: await _local.saveImage(uid, bytes));
+    }
+    if (p.localAvatarPath != null) await _local.deleteImage(p.localAvatarPath!);
+    _snap.profiles = [for (final x in _snap.profiles) x.id == id ? next : x];
+    await _persistSnapshot();
+    notifyListeners();
+  }
+
+  /// Profil fotoğrafını kaldırır (varsayılan baş harf avatarına döner).
+  Future<void> removeProfileAvatar(String id) async {
+    final p = _profile(id);
+    if (p == null) return;
+    if (p.serverId != null && p.avatarVersion > 0) {
+      if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
+      await api.deleteAvatar(p.serverId!);
+    }
+    if (p.localAvatarPath != null) await _local.deleteImage(p.localAvatarPath!);
+    _snap.profiles = [
+      for (final x in _snap.profiles) x.id == id ? x.copyWith(avatarVersion: 0, clearLocalAvatar: true) : x,
+    ];
+    await _persistSnapshot();
+    notifyListeners();
+  }
+
   /// Profili ve içindeki tüm fişleri siler (en az 1 profil kalmalıdır).
   Future<void> deleteProfile(String id) async {
     final p = _profile(id);
@@ -490,6 +549,7 @@ class AppState extends ChangeNotifier {
       if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
       await api.deleteProfile(p.serverId!);
     }
+    if (p.localAvatarPath != null) await _local.deleteImage(p.localAvatarPath!);
     for (final e in _snap.expenses.where((e) => e.profileUid == id)) {
       for (final path in e.localImages) {
         await _local.deleteImage(path);
@@ -737,9 +797,38 @@ class AppState extends ChangeNotifier {
     if (_syncEnabled) await flushNow(force: true);
   }
 
+  int? _otherCategoryId() => categories.where((c) => c.name == 'Diğer').firstOrNull?.id;
+
+  /// Taramada cihaz içi OCR mı kullanılacak? Senkron kapalıysa her zaman; `onDevice` her zaman; `server`
+  /// hiçbir zaman (ağ hatası hariç); `auto` yalnızca bağlantı yokken.
+  Future<bool> _preferOnDeviceOcr() async {
+    // Bulut senkronu kapalıyken hiçbir seçimde fotoğraf sunucuya gönderilmez.
+    if (!_syncEnabled) return true;
+    switch (_ocrMode()) {
+      case OcrMode.onDevice:
+        return true;
+      case OcrMode.server:
+        return false;
+      case OcrMode.auto:
+        try {
+          return !await _connectivity.isOnline();
+        } catch (_) {
+          return false;
+        }
+    }
+  }
+
+  /// Fişi okur ve ayrıştırır. Sunucu OCR'ı denenirken ağ hatası olursa (bağlantı yok / sunucuya ulaşılamıyor)
+  /// hata vermeden cihaz içi OCR'a düşer; doğrulama gibi ağ dışı hatalar olduğu gibi iletilir.
   Future<ScanResult> scanAndParseReceipt(List<Uint8List> pages, {String? engine}) async {
+    if (await _preferOnDeviceOcr()) return _onDeviceOcr.scan(pages);
     final ocrEngine = ocrFactory.resolve(api, engineName: engine);
-    return ocrEngine.scan(pages);
+    try {
+      return await ocrEngine.scan(pages);
+    } on ApiException catch (e) {
+      if (!e.network) rethrow;
+      return _onDeviceOcr.scan(pages);
+    }
   }
 
   @override

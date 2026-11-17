@@ -67,6 +67,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 40 }
         client_uid: { type: string, description: İstemci kimliği; aynı uid ile POST idempotenttir }
         created_at: { type: string, format: date-time }
+        avatar_version: { type: integer, description: '0 = avatar yok; her yüklemede artar (avatar URL''sine ?v= eklenerek önbellek kırılır)' }
     BulkResult:
       type: object
       properties:
@@ -519,6 +520,47 @@ paths:
       responses:
         '204': { description: Silindi }
         '400': { description: last_profile }
+        '404': { description: Profil yok veya başka hesaba ait }
+  /profiles/{id}/avatar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    put:
+      tags: [expense]
+      summary: Profil fotoğrafını yükle / değiştir
+      description: Tek `file` alanı; jpeg, png veya webp (içerikten sezilir), en çok 1 MB. İstemci önce ~512px'e küçültür.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: 'Yüklendi; { avatar_version }' }
+        '400': { description: Geçersiz/boş dosya veya izin verilmeyen tür }
+        '404': { description: Profil yok veya başka hesaba ait }
+        '413': { description: Dosya 1 MB'tan büyük }
+    get:
+      tags: [expense]
+      summary: Profil fotoğrafını getir (ham görsel)
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Görsel baytları
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '404': { description: Avatar yok, profil yok veya başka hesaba ait }
+    delete:
+      tags: [expense]
+      summary: Profil fotoğrafını kaldır
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: 'Kaldırıldı; { avatar_version: 0 }' }
         '404': { description: Profil yok veya başka hesaba ait }
   /expenses/bulk:
     post:

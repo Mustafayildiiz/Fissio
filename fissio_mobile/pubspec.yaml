@@ -44,6 +44,9 @@ dependencies:
   device_info_plus: ^13.3.0
   connectivity_plus: ^7.3.2
   crypto: ^3.0.8
+  package_info_plus: ^10.2.2
+  url_launcher: ^6.3.3
+  google_mlkit_text_recognition: ^1.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

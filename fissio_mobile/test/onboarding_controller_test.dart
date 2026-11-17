@@ -56,51 +56,22 @@ void main() {
     await c.load();
     // AuthPage girişte shouldShowAfterSignUp'ı hiç çağırmaz; yalnızca yükleme yapılmıştır.
     expect(store.map, isEmpty);
-    expect(c.replayAvailable, isTrue); // rehberi hiç görmemiş → Ayarlar'da erişilebilir
   });
 
-  test('Ayarlar satırı: taze → görünür, atla → görünür kalır, tamamla → kalıcı gizli', () async {
-    final store = _MemStore();
-    final fresh = OnboardingController(store: store);
-    await fresh.load();
-    expect(fresh.replayAvailable, isTrue);
-
-    await fresh.skip();
-    expect(fresh.replayAvailable, isTrue);
-    final afterSkip = OnboardingController(store: store);
-    await afterSkip.load();
-    expect(afterSkip.replayAvailable, isTrue);
-
-    await afterSkip.complete();
-    expect(afterSkip.replayAvailable, isFalse);
-    final afterComplete = OnboardingController(store: store);
-    await afterComplete.load();
-    expect(afterComplete.replayAvailable, isFalse);
-  });
-
-  test('Ayarlar\'dan açma satırı anında ve kalıcı gizler; dinleyiciler bilgilendirilir', () async {
+  test('complete/skip Ayarlar satırını etkilemez ve cihaz bayrağı yazmaz', () async {
     final store = _MemStore();
     final c = OnboardingController(store: store);
     await c.load();
-    var notified = 0;
-    c.addListener(() => notified++);
-
-    await c.markReplayOpened();
-    expect(c.replayAvailable, isFalse);
-    expect(notified, 1);
-
-    final restarted = OnboardingController(store: store);
-    await restarted.load();
-    expect(restarted.replayAvailable, isFalse);
+    await c.skip();
+    await c.complete();
+    expect(store.map.containsKey(OnboardingController.legacyReplayUsedKey), isFalse);
   });
 
-  test('depolama hata verirse çökmez; bellek durumu korunur', () async {
+  test('depolama hata verirse çökmez', () async {
     final c = OnboardingController(store: _BrokenStore());
     await c.load();
-    expect(c.replayAvailable, isTrue);
     expect(await c.shouldShowAfterSignUp('x@fissio.app'), isTrue);
     await c.markShownAtSignUp('x@fissio.app');
-    await c.markReplayOpened();
-    expect(c.replayAvailable, isFalse);
+    await c.complete();
   });
 }

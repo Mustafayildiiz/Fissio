@@ -73,14 +73,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(done, 1);
-      expect(ctrl.replayAvailable, isFalse);
       final restarted = OnboardingController(store: store);
       await restarted.load();
-      expect(restarted.replayAvailable, isFalse);
       expect(await restarted.shouldShowAfterSignUp('yeni@fissio.app'), isFalse);
     });
 
-    testWidgets('Atla akışı bitirir; otomatik gösterim kapanır, Ayarlar satırı açık kalır', (tester) async {
+    testWidgets('Atla akışı bitirir; otomatik gösterim kapanır', (tester) async {
       _tallScreen(tester);
       final store = _MemStore();
       final ctrl = OnboardingController(store: store);
@@ -97,14 +95,13 @@ void main() {
 
       expect(done, 1);
       expect(await ctrl.shouldShowAfterSignUp('a@fissio.app'), isFalse);
-      expect(ctrl.replayAvailable, isTrue);
     });
   });
 
   group('Ayarlar satırı', () {
     const rowLabel = 'Tanıtım Rehberini Görüntüle';
 
-    testWidgets('görmemiş kullanıcıda görünür; dokununca onboarding açılır ve satır kalıcı kaybolur', (tester) async {
+    testWidgets('satır görünür; açılan rehber kapanınca Ayarlara dönülür ve satır görünür kalır', (tester) async {
       _tallScreen(tester);
       final store = _MemStore();
       final ctrl = OnboardingController(store: store);
@@ -118,37 +115,26 @@ void main() {
       expect(find.byType(OnboardingPage), findsOneWidget);
       expect(find.text('1 / 3'), findsOneWidget);
 
-      // Rehberi kapatıp Ayarlar'a dön (Atla → maybePop).
       await tester.tap(find.byKey(const ValueKey('onb-skip')));
       await tester.pumpAndSettle();
       expect(find.byType(OnboardingPage), findsNothing);
-      expect(find.text(rowLabel), findsNothing);
+      expect(find.text(rowLabel), findsOneWidget);
 
-      // Uygulama yeniden başlatıldı.
-      final restarted = OnboardingController(store: store);
-      await restarted.load();
-      await tester.pumpWidget(_app(SettingsPage(onboarding: restarted)));
-      await tester.pump();
-      expect(find.text(rowLabel), findsNothing);
+      // Tamamlayarak da aynı: tekrar açılabilir.
+      await tester.tap(find.text(rowLabel));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.byKey(const ValueKey('onb-primary')));
+        await tester.pumpAndSettle();
+      }
+      expect(find.byType(OnboardingPage), findsNothing);
+      expect(find.text(rowLabel), findsOneWidget);
     });
 
-    testWidgets('kayıtta tamamlayan kullanıcıda baştan gizli', (tester) async {
+    testWidgets('kayıtta tamamlayan ya da eski bayrağı olan cihazda da görünür', (tester) async {
       _tallScreen(tester);
       final store = _MemStore();
-      await OnboardingController(store: store).complete();
-      final ctrl = OnboardingController(store: store);
-      await ctrl.load();
-      await tester.pumpWidget(_app(SettingsPage(onboarding: ctrl)));
-      await tester.pump();
-      expect(find.text(rowLabel), findsNothing);
-    });
-
-    testWidgets('kayıtta atlayan kullanıcıda görünür', (tester) async {
-      _tallScreen(tester);
-      final store = _MemStore();
-      final signUpCtrl = OnboardingController(store: store);
-      await signUpCtrl.markShownAtSignUp('a@fissio.app');
-      await signUpCtrl.skip();
+      await store.write(OnboardingController.legacyReplayUsedKey, '1');
       final ctrl = OnboardingController(store: store);
       await ctrl.load();
       await tester.pumpWidget(_app(SettingsPage(onboarding: ctrl)));
