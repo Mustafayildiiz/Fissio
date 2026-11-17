@@ -26,10 +26,23 @@ class FissioApp extends StatefulWidget {
   State<FissioApp> createState() => _FissioAppState();
 }
 
-class _FissioAppState extends State<FissioApp> {
+class _FissioAppState extends State<FissioApp> with WidgetsBindingObserver {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Uygulama ön plana gelince token'ı önceden yenile ve çevrimdışı kuyruğu boşalt.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) appState.onAppResumed();
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Token süresi dolduğunda (401) giriş sayfasına dön.
     appState.onSessionExpired = () {
       navigatorKey.currentState?.pushAndRemoveUntil(

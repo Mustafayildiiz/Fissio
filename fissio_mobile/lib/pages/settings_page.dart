@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../api.dart';
 import '../app_state.dart';
+import '../dialogs.dart';
 import '../onboarding_controller.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'account_widgets.dart';
 import 'auth_page.dart';
+import 'data_management_page.dart';
 import 'info_page.dart';
 import 'onboarding_page.dart';
 import 'preferences_page.dart';
 import 'profile_select_page.dart';
+import 'sessions_page.dart';
 
 /// Ayarlar'ı alttan açılan tam ekran sayfa olarak gösterir ("Bitti" ile kapanır).
 void openSettings(BuildContext context) {
@@ -56,6 +61,61 @@ class SettingsPage extends StatelessWidget {
 
   void _push(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  void _toAuth(BuildContext context) {
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthPage()),
+      (_) => false,
+    );
+  }
+
+  /// Çıkış: bellekteki tüm hesap verisi, aktif profil ve token'lar silinir. Yüklenmemiş yerel kayıt varsa
+  /// önce bilgilendirilir (cihazda kalır, aynı hesapla girişte geri gelir).
+  Future<void> _logout(BuildContext context) async {
+    final unsynced = appState.pendingCount + appState.localOnlyCount;
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Çıkış yap',
+      message: unsynced > 0
+          ? 'Buluta yüklenmemiş $unsynced kayıt bu cihazda saklanır ve aynı hesapla tekrar girince geri gelir. '
+                'Önce Veri Yönetimi\'nden senkronlayabilir ya da dışa aktarabilirsin.'
+          : 'Bu cihazdaki oturumun kapatılacak.',
+      confirmLabel: 'Çıkış yap',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) return;
+    await appState.logout();
+    if (context.mounted) _toAuth(context);
+  }
+
+  /// KVKK/GDPR: hesabı, profilleri, fişleri, görselleri ve oturumları kalıcı siler (şifre onayıyla).
+  Future<void> _deleteAccount(BuildContext context) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Hesabını kalıcı olarak sil',
+      message: 'Hesabın, tüm profillerin, fişlerin, fiş fotoğrafların ve açık oturumların sunucudan ve bu cihazdan '
+          'kalıcı olarak silinir. Bu işlem geri alınamaz.',
+      confirmLabel: 'Devam',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) return;
+    final pw = await showPasswordPrompt(
+      context,
+      title: 'Şifreni onayla',
+      message: 'Silme işlemini onaylamak için şifreni gir.',
+      confirmLabel: 'Hesabı sil',
+      destructive: true,
+    );
+    if (pw == null || pw.isEmpty || !context.mounted) return;
+    try {
+      await appState.deleteAccount(pw);
+      if (context.mounted) _toAuth(context);
+    } on ApiException catch (e) {
+      if (context.mounted) {
+        showMessage(context, e.code == 'invalid_credentials' ? 'Şifre hatalı.' : e.message);
+      }
+    }
   }
 
   Widget _row(
@@ -138,8 +198,8 @@ class SettingsPage extends StatelessWidget {
                       children: [
                         _row(context, LucideIcons.slidersHorizontal, 'Tercihler',
                             () => _push(context, const PreferencesPage())),
-                        _row(context, LucideIcons.database, 'Veri',
-                            () => _open(context, 'Veri', InfoTexts.data)),
+                        _row(context, LucideIcons.database, 'Veri Yönetimi',
+                            () => _push(context, const DataManagementPage())),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -164,10 +224,25 @@ class SettingsPage extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    const SectionLabel('Hesap'),
                     GroupedCard(
                       children: [
-                        _row(context, LucideIcons.logIn, 'Giriş / Kayıt',
-                            () => _push(context, const AuthPage())),
+                        if (appState.email != null)
+                          ListRow(
+                            leading: IconTile(LucideIcons.mail, size: 34, radius: 10),
+                            title: appState.email!,
+                            subtitle: 'Giriş yapılan hesap',
+                          ),
+                        _row(context, LucideIcons.smartphone, 'Aktif oturumlar',
+                            () => _push(context, const SessionsPage())),
+                        _row(context, LucideIcons.logOut, 'Çıkış yap', () => _logout(context)),
+                        ListRow(
+                          leading: IconTile(LucideIcons.trash2, size: 34, radius: 10),
+                          title: 'Hesabımı kalıcı olarak sil',
+                          titleColor: c.danger,
+                          vertical: 10,
+                          onTap: () => _deleteAccount(context),
+                        ),
                       ],
                     ),
                     Padding(

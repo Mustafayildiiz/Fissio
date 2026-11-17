@@ -22,14 +22,6 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
   String? _busyId;
   bool _manage = false;
 
-  @override
-  void initState() {
-    super.initState();
-    if (appState.profiles.isEmpty) {
-      appState.loadProfiles();
-    }
-  }
-
   void _openShell() {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const ShellPage()),
@@ -37,7 +29,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
     );
   }
 
-  Future<void> _select(UserProfile p) async {
+  Future<void> _select(Profile p) async {
     if (_busyId != null) return;
     setState(() => _busyId = p.id);
     try {
@@ -71,7 +63,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
     }
   }
 
-  Future<void> _renameDialog(UserProfile p) async {
+  Future<void> _renameDialog(Profile p) async {
     final name = await showTextPrompt(
       context,
       title: 'Profili yeniden adlandır',
@@ -80,11 +72,15 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       confirmLabel: 'Kaydet',
     );
     if (name != null && name.isNotEmpty) {
-      await appState.renameProfile(p.id, name);
+      try {
+        await appState.renameProfile(p.id, name);
+      } on ApiException catch (e) {
+        if (mounted) showMessage(context, e.message);
+      }
     }
   }
 
-  Future<void> _deleteProfile(UserProfile p) async {
+  Future<void> _deleteProfile(Profile p) async {
     final ok = await showConfirmDialog(
       context,
       title: 'Profili sil',
@@ -92,10 +88,15 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       confirmLabel: 'Sil',
       destructive: true,
     );
-    if (ok) await appState.deleteProfile(p.id);
+    if (!ok) return;
+    try {
+      await appState.deleteProfile(p.id);
+    } on ApiException catch (e) {
+      if (mounted) showMessage(context, e.message);
+    }
   }
 
-  void _showProfileOptions(UserProfile p) {
+  void _showProfileOptions(Profile p) {
     final c = context.c;
     showModalBottomSheet<void>(
       context: context,
@@ -157,6 +158,13 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
                       Text('FISSIO', style: FissioText.label(c)),
                       const SizedBox(height: 6),
                       Text('Profil seçin', style: FissioText.title(c)),
+                      if (appState.email != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          appState.email!,
+                          style: FissioText.body(c, size: 14, color: c.mute),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -237,7 +245,7 @@ class _ProfileCard extends StatelessWidget {
     required this.onOptions,
   });
 
-  final UserProfile profile;
+  final Profile profile;
   final bool active;
   final bool busy;
   final bool manage;
@@ -293,7 +301,14 @@ class _ProfileCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: FissioText.body(c, size: 17, weight: FontWeight.w600),
                   ),
-                  if (active)
+                  if (profile.state != SyncState.synced)
+                    Text(
+                      profile.state == SyncState.pending
+                          ? 'Yüklenmeyi bekliyor'
+                          : 'Yalnızca bu cihazda',
+                      style: FissioText.body(c, size: 13, color: c.mute),
+                    )
+                  else if (active)
                     Text(
                       'Son kullanılan',
                       style: FissioText.body(c, size: 13, color: c.mute),

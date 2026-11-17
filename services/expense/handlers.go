@@ -205,6 +205,11 @@ type expenseInput struct {
 	// SuggestedCategoryID: tarama sirasinda otomatik onerilen fis kategorisi. Secilenden farkliysa
 	// kullanici duzeltmesi sayilir ve kisisel kural olarak ogrenilir.
 	SuggestedCategoryID int `json:"suggested_category_id"`
+	// ProfileID: fisin ait oldugu profil (hesabin kendi profili olmali). Bos/0 = varsayilan profil.
+	ProfileID int64 `json:"profile_id"`
+	// ClientUID: istemcinin urettigi kalici kimlik. Ayni (hesap, client_uid) tekrar gelirse kayit
+	// mukerrer olusmaz (cevrimdisi kuyruk tekrari, yedekten iceri aktarma). Bos ise sunucu uretir.
+	ClientUID string `json:"client_uid"`
 }
 
 // itemsForStorage kalemleri kalici biciminde ({name, amount, category_id}) dondurur.
@@ -269,6 +274,8 @@ type expenseOut struct {
 	Note         string        `json:"note"`
 	Items        []expenseItem `json:"items"`
 	ImageIDs     []int64       `json:"image_ids"`
+	ProfileID    int64         `json:"profile_id"`
+	ClientUID    string        `json:"client_uid"`
 }
 
 func (in *expenseInput) validate() (time.Time, string) {
@@ -282,6 +289,12 @@ func (in *expenseInput) validate() (time.Time, string) {
 	d, err := time.Parse(dateLayout, in.Date)
 	if err != nil {
 		return time.Time{}, "date must be YYYY-MM-DD"
+	}
+	if in.ClientUID != "" && !clientUIDRe.MatchString(in.ClientUID) {
+		return time.Time{}, "invalid client_uid"
+	}
+	if in.ProfileID < 0 {
+		return time.Time{}, "invalid profile_id"
 	}
 	if len([]rune(in.Merchant)) > 100 {
 		return time.Time{}, "merchant too long"
@@ -312,7 +325,7 @@ func isFKViolation(err error) bool {
 }
 
 const selectExpense = `
-SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items,
+SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -323,7 +336,7 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var d time.Time
 	var items []byte
 	var imageIDs pq.Int64Array
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &imageIDs)
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &imageIDs)
 	e.Date = d.Format(dateLayout)
 	e.Items = []expenseItem{}
 	e.ImageIDs = []int64{} // JSON'da null degil []
@@ -350,6 +363,20 @@ func (h *handler) createExpense(c *gin.Context) {
 	if !h.itemCategoriesOK(c, in.Items) {
 		return
 	}
+	userID := c.GetInt64("userID")
+	profileID, found, err := h.resolveProfile(userID, in.ProfileID)
+	if err != nil {
+		serverError(c)
+		return
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
+		return
+	}
+	uid := in.ClientUID
+	if uid == "" {
+		uid = newUID()
+	}
 	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
 	tx, err := h.db.Begin()
 	if err != nil {
@@ -357,11 +384,7 @@ func (h *handler) createExpense(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
-	var id int64
-	err = tx.QueryRow(
-		`INSERT INTO expense.expenses (user_id, merchant, amount, spent_at, category_id, note, items)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		c.GetInt64("userID"), in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON)).Scan(&id)
+	id, created, err := insertExpense(tx, userID, profileID, uid, in, d, string(itemsJSON))
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
@@ -370,11 +393,38 @@ func (h *handler) createExpense(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	if err := saveRules(tx, c.GetInt64("userID"), collectRuleUpdates(in)); err != nil || tx.Commit() != nil {
+	if created {
+		if err := saveRules(tx, userID, collectRuleUpdates(in)); err != nil {
+			serverError(c)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		serverError(c)
 		return
 	}
-	h.respondExpense(c, http.StatusCreated, id)
+	status := http.StatusCreated
+	if !created {
+		status = http.StatusOK // ayni client_uid daha once kaydedilmis (idempotent tekrar)
+	}
+	h.respondExpense(c, status, id)
+}
+
+// insertExpense fisi ekler; (user_id, client_uid) zaten varsa mevcut kaydin id'sini ve created=false doner.
+func insertExpense(q interface {
+	QueryRow(query string, args ...any) *sql.Row
+}, userID, profileID int64, uid string, in expenseInput, d time.Time, itemsJSON string) (int64, bool, error) {
+	var id int64
+	err := q.QueryRow(
+		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 ON CONFLICT (user_id, client_uid) DO NOTHING RETURNING id`,
+		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = q.QueryRow(`SELECT id FROM expense.expenses WHERE user_id = $1 AND client_uid = $2`, userID, uid).Scan(&id)
+		return id, false, err
+	}
+	return id, err == nil, err
 }
 
 func (h *handler) respondExpense(c *gin.Context, status int, id int64) {
@@ -421,6 +471,14 @@ func (h *handler) getExpense(c *gin.Context) {
 func (h *handler) listExpenses(c *gin.Context) {
 	q := selectExpense + `WHERE e.user_id = $1`
 	args := []any{c.GetInt64("userID")}
+	if v := c.Query("profile_id"); v != "" {
+		pid, ok := h.profileFilter(c, v)
+		if !ok {
+			return
+		}
+		args = append(args, pid)
+		q += ` AND e.profile_id = $` + strconv.Itoa(len(args))
+	}
 	for _, p := range []struct{ param, op string }{{"from", ">="}, {"to", "<="}} {
 		if v := c.Query(p.param); v != "" {
 			d, err := time.Parse(dateLayout, v)
@@ -483,6 +541,20 @@ func (h *handler) updateExpense(c *gin.Context) {
 	if !h.itemCategoriesOK(c, in.Items) {
 		return
 	}
+	// profile_id verilmisse fis o profile tasinir (profil hesaba ait olmali); verilmemisse profil korunur.
+	var moveTo any
+	if in.ProfileID != 0 {
+		pid, found, err := h.resolveProfile(c.GetInt64("userID"), in.ProfileID)
+		if err != nil {
+			serverError(c)
+			return
+		}
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
+			return
+		}
+		moveTo = pid
+	}
 	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
 	tx, err := h.db.Begin()
 	if err != nil {
@@ -491,9 +563,10 @@ func (h *handler) updateExpense(c *gin.Context) {
 	}
 	defer tx.Rollback()
 	res, err := tx.Exec(
-		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6
+		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
+		 profile_id = COALESCE($9::bigint, profile_id)
 		 WHERE id=$7 AND user_id=$8`,
-		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"))
+		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo)
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
@@ -559,12 +632,19 @@ func (h *handler) summary(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.db.Query(
-		`SELECT c.id, c.name, SUM(e.amount), COUNT(*)
+	sq := `SELECT c.id, c.name, SUM(e.amount), COUNT(*)
 		 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id
-		 WHERE e.user_id = $1 AND e.spent_at BETWEEN $2 AND $3
-		 GROUP BY c.id, c.name ORDER BY SUM(e.amount) DESC`,
-		c.GetInt64("userID"), from, to)
+		 WHERE e.user_id = $1 AND e.spent_at BETWEEN $2 AND $3`
+	sargs := []any{c.GetInt64("userID"), from, to}
+	if v := c.Query("profile_id"); v != "" {
+		pid, ok := h.profileFilter(c, v)
+		if !ok {
+			return
+		}
+		sargs = append(sargs, pid)
+		sq += ` AND e.profile_id = $4`
+	}
+	rows, err := h.db.Query(sq+` GROUP BY c.id, c.name ORDER BY SUM(e.amount) DESC`, sargs...)
 	if err != nil {
 		serverError(c)
 		return
@@ -607,4 +687,23 @@ func (h *handler) summary(c *gin.Context) {
 		"count":       count,
 		"by_category": items,
 	})
+}
+
+// profileFilter profile_id sorgu parametresini dogrular (sahiplik); gecersiz/yabanci profil -> 400/404 yazar.
+func (h *handler) profileFilter(c *gin.Context, v string) (int64, bool) {
+	id, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || id <= 0 {
+		badRequest(c, "invalid profile_id")
+		return 0, false
+	}
+	pid, found, err := h.resolveProfile(c.GetInt64("userID"), id)
+	if err != nil {
+		serverError(c)
+		return 0, false
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
+		return 0, false
+	}
+	return pid, true
 }

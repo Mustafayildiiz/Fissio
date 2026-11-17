@@ -57,7 +57,7 @@ Toplam yaklaşık 7-8 hafta. İki kişi paralel çalışırsa Faz 1-3 (backend) 
 ### Faz 1: Altyapı ve Auth
 - [x] `docker-compose.yml`: postgres (portu dışarı açma), auth, expense. `healthcheck` ve `depends_on` ekle.
 - [x] SQL migrasyonları (`golang-migrate` veya init SQL)
-- [x] Auth: e-posta doğrulama, `bcrypt` (cost ≥ 10), JWT süresi 24 saat, `/auth/login` (şu an yalnızca e-posta biçim doğrulaması var, onay e-postası yok; bcrypt DefaultCost = 10)
+- [x] Auth: 6 haneli e-posta OTP doğrulaması (SMTP ya da geliştirme için log), şifre sıfırlama (kodla), `bcrypt` (DefaultCost = 10), 15 dk access JWT + 30 gün rotasyonlu refresh token, cihaz/oturum yönetimi (uzaktan çıkış, tüm cihazlardan çıkış), KVKK hesap silme
 - [x] Gin JWT middleware paylaşılan paketi (her serviste ayrı `jwt.go`, paylaşılan paket değil)
 - [ ] Birim testleri: yinelenen e-posta, yanlış şifre, süresi dolmuş token
 
@@ -121,7 +121,7 @@ Toplam yaklaşık 7-8 hafta. İki kişi paralel çalışırsa Faz 1-3 (backend) 
 ## 5. SRS'te Netleştirilmesi Gereken Noktalar
 1. **Servis ayrımı**: Auth ve Expense ayrı veritabanı mı kullanacak, yoksa aynı Postgres içinde ayrı şemalar mı? Öneri: tek Postgres, ayrı şemalar.
 2. **API gateway**: İstemci iki servise ayrı portlardan mı bağlanacak, yoksa tek giriş noktası (Nginx) mı olacak? Öneri: Nginx ile tek giriş (opsiyonel).
-3. **Refresh token**: SRS'te yok, yalnızca süreli JWT var. Süre dolunca yeniden giriş yapılacak.
+3. **Refresh token**: uygulandı (15 dk access + 30 gün tek kullanımlık refresh, DB'de hash'li; bkz. CLAUDE.md).
 4. **Ham metin saklama**: SRS "işlenmiş metin" saklandığını söylüyor. `raw_text` kolonunun tutulup tutulmayacağını belirle (KVKK açısından da önemli).
 5. **Kategori listesi**: Sabit mi, kullanıcı eklenebilir mi? Öneri: sabit liste ile başla.
 6. **Platform**: Önce yalnızca Android mi, yoksa iOS de mi? iOS için Mac gerekir.

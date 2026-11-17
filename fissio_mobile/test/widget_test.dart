@@ -1,4 +1,7 @@
+import 'package:fissio_mobile/pages/account_ready_page.dart';
 import 'package:fissio_mobile/pages/auth_page.dart';
+import 'package:fissio_mobile/pages/data_management_page.dart';
+import 'package:fissio_mobile/pages/forgot_password_page.dart';
 import 'package:fissio_mobile/pages/home_page.dart';
 import 'package:fissio_mobile/pages/onboarding_page.dart';
 import 'package:fissio_mobile/pages/preferences_page.dart';
@@ -7,7 +10,10 @@ import 'package:fissio_mobile/pages/receipt_detail_page.dart';
 import 'package:fissio_mobile/pages/receipt_form_page.dart';
 import 'package:fissio_mobile/pages/receipts_page.dart';
 import 'package:fissio_mobile/pages/scan_page.dart';
+import 'package:fissio_mobile/pages/sessions_page.dart';
 import 'package:fissio_mobile/pages/settings_page.dart';
+import 'package:fissio_mobile/pages/verify_email_page.dart';
+import 'package:fissio_mobile/api.dart';
 import 'package:fissio_mobile/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,6 +54,22 @@ void main() {
       await show(const ScanPage());
       await show(OnboardingPage(onDone: () {}));
       await show(const ReceiptDetailPage(id: 999));
+      // Hesap ekranları (eklentisiz: sahte yükleyici/geri çağrılarla).
+      await show(const AuthPage(startInRegister: true));
+      await show(const ForgotPasswordPage());
+      await show(const AccountReadyPage(email: 'a@b.co'));
+      await show(const DataManagementPage());
+      await show(SessionsPage(loader: () async => [
+            DeviceSession(
+              id: '1',
+              deviceName: 'Pixel 8',
+              platform: 'android',
+              lastActiveAt: DateTime.now(),
+              createdAt: DateTime.now(),
+              current: true,
+            ),
+          ]));
+      await show(VerifyEmailPage(email: 'a@b.co', initialCooldown: 30));
     });
   }
 }

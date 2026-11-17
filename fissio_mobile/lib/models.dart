@@ -1,5 +1,8 @@
 import 'dart:typed_data';
 
+String _isoDate(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
 class Category {
   final int id;
   final String name;
@@ -34,48 +37,75 @@ class CategoryRule {
   );
 }
 
-class UserProfile {
+/// Kaydın bulutla ilişkisi: [synced] sunucuda; [pending] bulut senkronu açıkken henüz yüklenmedi
+/// (çevrimdışı kuyruk, bağlantı gelince otomatik yüklenir); [localOnly] senkron kapalıyken yalnızca
+/// cihazda (kullanıcı senkronu açana kadar sunucuya hiçbir koşulda gönderilmez).
+enum SyncState { synced, pending, localOnly }
+
+SyncState syncStateFrom(String? v) => switch (v) {
+  'pending' => SyncState.pending,
+  'localOnly' => SyncState.localOnly,
+  _ => SyncState.synced,
+};
+
+/// Giriş yapmış hesap (sunucudan; şifre asla saklanmaz).
+class AuthUser {
+  final int id;
+  final String email;
+  final String name;
+  const AuthUser({required this.id, required this.email, this.name = ''});
+
+  factory AuthUser.fromJson(Map<String, dynamic> j) => AuthUser(
+    id: (j['id'] as num).toInt(),
+    email: (j['email'] as String?) ?? '',
+    name: (j['name'] as String?) ?? '',
+  );
+
+  Map<String, dynamic> toJson() => {'id': id, 'email': email, 'name': name};
+}
+
+/// Hesaba bağlı profil (Kişisel, Ev, İş...). [id] istemci kimliğidir (`client_uid`): hem sunucudaki hem
+/// henüz yüklenmemiş yerel profiller için aynıdır; böylece senkron idempotent olur.
+class Profile {
   final String id;
   final String name;
-  final String email;
-  final String password;
-  final String? token;
 
-  const UserProfile({
+  /// Sunucudaki sayısal kimlik; henüz yüklenmemiş profillerde null.
+  final int? serverId;
+  final SyncState state;
+
+  const Profile({
     required this.id,
     required this.name,
-    required this.email,
-    required this.password,
-    this.token,
+    this.serverId,
+    this.state = SyncState.synced,
   });
 
-  UserProfile copyWith({
-    String? name,
-    String? email,
-    String? password,
-    String? token,
-  }) => UserProfile(
+  Profile copyWith({String? name, int? serverId, SyncState? state}) => Profile(
     id: id,
     name: name ?? this.name,
-    email: email ?? this.email,
-    password: password ?? this.password,
-    token: token ?? this.token,
+    serverId: serverId ?? this.serverId,
+    state: state ?? this.state,
   );
 
-  factory UserProfile.fromJson(Map<String, dynamic> j) => UserProfile(
+  factory Profile.fromServerJson(Map<String, dynamic> j) => Profile(
+    id: j['client_uid'] as String,
+    name: j['name'] as String,
+    serverId: (j['id'] as num).toInt(),
+  );
+
+  factory Profile.fromLocalJson(Map<String, dynamic> j) => Profile(
     id: j['id'] as String,
     name: j['name'] as String,
-    email: j['email'] as String,
-    password: j['password'] as String,
-    token: j['token'] as String?,
+    serverId: (j['server_id'] as num?)?.toInt(),
+    state: syncStateFrom(j['state'] as String?),
   );
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toLocalJson() => {
     'id': id,
     'name': name,
-    'email': email,
-    'password': password,
-    'token': token,
+    if (serverId != null) 'server_id': serverId,
+    'state': state.name,
   };
 }
 
@@ -139,6 +169,7 @@ class ExpenseItem {
 }
 
 class Expense {
+  /// Sunucu fişlerinde sunucu kimliği (>0); yalnızca cihazdaki fişlerde negatif yerel kimlik.
   final int id;
   final String merchant;
   final double amount;
@@ -151,6 +182,22 @@ class Expense {
   /// Fişe bağlı fotoğraf kimlikleri (sunucuda saklanır, sıralı).
   final List<int> imageIds;
 
+  /// Hesap genelinde tekil kalıcı kimlik (`client_uid`): çevrimdışı kuyruk tekrarı ve içe aktarma
+  /// mükerrer kayıt üretmesin diye.
+  final String clientUid;
+
+  /// Fişin profili: istemci kimliği ([Profile.id]) ve (biliniyorsa) sunucu kimliği.
+  final String profileUid;
+  final int? profileServerId;
+
+  final SyncState syncState;
+
+  /// Yalnızca cihazdaki (henüz yüklenmemiş) fişin fotoğraf dosya yolları.
+  final List<String> localImages;
+
+  /// Taramada önerilen fiş kategorisi (yerel fişte, yüklenirken sunucunun kural öğrenmesi için saklanır).
+  final int? suggestedCategoryId;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -161,7 +208,50 @@ class Expense {
     required this.note,
     required this.items,
     this.imageIds = const [],
+    this.clientUid = '',
+    this.profileUid = '',
+    this.profileServerId,
+    this.syncState = SyncState.synced,
+    this.localImages = const [],
+    this.suggestedCategoryId,
   });
+
+  bool get isLocal => syncState != SyncState.synced;
+  int get imageCount => imageIds.length + localImages.length;
+
+  Expense copyWith({
+    int? id,
+    String? merchant,
+    double? amount,
+    DateTime? date,
+    int? categoryId,
+    String? categoryName,
+    String? note,
+    List<ExpenseItem>? items,
+    List<int>? imageIds,
+    String? clientUid,
+    String? profileUid,
+    int? profileServerId,
+    SyncState? syncState,
+    List<String>? localImages,
+    int? suggestedCategoryId,
+  }) => Expense(
+    id: id ?? this.id,
+    merchant: merchant ?? this.merchant,
+    amount: amount ?? this.amount,
+    date: date ?? this.date,
+    categoryId: categoryId ?? this.categoryId,
+    categoryName: categoryName ?? this.categoryName,
+    note: note ?? this.note,
+    items: items ?? this.items,
+    imageIds: imageIds ?? this.imageIds,
+    clientUid: clientUid ?? this.clientUid,
+    profileUid: profileUid ?? this.profileUid,
+    profileServerId: profileServerId ?? this.profileServerId,
+    syncState: syncState ?? this.syncState,
+    localImages: localImages ?? this.localImages,
+    suggestedCategoryId: suggestedCategoryId ?? this.suggestedCategoryId,
+  );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
     id: j['id'] as int,
@@ -177,7 +267,51 @@ class Expense {
     imageIds: ((j['image_ids'] as List?) ?? [])
         .map((e) => (e as num).toInt())
         .toList(),
+    clientUid: (j['client_uid'] as String?) ?? '',
+    profileServerId: (j['profile_id'] as num?)?.toInt(),
   );
+
+  /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
+  Map<String, dynamic> toLocalJson() => {
+    'id': id,
+    'merchant': merchant,
+    'amount': amount,
+    'date': _isoDate(date),
+    'category_id': categoryId,
+    'category_name': categoryName,
+    'note': note,
+    'items': items.map((i) => i.toJson()..['category_name'] = i.categoryName).toList(),
+    'client_uid': clientUid,
+    'profile_uid': profileUid,
+    if (profileServerId != null) 'profile_server_id': profileServerId,
+    'state': syncState.name,
+    'images': localImages,
+    if (suggestedCategoryId != null) 'suggested_category_id': suggestedCategoryId,
+  };
+
+  factory Expense.fromLocalJson(Map<String, dynamic> j) {
+    final items = ((j['items'] as List?) ?? []).map((e) {
+      final m = e as Map<String, dynamic>;
+      return ExpenseItem.fromJson(m)
+        ..suggestedCategoryId = (m['suggested_category_id'] as num?)?.toInt();
+    }).toList();
+    return Expense(
+      id: (j['id'] as num).toInt(),
+      merchant: (j['merchant'] as String?) ?? '',
+      amount: (j['amount'] as num).toDouble(),
+      date: DateTime.parse(j['date'] as String),
+      categoryId: (j['category_id'] as num?)?.toInt() ?? 0,
+      categoryName: (j['category_name'] as String?) ?? 'Diğer',
+      note: (j['note'] as String?) ?? '',
+      items: items,
+      clientUid: j['client_uid'] as String,
+      profileUid: (j['profile_uid'] as String?) ?? '',
+      profileServerId: (j['profile_server_id'] as num?)?.toInt(),
+      syncState: syncStateFrom(j['state'] as String?),
+      localImages: ((j['images'] as List?) ?? []).cast<String>(),
+      suggestedCategoryId: (j['suggested_category_id'] as num?)?.toInt(),
+    );
+  }
 }
 
 /// Kalem toplamından indirim düşülmüş, kaydedilecek fiş tutarı. İndirim yoksa ya da kalemlerden
@@ -190,6 +324,9 @@ double netTotal(double itemsTotal, double discount) {
 /// Fiş formu ile ürün ekranı arasında taşınan taslak.
 class ReceiptDraft {
   int? id; // null ise yeni fiş
+
+  /// Düzenlenen fişin kalıcı kimliği (yeni fişte kayıt sırasında üretilir).
+  String? clientUid;
   String merchant;
   int? categoryId;
 
@@ -219,6 +356,7 @@ class ReceiptDraft {
 
   ReceiptDraft({
     this.id,
+    this.clientUid,
     this.merchant = '',
     this.categoryId,
     this.suggestedCategoryId,
@@ -247,6 +385,7 @@ class ReceiptDraft {
   /// POST/PUT /expenses gövdesi. Fiş ve kalem `suggested_category_id`'leri, kullanıcı otomatik
   /// kategoriyi değiştirdiyse sunucunun kişisel kural öğrenmesi içindir.
   Map<String, dynamic> toRequestBody() => {
+    if (clientUid != null) 'client_uid': clientUid,
     'merchant': merchant,
     'amount': savedAmount,
     'date':
@@ -269,6 +408,7 @@ class ReceiptDraft {
                   i.amount,
                   categoryId: i.categoryId,
                   categoryName: i.categoryName,
+                  suggestedCategoryId: i.suggestedCategoryId,
                 ),
               )
               .toList();
@@ -277,8 +417,10 @@ class ReceiptDraft {
     final diff = ((gross - e.amount) * 100).round() / 100;
     return ReceiptDraft(
       id: e.id,
+      clientUid: e.clientUid.isEmpty ? null : e.clientUid,
       merchant: e.merchant,
       categoryId: e.categoryId,
+      suggestedCategoryId: e.suggestedCategoryId,
       date: e.date,
       note: e.note,
       items: items,

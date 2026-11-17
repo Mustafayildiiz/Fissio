@@ -53,6 +53,36 @@ class _PaperShadowPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+/// Cihazdaki fişin bulutla ilişkisini açıklar.
+class _SyncStateNote extends StatelessWidget {
+  const _SyncStateNote(this.state);
+  final SyncState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final pending = state == SyncState.pending;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
+      child: Row(
+        children: [
+          Icon(pending ? LucideIcons.cloudUpload : LucideIcons.smartphone, size: 20, color: c.accentInk),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              pending
+                  ? 'Bu fiş henüz buluta yüklenmedi; bağlantı gelince otomatik yüklenecek.'
+                  : 'Bu fiş yalnızca bu cihazda (bulut senkronu kapalı).',
+              style: FissioText.body(c, size: 14, color: c.mute),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ReceiptDetailPage extends StatelessWidget {
   const ReceiptDetailPage({super.key, required this.id});
   final int id;
@@ -109,11 +139,18 @@ class ReceiptDetailPage extends StatelessWidget {
                   trailing: BarAction(
                     'Düzenle',
                     bold: true,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ReceiptFormPage(initial: e),
-                      ),
-                    ),
+                    onTap: () {
+                      // Senkron kapalıyken bulut fişleri salt-okunurdur (yerel fişler serbestçe düzenlenir).
+                      if (!e.isLocal && !appState.syncEnabled) {
+                        showMessage(context, readOnlyCloudMessage);
+                        return;
+                      }
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ReceiptFormPage(initial: e),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 Expanded(
@@ -121,6 +158,10 @@ class ReceiptDetailPage extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
                     children: [
                       if (paper) _PaperReceipt(e) else _ListReceipt(e),
+                      if (e.isLocal) ...[
+                        const SizedBox(height: 16),
+                        _SyncStateNote(e.syncState),
+                      ],
                       const SizedBox(height: 16),
                       ReceiptImageStrip(expense: e),
                       const SizedBox(height: 16),

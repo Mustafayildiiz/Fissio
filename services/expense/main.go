@@ -23,28 +23,50 @@ func main() {
 		log.Fatalf("migration failed: %v", err)
 	}
 
-	secret := os.Getenv("JWT_SECRET")
+	// Access token'i auth servisi imzalar: JWT_ACCESS_SECRET (yoksa eski JWT_SECRET) iki serviste ayni olmali.
+	secret := os.Getenv("JWT_ACCESS_SECRET")
 	if secret == "" {
-		log.Fatal("JWT_SECRET is required")
+		secret = os.Getenv("JWT_SECRET")
+	}
+	if secret == "" {
+		log.Fatal("JWT_ACCESS_SECRET (or JWT_SECRET) is required")
 	}
 
+	h := &handler{db: db, ocrFactory: NewOcrEngineFactoryFromEnv()}
+	// Iptal edilen oturum (cikis, uzaktan cikis, hesap silme) en gec 10 sn icinde reddedilir.
+	sessions := newSessionChecker(db, 10*time.Second)
+	r := buildRouter(h, []byte(secret), sessions.alive)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Fatal(r.Run(":" + port))
+}
+
+// buildRouter tum rotalari kurar (testler de gercek rota tablosunu kullanir). alive nil ise oturum kontrolu yapilmaz.
+func buildRouter(h *handler, secret []byte, alive func(sid string) (bool, error)) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors())
 
 	r.GET("/health", func(c *gin.Context) {
-		if err := db.Ping(); err != nil {
+		if err := h.db.Ping(); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"service": "expense", "status": "db_down"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"service": "expense", "status": "ok", "time": time.Now().UTC()})
 	})
 
-	h := &handler{db: db, ocrFactory: NewOcrEngineFactoryFromEnv()}
-	api := r.Group("/", authMiddleware([]byte(secret)))
+	api := r.Group("/", authMiddleware(secret, alive))
+	api.GET("/profiles", h.listProfiles)
+	api.POST("/profiles", h.createProfile)
+	api.PUT("/profiles/:id", h.renameProfile)
+	api.DELETE("/profiles/:id", h.deleteProfile)
 	api.GET("/categories", h.listCategories)
 	api.POST("/receipts/parse", h.parseReceipt)
 	api.POST("/receipts/scan", h.scanReceipt)
 	api.POST("/expenses", h.createExpense)
+	api.POST("/expenses/bulk", h.bulkExpenses)
 	api.GET("/expenses", h.listExpenses)
 	api.GET("/expenses/:id", h.getExpense)
 	api.PUT("/expenses/:id", h.updateExpense)
@@ -55,12 +77,7 @@ func main() {
 	api.GET("/reports/summary", h.summary)
 	api.GET("/category-rules", h.listRules)
 	api.DELETE("/category-rules/:id", h.deleteRule)
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Fatal(r.Run(":" + port))
+	return r
 }
 
 func waitForDB(db *sql.DB) {

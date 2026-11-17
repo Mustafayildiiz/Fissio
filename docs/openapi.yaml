@@ -5,7 +5,12 @@ info:
   description: |
     Fissio mikroservis API sözleşmesi. Üç servis ayrı portlardan yayın yapar:
     auth (:8081), expense (:8082), ocr (:8083).
-    Kimlik doğrulama: `Authorization: Bearer <JWT>` (24 saat geçerli).
+    Kimlik doğrulama: `Authorization: Bearer <access_token>`. Access token kısa ömürlüdür (15 dakika);
+    süresi dolunca `POST /auth/refresh` ile (tek kullanımlık, rotasyonlu) refresh token'dan yenilenir.
+    Oturumu iptal edilen (çıkış, uzaktan çıkış, şifre sıfırlama, hesap silme) token'lar süresi dolmadan
+    `401 session_revoked` döner. Hata gövdesi: `{ error, code }` (`code` makine okunur).
+    Hesap izolasyonu: User → Profiles → Receipts. Her profil/fiş yalnızca sahibi hesaba görünür; başka
+    hesabın kaynağına erişim `404` döner. `client_uid` hesap başına tekildir (idempotent kayıt / içe aktarma).
 servers:
   - url: http://localhost:8081
     description: auth
@@ -29,7 +34,55 @@ components:
       required: [email, password]
       properties:
         email: { type: string, format: email }
-        password: { type: string }
+        password: { type: string, description: 'En az 8 karakter, bir rakam ve bir büyük harf (en çok 72 bayt)' }
+        name: { type: string, description: 'Yalnızca kayıtta; en çok 80 karakter' }
+        device_name: { type: string, description: 'Oturum listesinde gösterilir (örn. Pixel 8)' }
+        platform: { type: string, description: 'android | ios | ...' }
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string, description: '15 dakika geçerli JWT (sub, sid, typ=access)' }
+        refresh_token: { type: string, description: 'Opak, 30 gün, tek kullanımlık (DB de hash li). Her yenilemede değişir.' }
+        expires_at: { type: string, format: date-time, description: access_token bitişi }
+        user:
+          type: object
+          properties:
+            id: { type: integer, format: int64 }
+            email: { type: string }
+            name: { type: string }
+    Session:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        device_name: { type: string }
+        platform: { type: string }
+        ip: { type: string }
+        created_at: { type: string, format: date-time }
+        last_active_at: { type: string, format: date-time }
+        current: { type: boolean, description: İsteği yapan oturum }
+    Profile:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, minLength: 1, maxLength: 40 }
+        client_uid: { type: string, description: İstemci kimliği; aynı uid ile POST idempotenttir }
+        created_at: { type: string, format: date-time }
+    BulkResult:
+      type: object
+      properties:
+        created: { type: integer }
+        skipped: { type: integer, description: client_uid zaten kayıtlı olanlar (mükerrer oluşturulmaz) }
+        failed: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              client_uid: { type: string }
+              status: { type: string, enum: [created, skipped, error] }
+              id: { type: integer, format: int64 }
+              error: { type: string }
     Item:
       type: object
       description: >-
@@ -72,6 +125,17 @@ components:
             Tarama sırasında önerilen fiş kategorisi. category_id'den farklıysa kullanıcı düzeltmesi
             sayılır ve işletme adı için kişisel kural olarak saklanır (sonraki taramalarda uygulanır).
         note: { type: string }
+        profile_id:
+          type: integer
+          format: int64
+          description: >-
+            Fişin profili (hesabın kendi profili olmalı; yoksa 404). Boş/0 = varsayılan (en eski) profil.
+            Güncellemede verilmezse profil korunur, verilirse fiş o profile taşınır.
+        client_uid:
+          type: string
+          description: >-
+            İstemci/dışa aktarma kimliği (`[A-Za-z0-9._:-]{1,64}`). Aynı hesapta aynı uid tekrar gelirse
+            kayıt mükerrer oluşmaz (`POST /expenses` mevcut kaydı 200 ile döner). Boşsa sunucu üretir.
         items:
           type: array
           items: { $ref: '#/components/schemas/Item' }
@@ -234,16 +298,53 @@ paths:
   /auth/register:
     post:
       tags: [auth]
-      summary: Kayıt
+      summary: Kayıt (6 haneli e-posta doğrulama kodu gönderir)
+      description: >-
+        Hesap e-posta doğrulanana kadar aktif değildir. Doğrulanmamış aynı e-posta tekrar kaydolursa
+        şifre/ad güncellenir ve yeni kod gönderilir. SMTP yapılandırılmamışsa kod yalnızca auth loguna yazılır.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/Credentials' }
       responses:
-        '201': { description: Oluşturuldu (id, email, created_at) }
-        '400': { description: Geçersiz e-posta veya şifre }
-        '409': { description: E-posta zaten kayıtlı }
+        '201': { description: 'Kod gönderildi: { email, verification_required, resend_after_seconds, expires_in_seconds }' }
+        '400': { description: 'invalid_email | weak_password' }
+        '409': { description: 'email_taken (doğrulanmış hesap)' }
+        '429': { description: 'resend_cooldown (retry_after) | too_many_codes | rate_limited' }
+        '502': { description: email_send_failed }
+  /auth/verify-email:
+    post:
+      tags: [auth]
+      summary: E-posta doğrulama kodunu onayla (otomatik giriş)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string }
+                code: { type: string, description: 6 haneli kod, 10 dakika geçerli, tek kullanımlık }
+                device_name: { type: string }
+                platform: { type: string }
+      responses:
+        '200': { description: Oturum açıldı, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        '400': { description: 'invalid_code | code_expired' }
+        '429': { description: 'too_many_attempts (kod başına en çok 5 deneme)' }
+  /auth/resend-code:
+    post:
+      tags: [auth]
+      summary: Doğrulama kodunu yeniden gönder (60 sn bekleme, saatte en çok 5)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string } } }
+      responses:
+        '202': { description: Kabul edildi (hesap varlığı sızdırılmaz) }
+        '429': { description: 'resend_cooldown (retry_after saniye) | too_many_codes' }
   /auth/login:
     post:
       tags: [auth]
@@ -254,16 +355,194 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/Credentials' }
       responses:
-        '200': { description: token, expires_at ve user döner }
-        '401': { description: E-posta veya şifre hatalı }
+        '200': { description: Oturum açıldı, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        '401': { description: invalid_credentials }
+        '403': { description: 'email_not_verified (şifre doğruysa yeni kod gönderilir)' }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Access token yenile (refresh token rotasyonu)
+      description: >-
+        Refresh token tek kullanımlıktır; yanıttaki yeni refresh token saklanmalıdır. Rotasyondan sonra eski token
+        için 45 sn tolerans vardır (yeni çifti kaydetmeden kapanan uygulama oturumunu kaybetmesin); bu
+        süreden sonra eski token yeniden kullanılırsa çalıntı sayılır ve oturum iptal edilir.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [refresh_token], properties: { refresh_token: { type: string } } }
+      responses:
+        '200': { description: Yeni çift, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        '401': { description: 'invalid_refresh | session_revoked' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Bu refresh token oturumunu kapat (idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { refresh_token: { type: string } } }
+      responses:
+        '204': { description: Kapatıldı }
+  /auth/logout-all:
+    post:
+      tags: [auth]
+      summary: Tüm cihazlardan çıkış (tüm oturumlar ve refresh token lar geçersiz)
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Tüm oturumlar kapatıldı }
+  /auth/sessions:
+    get:
+      tags: [auth]
+      summary: Açık oturumlar (cihaz, platform, son aktiflik)
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Session' } }
+  /auth/sessions/{id}:
+    delete:
+      tags: [auth]
+      summary: Tek bir cihazdaki oturumu uzaktan kapat
+      security: [{ bearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Kapatıldı }
+        '404': { description: Oturum yok veya başka hesaba ait }
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      summary: Şifre sıfırlama kodu gönder
+      description: Hesap var/yok ayrımı sızdırılmaz; her zaman 202 döner. Kod yalnızca doğrulanmış hesaplara gider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string } } }
+      responses:
+        '202': { description: Kabul edildi }
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      summary: Kodla yeni şifre belirle (tüm oturumlar kapanır)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, new_password]
+              properties:
+                email: { type: string }
+                code: { type: string }
+                new_password: { type: string }
+      responses:
+        '204': { description: Şifre güncellendi }
+        '400': { description: 'invalid_code | code_expired | weak_password' }
+        '429': { description: too_many_attempts }
+  /auth/account:
+    delete:
+      tags: [auth]
+      summary: Hesabı kalıcı sil (KVKK/GDPR)
+      description: >-
+        Şifre onayıyla çalışır. Hesap, tüm profiller, fişler, fiş görselleri, kategori kuralları, oturumlar
+        ve doğrulama kodları tek işlemde kalıcı olarak silinir.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [password], properties: { password: { type: string } } }
+      responses:
+        '204': { description: Silindi }
+        '403': { description: invalid_credentials }
   /auth/me:
     get:
       tags: [auth]
       summary: Geçerli kullanıcı
       security: [{ bearer: [] }]
       responses:
-        '200': { description: Kullanıcı bilgisi }
-        '401': { description: Token geçersiz veya süresi dolmuş }
+        '200': { description: 'id, email, name, created_at, email_verified' }
+        '401': { description: 'unauthorized | session_revoked' }
+  /profiles:
+    get:
+      tags: [expense]
+      summary: Hesabın profilleri (hiç yoksa varsayılan "Kişisel" otomatik oluşturulur)
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Profile' } }
+    post:
+      tags: [expense]
+      summary: Profil oluştur (client_uid ile idempotent; hesap başına en çok 20)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                client_uid: { type: string }
+      responses:
+        '201': { description: Oluşturuldu, content: { application/json: { schema: { $ref: '#/components/schemas/Profile' } } } }
+        '200': { description: Aynı client_uid ile profil zaten var }
+        '400': { description: Geçersiz ad / çok fazla profil }
+  /profiles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    put:
+      tags: [expense]
+      summary: Profili yeniden adlandır
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name], properties: { name: { type: string } } }
+      responses:
+        '200': { description: Güncellendi }
+        '404': { description: Profil yok veya başka hesaba ait }
+    delete:
+      tags: [expense]
+      summary: Profili ve içindeki tüm fişleri (görseller dahil) sil. Son profil silinemez.
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Silindi }
+        '400': { description: last_profile }
+        '404': { description: Profil yok veya başka hesaba ait }
+  /expenses/bulk:
+    post:
+      tags: [expense]
+      summary: Toplu, idempotent fiş kaydı (çevrimdışı kuyruk boşaltma ve yedekten içe aktarma)
+      description: >-
+        En çok 500 fiş. Her fişte `client_uid` zorunludur; hesapta zaten varsa `skipped` olur (mükerrer
+        oluşmaz). Geçersiz fişler `error` olarak raporlanır ve diğerlerini engellemez.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expenses]
+              properties:
+                profile_id: { type: integer, format: int64, description: Fişlerde profile_id yoksa kullanılır }
+                expenses:
+                  type: array
+                  items: { $ref: '#/components/schemas/ExpenseInput' }
+      responses:
+        '200': { description: Sonuç, content: { application/json: { schema: { $ref: '#/components/schemas/BulkResult' } } } }
+        '400': { description: Boş veya 500 den fazla }
   /categories:
     get:
       tags: [expense]
@@ -368,6 +647,7 @@ paths:
       summary: Harcama listesi
       security: [{ bearer: [] }]
       parameters:
+        - { name: profile_id, in: query, description: 'Yalnızca bu profil (hesabın profili olmalı, yoksa 404). Verilmezse hesabın tüm profilleri.', schema: { type: integer, format: int64 } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -395,6 +675,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Expense' }
+        '200': { description: Aynı client_uid ile fiş zaten kayıtlı; mevcut kayıt döner (mükerrer oluşmaz) }
+        '404': { description: profile_id hesaba ait değil }
   /expenses/{id}/images:
     parameters:
       - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -475,6 +757,7 @@ paths:
       parameters:
         - { name: period, in: query, schema: { type: string, enum: [week, month], default: month } }
         - { name: date, in: query, description: Referans tarih (YYYY-MM-DD), schema: { type: string, format: date } }
+        - { name: profile_id, in: query, description: Yalnızca bu profil (verilmezse hesabın tüm profilleri), schema: { type: integer, format: int64 } }
       responses:
         '200':
           description: OK

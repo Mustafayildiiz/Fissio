@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS expense.expenses (
 CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expense.expenses (user_id, spent_at);
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS note  TEXT  NOT NULL DEFAULT '';
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]';
-ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS profile_id TEXT NOT NULL DEFAULT 'default';
 CREATE TABLE IF NOT EXISTS expense.receipt_images (
 	id           BIGSERIAL PRIMARY KEY,
 	expense_id   BIGINT NOT NULL REFERENCES expense.expenses(id) ON DELETE CASCADE,
@@ -47,6 +46,10 @@ CREATE TABLE IF NOT EXISTS expense.category_rules (
 	UNIQUE (user_id, kind, pattern)
 );
 `); err != nil {
+		return err
+	}
+
+	if err := migrateProfiles(db); err != nil {
 		return err
 	}
 
@@ -106,4 +109,60 @@ func migrateTaxonomy(db *sql.DB) error {
 	_, err := db.Exec(`UPDATE expense.categories SET keywords = array_remove(array_remove(keywords, 'elektrik'), 'dogalgaz')
 		WHERE keywords && ARRAY['elektrik','dogalgaz']`)
 	return err
+}
+
+// migrateProfiles hesap altinda izole profilleri kurar (idempotent):
+//   - expense.profiles(user_id, name, client_uid); varsayilan profil "Kisisel".
+//   - expenses.profile_id eskiden hic kullanilmayan metin kolonuydu ('default'); profile_id_legacy'e tasinir,
+//     yerine profiles'a bagli BIGINT profile_id gelir. Mevcut harcamalar kullanici basina "Kisisel" profile baglanir.
+//   - expenses.client_uid: istemci/ihrac kimligi; (user_id, client_uid) tekil -> iceri aktarma ve cevrimdisi
+//     kuyruk tekrarlari mukerrer kayit uretmez. Mevcut satirlara 'srv-<id>' yazilir.
+func migrateProfiles(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+CREATE TABLE IF NOT EXISTS expense.profiles (
+	id         BIGSERIAL PRIMARY KEY,
+	user_id    BIGINT NOT NULL,
+	name       TEXT NOT NULL,
+	client_uid TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	UNIQUE (user_id, client_uid)
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_user ON expense.profiles (user_id);`); err != nil {
+		return err
+	}
+
+	var legacyType sql.NullString
+	if err := tx.QueryRow(`SELECT data_type FROM information_schema.columns
+		WHERE table_schema='expense' AND table_name='expenses' AND column_name='profile_id'`).Scan(&legacyType); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if legacyType.Valid && legacyType.String != "bigint" {
+		if _, err := tx.Exec(`ALTER TABLE expense.expenses RENAME COLUMN profile_id TO profile_id_legacy`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES expense.profiles(id) ON DELETE CASCADE;
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS client_uid TEXT;
+
+INSERT INTO expense.profiles (user_id, name, client_uid)
+	SELECT DISTINCT user_id, 'Kişisel', 'srv-default-' || user_id FROM expense.expenses WHERE profile_id IS NULL
+	ON CONFLICT (user_id, client_uid) DO NOTHING;
+UPDATE expense.expenses e SET profile_id = (SELECT min(p.id) FROM expense.profiles p WHERE p.user_id = e.user_id)
+	WHERE e.profile_id IS NULL;
+UPDATE expense.expenses SET client_uid = 'srv-' || id WHERE client_uid IS NULL;
+
+ALTER TABLE expense.expenses ALTER COLUMN profile_id SET NOT NULL;
+ALTER TABLE expense.expenses ALTER COLUMN client_uid SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_expenses_user_uid ON expense.expenses (user_id, client_uid);
+CREATE INDEX IF NOT EXISTS idx_expenses_profile_date ON expense.expenses (profile_id, spent_at);`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

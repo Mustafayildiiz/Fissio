@@ -229,17 +229,22 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       ..items = items;
     setState(() => _busy = true);
     try {
-      final imagesOk = await appState.saveDraft(_draft);
+      final wasNew = _draft.id == null;
+      final res = await appState.saveDraft(_draft);
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
       showMessage(
         context,
-        !imagesOk
+        !res.imagesOk
             ? 'Fiş kaydedildi ancak fotoğraflar yüklenemedi; fiş detayından tekrar ekleyin.'
-            : (_draft.id == null ? 'Fiş kaydedildi.' : 'Fiş güncellendi.'),
+            : res.queued
+            ? 'Çevrimdışı kaydedildi. Bağlantı gelince otomatik yüklenecek.'
+            : res.localOnly
+            ? 'Fiş yalnızca bu cihaza kaydedildi (bulut senkronu kapalı).'
+            : (wasNew ? 'Fiş kaydedildi.' : 'Fiş güncellendi.'),
       );
     } on ApiException catch (e) {
-      // Ağ hatasında kuyruğa alınmaz; form ekranda kalır, kullanıcı tekrar dener.
+      // Ağ dışı hata (doğrulama, yetki): form ekranda kalır. Ağ hatasında fiş zaten cihaz kuyruğuna alınır.
       if (mounted) showMessage(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);

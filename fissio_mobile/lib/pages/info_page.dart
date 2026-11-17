@@ -4,14 +4,17 @@ import '../theme.dart';
 import '../widgets.dart';
 
 class InfoTexts {
-  static const data = 'Harcama kayıtlarınız hesabınıza bağlı olarak veritabanında saklanır. '
-      'Fiş fotoğrafları sunucuya yüklenmez ve saklanmaz.';
+  static const data = 'Fişlerin ve profillerin varsayılan olarak hesabına bağlı biçimde bulutta (sunucu veritabanında) '
+      'saklanır; bağlantı yokken kaydettiklerin cihazda bekler ve bağlantı gelince otomatik yüklenir. '
+      'Ayarlar > Veri Yönetimi\'nden bulut senkronunu kapatırsan yeni kayıtlar yalnızca bu cihazda kalır. '
+      'Verilerini JSON veya CSV olarak dışa aktarabilir, yedekten geri yükleyebilirsin.';
   static const support = 'Sorun ve önerileriniz için proje deposundaki Issues bölümünü kullanabilirsiniz.';
   static const about = 'Fissio, fişlerinizi kaydetmenize ve mikro harcamalarınızı '
       'kategori bazında takip etmenize yardımcı olan bir harcama yönetim uygulamasıdır.';
-  static const privacy = 'Fiş görselleri cihazda işlenir ve sunucuya gönderilmez. '
-      'Yalnızca onayladığınız finansal kayıtlar (marka, tutar, tarih, kategori) saklanır. '
-      'Şifreniz bcrypt ile hashlenerek tutulur.';
+  static const privacy = 'Fiş fotoğrafı, metne çevrilmek üzere işlenmesi için geçici olarak sunucuya gönderilir ve '
+      'bu işlem sırasında saklanmaz. Kaydettiğin fişlerin fotoğrafları ve finansal kayıtlar (işletme, tutar, tarih, '
+      'kategori, kalemler) hesabına bağlı olarak saklanır; bulut senkronu kapalıyken yalnızca cihazında kalır. '
+      'Şifren bcrypt ile hashlenerek tutulur. Hesabını Ayarlar\'dan kalıcı olarak silersen tüm verilerin silinir.';
   static const terms = 'Bu uygulama ders projesi kapsamında geliştirilmiştir. '
       'Resmi bir muhasebe belgesi yerine geçmez.';
 }

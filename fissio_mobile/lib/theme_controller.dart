@@ -9,9 +9,17 @@ abstract class PrefsStore {
   Future<void> write(String key, String value);
 }
 
-class SecurePrefsStore implements PrefsStore {
+/// Anahtar silebilen depo (oturum/hesap verisi için). Silemeyen depolarda AppState boş değer yazar.
+abstract class DeletablePrefsStore implements PrefsStore {
+  Future<void> delete(String key);
+}
+
+class SecurePrefsStore implements DeletablePrefsStore {
   const SecurePrefsStore();
   static const _s = FlutterSecureStorage();
+
+  @override
+  Future<void> delete(String key) => _s.delete(key: key);
 
   @override
   Future<String?> read(String key) => _s.read(key: key);
