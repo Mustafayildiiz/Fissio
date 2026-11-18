@@ -4,6 +4,7 @@ import '../app_state.dart';
 import '../stats.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'budget_widgets.dart';
 import 'receipt_detail_page.dart';
 import 'settings_page.dart';
 
@@ -84,6 +85,10 @@ class _HomePageState extends State<HomePage> {
                       stats: stats,
                       onOpenCategory: widget.onOpenCategory,
                     ),
+                    const SizedBox(height: 22),
+                    const BudgetsSection(),
+                    const SizedBox(height: 22),
+                    const FixedExpensesSection(),
                     const SizedBox(height: 22),
                     const SectionLabel('En yüksek fiş'),
                     const SizedBox(height: 8),

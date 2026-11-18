@@ -83,9 +83,42 @@ class _SyncStateNote extends StatelessWidget {
   }
 }
 
+/// "Her ay tekrarlanır" bilgisi (düzenlemek için "Düzenle" > Her ay tekrarlanır).
+class _RecurringNote extends StatelessWidget {
+  const _RecurringNote(this.e);
+  final Expense e;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      key: const Key('recurring-note'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
+      child: Row(
+        children: [
+          Icon(LucideIcons.repeat, size: 20, color: c.accentInk),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Her ay tekrarlanır · ayın ${e.recurringDay}. günü'
+              '${e.recurringRemind ? ' · hatırlatıcı açık' : ''}',
+              style: FissioText.body(c, size: 14, color: c.mute),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ReceiptDetailPage extends StatelessWidget {
-  const ReceiptDetailPage({super.key, required this.id});
+  const ReceiptDetailPage({super.key, required this.id, this.app});
   final int id;
+
+  /// Verilmezse global [appState] (testlerde sahte sunuculu örnek verilir).
+  final AppState? app;
+  AppState get _app => app ?? appState;
 
   Future<void> _delete(BuildContext context, Expense e) async {
     final ok = await showConfirmDialog(
@@ -97,7 +130,7 @@ class ReceiptDetailPage extends StatelessWidget {
     );
     if (!ok) return;
     try {
-      await appState.deleteExpense(e.id);
+      await _app.deleteExpense(e.id);
       if (context.mounted) Navigator.of(context).pop();
     } on ApiException catch (err) {
       if (context.mounted) showMessage(context, err.message);
@@ -108,9 +141,9 @@ class ReceiptDetailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     return ListenableBuilder(
-      listenable: Listenable.merge([appState, themeController]),
+      listenable: Listenable.merge([_app, themeController]),
       builder: (context, _) {
-        final e = appState.expenses.where((x) => x.id == id).firstOrNull;
+        final e = _app.expenses.where((x) => x.id == id).firstOrNull;
         if (e == null) {
           // Silindi veya bulunamadı.
           return Scaffold(
@@ -141,7 +174,7 @@ class ReceiptDetailPage extends StatelessWidget {
                     bold: true,
                     onTap: () {
                       // Senkron kapalıyken bulut fişleri salt-okunurdur (yerel fişler serbestçe düzenlenir).
-                      if (!e.isLocal && !appState.syncEnabled) {
+                      if (!e.isLocal && !_app.syncEnabled) {
                         showMessage(context, readOnlyCloudMessage);
                         return;
                       }
@@ -158,6 +191,10 @@ class ReceiptDetailPage extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
                     children: [
                       if (paper) _PaperReceipt(e) else _ListReceipt(e),
+                      if (e.isRecurring) ...[
+                        const SizedBox(height: 16),
+                        _RecurringNote(e),
+                      ],
                       if (e.isLocal) ...[
                         const SizedBox(height: 16),
                         _SyncStateNote(e.syncState),
@@ -278,10 +315,6 @@ class _PaperReceipt extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (e.imageIds.isNotEmpty) ...[
-                    const SizedBox(width: 12),
-                    const IconTile(LucideIcons.camera, size: 44),
-                  ],
                 ],
               ),
               const _DashedLine(margin: EdgeInsets.fromLTRB(0, 18, 0, 6)),

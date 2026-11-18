@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="launch_bg">#121110</color>
+    <color name="widget_bg">#1F1D1C</color>
+    <color name="widget_ink">#F3F2F2</color>
+    <color name="widget_mute">#9B9797</color>
+    <color name="widget_accent">#EC3013</color>
+    <color name="widget_on_accent">#FFFFFF</color>
 </resources>

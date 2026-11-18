@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show ChangeNotifier, VoidCallback;
 
 import 'api.dart';
+import 'budgets.dart';
 import 'data/connectivity.dart';
 import 'data/local_store.dart';
 import 'data/sync_service.dart';
@@ -12,6 +13,10 @@ import 'data/uid.dart';
 import 'models.dart';
 import 'ocr/ocr_engine.dart';
 import 'ocr/on_device_ocr_engine.dart';
+import 'recurring.dart';
+import 'services/notifier.dart';
+import 'services/widget_sync.dart';
+import 'theme.dart' show fmtMoney, kMonthNames;
 import 'theme_controller.dart';
 
 /// [AppState.saveDraft] sonucu.
@@ -47,7 +52,11 @@ class AppState extends ChangeNotifier {
     DateTime Function()? clock,
     OcrEngine? onDeviceOcr,
     OcrMode Function()? ocrMode,
+    LocalNotifier? notifier,
+    WidgetSync? widgetSync,
   }) : _store = store ?? const SecurePrefsStore(),
+       notifier = notifier ?? PluginLocalNotifier(),
+       _widget = widgetSync ?? PluginWidgetSync(),
        _local = local ?? FileLocalStore(),
        _connectivity = connectivity ?? PluginConnectivity(),
        _clock = clock ?? DateTime.now,
@@ -76,12 +85,17 @@ class AppState extends ChangeNotifier {
   final Duration backgroundInterval;
   final OcrMode Function() _ocrMode;
   late final OcrEngine _onDeviceOcr;
+
+  /// Yerel bildirimler (bütçe eşikleri, ödeme hatırlatıcıları) ve ana ekran widget'ı; testlerde sahteleri verilir.
+  final LocalNotifier notifier;
+  final WidgetSync _widget;
   final OcrEngineFactory ocrFactory = OcrEngineFactory(defaultEngine: 'paddleocr');
 
   static const _tokensKey = 'auth_tokens';
   static const _userKey = 'auth_user';
   static String _activeKey(int uid) => 'active_profile:$uid';
   static String _syncKey(int uid) => 'sync_enabled:$uid';
+  static String _alertsKey(int uid) => 'budget_alerts:$uid';
 
   AuthUser? user;
   LocalSnapshot _snap = LocalSnapshot();
@@ -89,6 +103,9 @@ class AppState extends ChangeNotifier {
   List<Category> categories = [];
   String? activeProfileId;
   bool _syncEnabled = true;
+
+  /// Bu hesapta bu ay gönderilmiş bütçe bildirimleri (bkz. [budgetAlertKey]); tekrar bildirimi önler.
+  Set<String> _alertsSent = {};
   bool loading = false;
   String? error;
 
@@ -110,25 +127,30 @@ class AppState extends ChangeNotifier {
   String get displayName => profileName ?? user?.name.nonEmpty ?? email ?? 'Profil';
 
   /// Bağlantı gelince buluta yüklenecek kayıt sayısı (senkron açık).
-  int get pendingCount => _sync.pendingCount;
+  int get pendingCount => _sync.pendingCount + _sync.pendingBudgetCount;
 
   /// Yalnızca cihazda kalan (senkron kapalıyken eklenen) fiş + profil sayısı.
   int get localOnlyCount =>
       _snap.expenses.where((e) => e.syncState == SyncState.localOnly).length +
-      _snap.profiles.where((p) => p.state == SyncState.localOnly).length;
+      _snap.profiles.where((p) => p.state == SyncState.localOnly).length +
+      _snap.budgets.where((b) => b.state == SyncState.localOnly).length;
 
   /// Yüklenmemiş (pending + localOnly) kayıt var mı — çıkışta bilgilendirme için.
   bool get hasUnsyncedData => pendingCount + localOnlyCount > 0;
 
-  /// Aktif profilin fişleri: sunucudakiler + cihazdakiler (tarihe göre, yeni üstte).
-  List<Expense> get expenses {
+  List<Expense> _activeUnsorted() {
     final pid = activeProfileId;
     final cloudUids = {for (final e in _cloudExpenses) e.clientUid};
-    final out = <Expense>[
+    return <Expense>[
       ..._cloudExpenses.where((e) => e.profileUid == pid),
       // Sunucuda zaten olan fişin yerel kaydı yalnızca görsel kuyruğudur; listede tekrarlanmaz.
       ..._snap.expenses.where((e) => e.profileUid == pid && !cloudUids.contains(e.clientUid)),
     ];
+  }
+
+  /// Aktif profilin fişleri: sunucudakiler + cihazdakiler (tarihe göre, yeni üstte).
+  List<Expense> get expenses {
+    final out = _activeUnsorted();
     out.sort((a, b) {
       final c = b.date.compareTo(a.date);
       return c != 0 ? c : b.id.compareTo(a.id);
@@ -249,6 +271,11 @@ class AppState extends ChangeNotifier {
     _syncEnabled = (await _read(_syncKey(id))) != '0';
     activeProfileId = await _read(_activeKey(id));
     _cloudExpenses = [];
+    _alertsSent = {};
+    try {
+      final raw = await _read(_alertsKey(id));
+      if (raw != null) _alertsSent = {...(jsonDecode(raw) as List).cast<String>()};
+    } catch (_) {}
   }
 
   Future<void> login(String mail, String password) async {
@@ -296,6 +323,7 @@ class AppState extends ChangeNotifier {
       await _local.deleteAll(id);
       await _delete(_syncKey(id));
       await _delete(_activeKey(id));
+      await _delete(_alertsKey(id));
     }
     await _localSignOut();
   }
@@ -310,6 +338,8 @@ class AppState extends ChangeNotifier {
     if (id != null) await _delete(_activeKey(id));
     _resetMemory();
     notifyListeners();
+    // Sonraki hesap önceki kullanıcının harcamasını / hatırlatıcılarını görmesin.
+    await _clearDerivedOutputs();
   }
 
   void _resetMemory() {
@@ -319,6 +349,7 @@ class AppState extends ChangeNotifier {
     categories = [];
     activeProfileId = null;
     _syncEnabled = true;
+    _alertsSent = {};
     loading = false;
     error = null;
     _flushBackoffUntil = null;
@@ -395,6 +426,7 @@ class AppState extends ChangeNotifier {
     final to = value ? SyncState.pending : SyncState.localOnly;
     _snap.profiles = [for (final p in _snap.profiles) p.state == from ? p.copyWith(state: to) : p];
     _snap.expenses = [for (final e in _snap.expenses) e.syncState == from ? e.copyWith(syncState: to) : e];
+    _snap.budgets = [for (final b in _snap.budgets) b.state == from ? b.copyWith(state: to) : b];
     await _persistSnapshot();
     notifyListeners();
     if (value) await flushNow(force: true);
@@ -419,12 +451,30 @@ class AppState extends ChangeNotifier {
       categories = cats;
       _snap.categories = cats;
       _applyCloud(ps, ex);
+      await _refreshBudgets(ps);
       await _persistSnapshot();
     } on ApiException catch (e) {
       error = e.message;
     }
     loading = false;
     notifyListeners();
+  }
+
+  /// Sunucudaki limitler yerel önbelleğe alınır: yüklenmemiş (pending/localOnly) limitler korunur, sunucudan
+  /// gelenler eşitlenir. Sunucu bütçe uç noktasını bilmiyorsa (eski sürüm) yerel önbellek olduğu gibi kalır.
+  Future<void> _refreshBudgets(List<Profile> serverProfiles) async {
+    try {
+      final raw = await api.budgets();
+      final byServerId = {for (final p in serverProfiles) p.serverId: p.id};
+      final server = [
+        for (final j in raw) ?Budget.fromServerJson(j, (id) => byServerId[id]),
+      ];
+      final keep = _snap.budgets.where((b) => b.state != SyncState.synced).toList();
+      bool has(Budget b) => keep.any((k) => k.profileUid == b.profileUid && k.categoryId == b.categoryId);
+      _snap.budgets = [...server.where((b) => !has(b)), ...keep];
+    } on ApiException catch (e) {
+      if (e.network) rethrow;
+    }
   }
 
   void _applyCloud(List<Profile> serverProfiles, List<Expense> serverExpenses) {
@@ -556,6 +606,7 @@ class AppState extends ChangeNotifier {
       }
     }
     _snap.expenses = _snap.expenses.where((e) => e.profileUid != id).toList();
+    _snap.budgets = _snap.budgets.where((b) => b.profileUid != id).toList();
     _snap.profiles = _snap.profiles.where((x) => x.id != id).toList();
     _cloudExpenses = _cloudExpenses.where((e) => e.profileUid != id).toList();
     await _persistSnapshot();
@@ -573,6 +624,23 @@ class AppState extends ChangeNotifier {
   /// Fişi kaydeder. Senkron açık + bağlantı varsa sunucuya; bağlantı yoksa cihaz kuyruğuna (kaybolmaz,
   /// bağlantı gelince yüklenir); senkron kapalıysa yalnızca cihaza. Fotoğraflar fişle birlikte aynı yola gider.
   Future<SaveResult> saveDraft(ReceiptDraft d) async {
+    // Bütçe eşikleri fişin KENDİ profili için denetlenir (düzenlemede aktif profil değil, fişin profili).
+    final profileUid = d.id == null ? activeProfile?.id : (allExpenses.where((e) => e.id == d.id).firstOrNull?.profileUid ?? activeProfile?.id);
+    final result = await _saveDraftCore(d);
+    if (profileUid != null) {
+      try {
+        await _checkBudgets(profileUid);
+      } catch (_) {
+        // Bildirim hatası kaydı etkilemez.
+      }
+    }
+    return result;
+  }
+
+  Expense _withProfileUid(Expense e) =>
+      e.copyWith(profileUid: _snap.profiles.where((p) => p.serverId == e.profileServerId).firstOrNull?.id ?? '');
+
+  Future<SaveResult> _saveDraftCore(ReceiptDraft d) async {
     final profile = activeProfile;
     if (profile == null) throw ApiException('Önce bir profil seçin.');
 
@@ -583,6 +651,8 @@ class AppState extends ChangeNotifier {
     if (d.id != null) {
       if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
       final saved = await api.updateExpense(d.id!, d.toRequestBody());
+      // Liste yenilemesi (refresh) başarısız olsa bile bütçe kontrolü güncel tutarı görsün.
+      _cloudExpenses = [for (final x in _cloudExpenses) x.id == saved.id ? _withProfileUid(saved) : x];
       final ok = await _uploadPending(saved.id, d);
       await refresh();
       return SaveResult(imagesOk: ok);
@@ -609,6 +679,7 @@ class AppState extends ChangeNotifier {
       await _queueLocal(d, profile, SyncState.pending);
       return const SaveResult(queued: true);
     }
+    _cloudExpenses = [..._cloudExpenses.where((x) => x.id != saved.id), _withProfileUid(saved)];
     var imagesOk = true;
     var queued = false;
     if (d.pendingImages.isNotEmpty) {
@@ -627,6 +698,183 @@ class AppState extends ChangeNotifier {
     }
     await refresh(); // fotoğraf kimlikleri (image_ids) listede/detayda görünsün
     return SaveResult(imagesOk: imagesOk, queued: queued);
+  }
+
+  // --- Bütçe limitleri ---
+
+  /// Aktif profilin kategori limitleri.
+  List<Budget> get budgets => List.unmodifiable(_snap.budgets.where((b) => b.profileUid == activeProfileId));
+
+  /// Aktif profilin bu ayki limit / harcama ilerlemesi (kategori adına göre sıralı).
+  List<BudgetProgress> get budgetProgress =>
+      computeBudgetProgress(_activeUnsorted(), _snap.budgets, activeProfileId ?? '', _clock());
+
+  Budget? _budgetOf(String profileUid, int categoryId) =>
+      _snap.budgets.where((b) => b.profileUid == profileUid && b.categoryId == categoryId).firstOrNull;
+
+  /// Aktif profil için kategori limitini koyar/günceller. Senkron açık + çevrimiçiyse sunucuya; bağlantı yoksa
+  /// (ya da profil henüz sunucuda değilse) cihaz kuyruğuna ([SyncState.pending]); senkron kapalıysa yalnızca
+  /// cihaza ([SyncState.localOnly]). Senkron kapalıyken bulutta kayıtlı limit değiştirilemez.
+  Future<void> setBudget(int categoryId, double limit) async {
+    final p = activeProfile;
+    if (p == null || limit <= 0) return;
+    final name = _categoryName(categoryId) ?? '';
+    final existing = _budgetOf(p.id, categoryId);
+    Budget make(SyncState state, {int? serverId, double? lim}) => Budget(
+      profileUid: p.id,
+      categoryId: categoryId,
+      categoryName: name,
+      limit: lim ?? limit,
+      serverId: serverId,
+      state: state,
+    );
+    Budget next;
+    if (_syncEnabled && p.serverId != null) {
+      try {
+        final j = await api.putBudget(p.serverId!, categoryId, limit);
+        next = make(
+          SyncState.synced,
+          serverId: (j['id'] as num?)?.toInt(),
+          lim: (j['monthly_limit'] as num?)?.toDouble(),
+        );
+      } on ApiException catch (e) {
+        if (!e.network) rethrow;
+        next = make(SyncState.pending, serverId: existing?.serverId);
+      }
+    } else if (_syncEnabled) {
+      next = make(SyncState.pending, serverId: existing?.serverId);
+    } else {
+      if (existing != null && existing.state == SyncState.synced) throw ApiException(readOnlyCloudMessage);
+      next = make(SyncState.localOnly);
+    }
+    _snap.budgets = [
+      ..._snap.budgets.where((b) => !(b.profileUid == p.id && b.categoryId == categoryId)),
+      next,
+    ];
+    await _persistSnapshot();
+    notifyListeners();
+  }
+
+  /// Aktif profildeki kategori limitini kaldırır.
+  Future<void> removeBudget(int categoryId) async {
+    final p = activeProfile;
+    final existing = p == null ? null : _budgetOf(p.id, categoryId);
+    if (existing == null) return;
+    if (existing.serverId != null) {
+      if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
+      try {
+        await api.deleteBudget(existing.serverId!);
+      } on ApiException catch (e) {
+        if (e.status != 404) rethrow; // sunucuda zaten yok
+      }
+    }
+    _snap.budgets = _snap.budgets.where((b) => !(b.profileUid == existing.profileUid && b.categoryId == categoryId)).toList();
+    await _persistSnapshot();
+    notifyListeners();
+  }
+
+  bool _permissionAsked = false;
+
+  /// Fiş kaydedildi/güncellendi: [profileUid] profilinin içinde bulunulan aydaki bütçe eşiklerini (%80 / %100)
+  /// denetler; bir eşik o ay ilk kez aşılmışsa yerel bildirim gönderir (aynı ay + aynı eşik için tekrar yok).
+  Future<void> _checkBudgets(String profileUid) async {
+    final id = user?.id;
+    if (id == null) return;
+    final now = _clock();
+    final progress = computeBudgetProgress(allExpenses, _snap.budgets, profileUid, now);
+    final r = evaluateBudgetAlerts(progress, _alertsSent, now);
+    _alertsSent = r.sent;
+    if (r.alerts.isEmpty) return;
+    await _write(_alertsKey(id), jsonEncode(_alertsSent.toList()));
+    if (!_permissionAsked) {
+      _permissionAsked = true;
+      await notifier.requestPermission();
+    }
+    for (final a in r.alerts) {
+      final b = a.progress.budget;
+      await notifier.show(
+        id: budgetNotificationId(b.profileUid, b.categoryId, a.threshold),
+        title: a.title,
+        body: a.body,
+        payload: 'budgets',
+      );
+    }
+  }
+
+  // --- Tekrarlayan giderler ---
+
+  /// Aktif profilin tekrarlayan giderleri ve "Aylık Sabit Gider Projeksiyonu".
+  RecurringProjection get recurring => buildRecurring(_activeUnsorted(), _clock());
+
+  /// Önümüzdeki 30 gün içinde ödemesi gelen tekrarlayan giderler (aktif profil).
+  List<RecurringItem> get upcomingPayments => upcomingPaymentsOf(recurring.items, _clock());
+
+  // --- Türetilen çıktılar: ana ekran widget'ı ve ödeme hatırlatıcıları ---
+
+  bool _derivedQueued = false;
+  bool _disposed = false;
+  WidgetPayload? _lastWidget;
+  bool _widgetPushed = false;
+  String? _lastReminderSig;
+  Future<void> _derivedChain = Future.value();
+
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
+    // Fiş ekleme/silme/güncelleme, profil değişimi, yenileme, senkron/çıkış... hepsi buradan geçer; widget ve
+    // hatırlatıcılar değişiklik olduğunda (aynı veri tekrar gönderilmez) güncellenir.
+    if (_derivedQueued || _disposed) return;
+    _derivedQueued = true;
+    scheduleMicrotask(() {
+      _derivedQueued = false;
+      if (!_disposed) _syncDerived();
+    });
+  }
+
+  WidgetPayload? _widgetPayload() {
+    if (user == null) return null;
+    final now = _clock();
+    return WidgetPayload(
+      profileName: activeProfile?.name ?? '',
+      monthTotalText: fmtMoney(monthTotalFor(_activeUnsorted(), activeProfileId, now)),
+      monthLabel: '${kMonthNames[now.month - 1]} ${now.year}',
+    );
+  }
+
+  void _syncDerived() {
+    final payload = _widgetPayload();
+    if (payload != null ? payload != _lastWidget : _widgetPushed) {
+      _lastWidget = payload;
+      _widgetPushed = payload != null;
+      unawaited(_widget.update(payload));
+    }
+
+    // Ödeme hatırlatıcıları: tüm profillerin tekrarlayan giderleri için bir sonraki ödemeye göre.
+    final now = _clock();
+    final plans = user == null || !allExpenses.any((e) => e.isRecurring)
+        ? const <ReminderPlan>[]
+        : planReminders(buildRecurring(allExpenses, now).items, now);
+    final sig = plans.map((p) => '${p.id}@${p.when.millisecondsSinceEpoch}').join(',');
+    if (sig == (_lastReminderSig ?? '')) return;
+    _lastReminderSig = sig;
+    _derivedChain = _derivedChain.then((_) async {
+      await notifier.cancelScheduled();
+      for (final p in plans) {
+        await notifier.schedule(id: p.id, when: p.when, title: p.title, body: p.body, payload: 'recurring');
+      }
+    });
+  }
+
+  /// Çıkış / hesap silme: widget verisi, planlı ve gösterilmiş bildirimler temizlenir.
+  Future<void> _clearDerivedOutputs() async {
+    _lastReminderSig = '';
+    if (_widgetPushed || _lastWidget != null) {
+      _lastWidget = null;
+      _widgetPushed = false;
+      await _widget.update(null);
+    }
+    await _derivedChain;
+    await notifier.cancelAll();
   }
 
   Future<bool> _uploadPending(int expenseId, ReceiptDraft d) async {
@@ -679,6 +927,8 @@ class AppState extends ChangeNotifier {
       syncState: state,
       localImages: images,
       suggestedCategoryId: d.suggestedCategoryId,
+      recurringDay: d.recurringDay,
+      recurringRemind: d.recurringRemind,
     );
   }
 
@@ -833,6 +1083,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _stopBackground();
     super.dispose();
   }

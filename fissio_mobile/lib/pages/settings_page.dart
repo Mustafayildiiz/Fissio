@@ -5,6 +5,7 @@ import '../api.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../onboarding_controller.dart';
+import '../logo.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../profile_avatar.dart';
@@ -62,7 +63,9 @@ class SettingsPage extends StatelessWidget {
 
   void _open(BuildContext context, String title, List<InfoSection> sections) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => InfoPage(title: title, sections: sections)),
+      MaterialPageRoute(
+        builder: (_) => InfoPage(title: title, sections: sections, showLogo: title == 'Hakkımızda'),
+      ),
     );
   }
 
@@ -274,9 +277,15 @@ class SettingsPage extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(4, 18, 4, 0),
                       child: FutureBuilder<String>(
                         future: appVersionLoader(),
-                        builder: (context, snap) => Text(
-                          (snap.data ?? '').isEmpty ? 'Fissio' : 'Fissio · Sürüm ${snap.data}',
-                          style: FissioText.body(c, size: 13, color: c.mute),
+                        builder: (context, snap) => Row(
+                          children: [
+                            const FissioLogo(size: 22),
+                            const SizedBox(width: 8),
+                            Text(
+                              (snap.data ?? '').isEmpty ? 'Fissio' : 'Fissio · Sürüm ${snap.data}',
+                              style: FissioText.body(c, size: 13, color: c.mute),
+                            ),
+                          ],
                         ),
                       ),
                     ),

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
-
 import '../app_state.dart';
+import '../logo.dart';
+import '../services/deep_links.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'auth_page.dart';
 import 'profile_select_page.dart';
+import 'shell_page.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -23,14 +24,21 @@ class _SplashPageState extends State<SplashPage> {
 
   Future<void> _boot() async {
     final results = await Future.wait<Object?>([
-      appState.restoreSession(),
+      // Widget kısayolu (soğuk açılış) oturum geri yüklenirken okunur.
+      deepLinks.init().then((_) => appState.restoreSession()),
       Future<void>.delayed(const Duration(milliseconds: 1200)),
     ]);
     if (!mounted) return;
     final ok = results[0] as bool;
+    // Widget'tan "hızlı tara" ile açıldıysa ve aktif profil varsa profil seçimi atlanır; kabuk taramayı açar.
+    final direct = ok && deepLinks.hasPendingScan && appState.activeProfile != null;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => ok ? const ProfileSelectPage() : const AuthPage(),
+        builder: (_) => direct
+            ? const ShellPage()
+            : ok
+            ? const ProfileSelectPage()
+            : const AuthPage(),
       ),
     );
   }
@@ -46,15 +54,7 @@ class _SplashPageState extends State<SplashPage> {
             mainAxisAlignment: MainAxisAlignment.end,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: c.accent,
-                  borderRadius: BorderRadius.circular(kRadius),
-                ),
-                child: Icon(LucideIcons.receipt, size: 36, color: c.onAccent),
-              ),
+              const FissioLogo(size: 88),
               const SizedBox(height: 20),
               Text('Fissio', style: FissioText.title(c, size: 64).copyWith(height: 1)),
               const SizedBox(height: 20),

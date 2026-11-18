@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../services/deep_links.dart';
 import '../widgets.dart';
 import 'home_page.dart';
 import 'receipts_page.dart';
@@ -23,12 +24,23 @@ class _ShellPageState extends State<ShellPage> {
   void initState() {
     super.initState();
     appState.refresh();
+    // Ana ekran widget'ından gelen "hızlı tara" (fissio://scan): soğuk açılışta bekleyen istek ilk karede,
+    // sıcak açılışta (arka plandan) geldiği anda tüketilir.
+    deepLinks.addListener(_maybeOpenScan);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenScan());
   }
 
   @override
   void dispose() {
+    deepLinks.removeListener(_maybeOpenScan);
     _filter.dispose();
     super.dispose();
+  }
+
+  void _maybeOpenScan() {
+    if (!mounted || !appState.loggedIn || appState.activeProfile == null) return;
+    if (!deepLinks.consumeScan()) return;
+    _addReceipt();
   }
 
   void _openCategory(int? categoryId) {

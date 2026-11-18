@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../app_state.dart';
+import '../logo.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'account_widgets.dart';
@@ -148,6 +149,7 @@ class _AuthPageState extends State<AuthPage> {
                       ),
                     ),
                   AccountHeader(
+                    leading: const FissioLogo(size: 56),
                     title: _register ? 'Hesap oluştur' : 'Giriş yap',
                     subtitle: Text(
                       _register

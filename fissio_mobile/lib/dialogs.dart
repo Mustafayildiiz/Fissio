@@ -11,6 +11,7 @@ Future<String?> showTextPrompt(
   required String confirmLabel,
   String initial = '',
   String hint = '',
+  TextInputType? keyboardType,
 }) {
   return showDialog<String>(
     context: context,
@@ -19,6 +20,7 @@ Future<String?> showTextPrompt(
       confirmLabel: confirmLabel,
       initial: initial,
       hint: hint,
+      keyboardType: keyboardType,
     ),
   );
 }
@@ -29,11 +31,13 @@ class _PromptDialog extends StatefulWidget {
     required this.confirmLabel,
     required this.initial,
     required this.hint,
+    this.keyboardType,
   });
   final String title;
   final String confirmLabel;
   final String initial;
   final String hint;
+  final TextInputType? keyboardType;
 
   @override
   State<_PromptDialog> createState() => _PromptDialogState();
@@ -56,6 +60,7 @@ class _PromptDialogState extends State<_PromptDialog> {
       content: TextField(
         controller: _ctrl,
         autofocus: true,
+        keyboardType: widget.keyboardType,
         style: FissioText.body(c),
         cursorColor: c.accentInk,
         onSubmitted: (v) => Navigator.pop(context, v.trim()),

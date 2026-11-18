@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../app_state.dart';
+import '../logo.dart';
 import '../ocr/ocr_engine.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
@@ -48,8 +49,9 @@ class PreferencesPage extends StatelessWidget {
                     GroupedCard(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        Wrap(
+                          alignment: WrapAlignment.spaceEvenly,
+                          runSpacing: 14,
                           children: [
                             for (final o in kAccentOptions)
                               _Swatch(
@@ -63,6 +65,10 @@ class PreferencesPage extends StatelessWidget {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Uygulama logosu'),
+                    const SizedBox(height: 8),
+                    const _LogoSection(),
                     const SizedBox(height: 24),
                     const SectionLabel('Fiş detayı'),
                     const SizedBox(height: 8),
@@ -140,8 +146,86 @@ class PreferencesPage extends StatelessWidget {
   }
 }
 
+/// Uygulama logosu: "temaya uygun" (vurgu rengini izler) ya da paletten sabit bir renk. Seçim başlatıcı
+/// (ana ekran) ikonunu da değiştirir.
+class _LogoSection extends StatelessWidget {
+  const _LogoSection();
+
+  @override
+  Widget build(BuildContext context) =>
+      ListenableBuilder(listenable: themeController, builder: (context, _) => _content(context));
+
+  Widget _content(BuildContext context) {
+    final c = context.c;
+    final follows = themeController.logoFollowsTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GroupedCard(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Row(
+              children: [
+                const FissioLogo(size: 64),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: FutureBuilder<bool>(
+                    future: themeController.launcherSupported,
+                    builder: (context, snap) {
+                      final icon = snap.data == true;
+                      final what = icon ? 'Logo ve ana ekran ikonu' : 'Logo';
+                      return Text(
+                        '${follows ? '$what vurgu rengini izler.' : '$what seçtiğin sabit renkte kalır.'}'
+                        '${icon ? '' : ' Ana ekran ikonu yalnızca yayın sürümünde değişir.'}',
+                        style: FissioText.body(c, size: 14, color: c.mute).copyWith(height: 1.35),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SegmentedControl<bool>(
+          key: const ValueKey('logo-mode'),
+          value: follows,
+          onChanged: (v) => themeController.setLogoColor(v ? null : themeController.logoColor),
+          items: const [
+            SegmentItem(true, 'Temaya uygun', icon: LucideIcons.sparkles),
+            SegmentItem(false, 'Sabit renk', icon: LucideIcons.palette),
+          ],
+        ),
+        if (!follows) ...[
+          const SizedBox(height: 10),
+          GroupedCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            children: [
+              Wrap(
+                alignment: WrapAlignment.spaceEvenly,
+                runSpacing: 14,
+                children: [
+                  for (final o in kBrandPalette)
+                    _Swatch(
+                      key: ValueKey('logo-${o.key}'),
+                      name: o.name,
+                      color: o.color,
+                      selected: themeController.logoColor.toARGB32() == o.color.toARGB32(),
+                      onTap: () => themeController.setLogoColor(o.color),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _Swatch extends StatelessWidget {
   const _Swatch({
+    super.key,
     required this.name,
     required this.color,
     required this.selected,

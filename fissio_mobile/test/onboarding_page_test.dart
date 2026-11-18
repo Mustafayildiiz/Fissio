@@ -159,7 +159,13 @@ void main() {
           final context = tester.element(find.byType(OnboardingPage));
           final c = context.c;
           expect(c.isDark, brightness == Brightness.dark);
-          expect(c.accent, option.color);
+          // Koyu zeminde neredeyse siyah vurgular (Grafit, Mürekkep) görünmez kalmasın diye açık dolguya çevrilir
+          // (bkz. FissioColors.dark); diğer tüm vurgular seçilen renkle birebir aynıdır.
+          if (brightness == Brightness.dark && option.color.computeLuminance() < .08) {
+            expect(c.accent.computeLuminance(), greaterThan(.5));
+          } else {
+            expect(c.accent, option.color);
+          }
 
           // Zemin, başlık, açıklama.
           expect(tester.widget<Scaffold>(find.byType(Scaffold)).body, isNotNull);

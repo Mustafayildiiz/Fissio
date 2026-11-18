@@ -61,8 +61,11 @@ class SyncService {
   int get pendingAvatarCount =>
       snapshot().profiles.where((p) => p.localAvatarPath != null && p.serverId != null).length;
 
-  /// Kuyrukta (fiş/profil/avatar) gönderilecek bir şey var mı?
-  bool get hasWork => pendingCount > 0 || pendingAvatarCount > 0;
+  /// Yüklenmeyi bekleyen bütçe limitleri.
+  int get pendingBudgetCount => snapshot().budgets.where((b) => b.state == SyncState.pending).length;
+
+  /// Kuyrukta (fiş/profil/avatar/bütçe) gönderilecek bir şey var mı?
+  bool get hasWork => pendingCount > 0 || pendingAvatarCount > 0 || pendingBudgetCount > 0;
 
   Future<void> _persist() async {
     final id = userId();
@@ -164,6 +167,29 @@ class SyncService {
         }
       }
     }
+
+    // 3) Bütçe limitleri: profil sunucuda varsa (profil + kategori başına tek limit; PUT idempotent).
+    for (final b in List<Budget>.of(snap.budgets)) {
+      if (b.state != SyncState.pending) continue;
+      if (!enabled()) return FlushOutcome.disabled;
+      final serverId = snap.profiles.where((p) => p.id == b.profileUid).firstOrNull?.serverId;
+      if (serverId == null) {
+        partial = true;
+        continue;
+      }
+      try {
+        final j = await api.putBudget(serverId, b.categoryId, b.limit);
+        final i = snap.budgets.indexWhere((x) => x.profileUid == b.profileUid && x.categoryId == b.categoryId);
+        if (i >= 0) {
+          snap.budgets[i] = b.copyWith(serverId: (j['id'] as num?)?.toInt(), state: SyncState.synced);
+        }
+        await _persist();
+        onChanged?.call();
+      } on ApiException catch (e) {
+        if (e.network) rethrow;
+        partial = true;
+      }
+    }
     return partial ? FlushOutcome.partial : FlushOutcome.done;
   }
 
@@ -199,5 +225,8 @@ class SyncService {
     if (e.suggestedCategoryId != null) 'suggested_category_id': e.suggestedCategoryId,
     'note': e.note,
     'items': e.items.map((i) => i.toJson()).toList(),
+    // Çevrimdışı kuyrukta girilen "Her ay tekrarlanır" işareti sunucuya da taşınır.
+    'recurring_day': e.recurringDay,
+    'recurring_remind': e.recurringRemind,
   };
 }

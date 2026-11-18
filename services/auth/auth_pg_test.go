@@ -77,7 +77,8 @@ CREATE SCHEMA expense;
 CREATE TABLE expense.profiles (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, name TEXT);
 CREATE TABLE expense.expenses (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, merchant TEXT);
 CREATE TABLE expense.receipt_images (id BIGSERIAL PRIMARY KEY, expense_id BIGINT REFERENCES expense.expenses(id) ON DELETE CASCADE, user_id BIGINT NOT NULL);
-CREATE TABLE expense.category_rules (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL);`); err != nil {
+CREATE TABLE expense.category_rules (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL);
+CREATE TABLE expense.budgets (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, profile_id BIGINT NOT NULL);`); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate(db); err != nil {
@@ -466,6 +467,9 @@ func TestPGDeleteAccountWipesEverything(t *testing.T) {
 		if _, err := e.db.Exec(`INSERT INTO expense.category_rules (user_id) VALUES ($1)`, id); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := e.db.Exec(`INSERT INTO expense.budgets (user_id, profile_id) VALUES ($1, 1)`, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	st, b := e.do("DELETE", "/auth/account", map[string]any{"password": "Wrong1234"}, acc)
@@ -489,6 +493,7 @@ func TestPGDeleteAccountWipesEverything(t *testing.T) {
 		`SELECT count(*) FROM expense.expenses WHERE user_id=$1`,
 		`SELECT count(*) FROM expense.receipt_images WHERE user_id=$1`,
 		`SELECT count(*) FROM expense.category_rules WHERE user_id=$1`,
+		`SELECT count(*) FROM expense.budgets WHERE user_id=$1`,
 	} {
 		if n := count(q, uid); n != 0 {
 			t.Fatalf("%s left %d rows for deleted user", q, n)

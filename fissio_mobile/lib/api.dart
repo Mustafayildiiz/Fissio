@@ -521,6 +521,25 @@ class ApiClient {
     );
   }
 
+  // --- Bütçe limitleri (profil + kategori bazlı, aylık) ---
+  /// Hesabın tüm profillerinin limitleri (ham JSON; `Budget.fromServerJson` ile çözülür).
+  Future<List<Map<String, dynamic>>> budgets() async {
+    final j = await _send('GET', _expense, '/budgets') as List;
+    return j.cast<Map<String, dynamic>>();
+  }
+
+  /// Limit koyar/günceller (profil + kategori başına tek limit).
+  Future<Map<String, dynamic>> putBudget(int profileServerId, int categoryId, double limit) async =>
+      await _send(
+            'PUT',
+            _expense,
+            '/budgets',
+            body: {'profile_id': profileServerId, 'category_id': categoryId, 'monthly_limit': limit},
+          )
+          as Map<String, dynamic>;
+
+  Future<void> deleteBudget(int id) => _send('DELETE', _expense, '/budgets/$id');
+
   // --- Fiş fotoğrafları (hesaba bağlı, sunucuda saklanır) ---
   /// Bir fişe fotoğraf yükler (tekrarlanan `file` alanı); yeni görsel kimliklerini döner.
   Future<List<int>> uploadImages(int expenseId, List<Uint8List> images) async {

@@ -1,5 +1,5 @@
 name: fissio_mobile
-description: "A new Flutter project."
+description: "Fissio: akıllı fiş okuma ve mikro harcama yönetimi."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -47,6 +47,9 @@ dependencies:
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
   google_mlkit_text_recognition: ^1.0.3
+  home_widget: ^0.10.0
+  flutter_local_notifications: ^23.0.3
+  timezone: ^0.11.2
 dev_dependencies:
   flutter_test:
     sdk: flutter

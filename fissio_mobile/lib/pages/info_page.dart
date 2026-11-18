@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logo.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -95,9 +96,12 @@ class InfoTexts {
 }
 
 class InfoPage extends StatelessWidget {
-  const InfoPage({super.key, required this.title, required this.sections});
+  const InfoPage({super.key, required this.title, required this.sections, this.showLogo = false});
   final String title;
   final List<InfoSection> sections;
+
+  /// "Hakkımızda": başlığın altında logo + uygulama adı.
+  final bool showLogo;
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +123,11 @@ class InfoPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                  if (showLogo)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 22),
+                      child: Align(alignment: Alignment.centerLeft, child: FissioWordmark(logoSize: 56, fontSize: 40)),
+                    ),
                   for (final s in sections)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 18),

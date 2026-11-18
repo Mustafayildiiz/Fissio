@@ -5,16 +5,48 @@ import 'package:flutter/material.dart';
 
 const fontFamily = 'Archivo';
 
-/// Varsayılan vurgu rengi (mor). Tercihler'den değiştirilebilir.
-const kDefaultAccent = Color(0xFF7C4DFF);
+/// Fissio marka rengi (tasarım sisteminin `--color-accent` değeri). Varsayılan vurgu; Tercihler'den değiştirilebilir.
+const kDefaultAccent = Color(0xFFEC3013);
 
-/// Tercihler ekranında sunulan vurgu renkleri.
+/// Eski varsayılan mor (#7C4DFF). Kayıtlı tercihte kalmış olabilir; tasarımdaki mora ([kBrandPurple]) taşınır.
+const kLegacyPurple = Color(0xFF7C4DFF);
+const kBrandPurple = Color(0xFF5B3FD1);
+
+/// "Fissio Logo Final" tasarımının renk paleti: hem vurgu renkleri hem de uygulama logosu / başlatıcı ikonu
+/// arka planı. [key] başlatıcı ikon takma adlarıyla (Android activity-alias, iOS alternatif ikon) eşleşir.
+/// Sıra: ilk dört eski seçenekle aynıdır (kayıtlı tercihler ve testler bozulmasın).
+const kBrandPalette = <({String key, String name, Color color})>[
+  (key: 'purple', name: 'Mor', color: kBrandPurple),
+  (key: 'green', name: 'Yeşil', color: Color(0xFF1F8A4C)),
+  (key: 'darkred', name: 'Koyu kırmızı', color: Color(0xFFAE1800)),
+  (key: 'red', name: 'Kırmızı', color: Color(0xFFEC3013)),
+  (key: 'blue', name: 'Mavi', color: Color(0xFF1F5FD1)),
+  (key: 'graphite', name: 'Grafit', color: Color(0xFF3A3736)),
+  (key: 'ink', name: 'Mürekkep', color: Color(0xFF201E1D)),
+];
+
+/// Tercihler ekranında sunulan vurgu renkleri (marka paletinin aynısı).
 const kAccentOptions = <({String name, Color color})>[
-  (name: 'Mor', color: Color(0xFF7C4DFF)),
+  (name: 'Mor', color: kBrandPurple),
   (name: 'Yeşil', color: Color(0xFF1F8A4C)),
   (name: 'Koyu kırmızı', color: Color(0xFFAE1800)),
   (name: 'Kırmızı', color: Color(0xFFEC3013)),
+  (name: 'Mavi', color: Color(0xFF1F5FD1)),
+  (name: 'Grafit', color: Color(0xFF3A3736)),
+  (name: 'Mürekkep', color: Color(0xFF201E1D)),
 ];
+
+/// [color]'a en yakın marka paleti anahtarı (paletteki bir renkse birebir; değilse kırmızı).
+String brandKeyOf(Color color) {
+  for (final p in kBrandPalette) {
+    if (p.color.toARGB32() == color.toARGB32()) return p.key;
+  }
+  return 'red';
+}
+
+/// Koyu zeminde neredeyse siyah vurgular (Mürekkep, Grafit) dolgu olarak görünmez olur; bu eşiğin altındakiler
+/// koyu temada açık bir dolguya çevrilir.
+const double _kDarkAccentLuminance = .08;
 
 /// Silme / hata için sabit kırmızı (vurgu rengine bağlı değildir).
 const kDanger = Color(0xFFD92D20);
@@ -40,7 +72,9 @@ class FissioColors extends ThemeExtension<FissioColors> {
     required this.seg4,
     required this.accent,
     required this.accentInk,
+    required this.onAccent,
     required this.danger,
+    required this.warn,
     required this.isDark,
   });
 
@@ -58,7 +92,13 @@ class FissioColors extends ThemeExtension<FissioColors> {
 
   /// Metin/ikon olarak kullanılan vurgu (koyu zeminde okunaklı olacak şekilde açılır).
   final Color accentInk;
+
+  /// Vurgu dolgusu üzerindeki metin/ikon rengi (dolgunun parlaklığına göre).
+  final Color onAccent;
   final Color danger;
+
+  /// Uyarı (sarı): bütçe %80 eşiği.
+  final Color warn;
   final bool isDark;
 
   factory FissioColors.light([Color accent = kDefaultAccent]) => FissioColors(
@@ -74,13 +114,18 @@ class FissioColors extends ThemeExtension<FissioColors> {
         seg4: const Color(0xFFBAB6B6),
         accent: accent,
         accentInk: accent,
+        onAccent: Colors.white,
         danger: kDanger,
+        warn: const Color(0xFFE5A100),
         isDark: false,
       );
 
   factory FissioColors.dark([Color accent = kDefaultAccent]) {
     final hsl = HSLColor.fromColor(accent);
     final ink = hsl.lightness < .6 ? hsl.withLightness(.64).toColor() : accent;
+    // Neredeyse siyah vurgu (Mürekkep/Grafit): koyu zeminde dolgu da açık olur, üstündeki metin koyu kalır.
+    final nearBlack = accent.computeLuminance() < _kDarkAccentLuminance;
+    final fill = nearBlack ? const Color(0xFFE9E7E6) : accent;
     return FissioColors(
       bg: const Color(0xFF121110),
       surf: const Color(0xFF1F1D1C),
@@ -92,15 +137,14 @@ class FissioColors extends ThemeExtension<FissioColors> {
       bar: const Color(0xF0121110),
       paper: const Color(0xFF262423),
       seg4: const Color(0xFF605D5D),
-      accent: accent,
-      accentInk: ink,
+      accent: fill,
+      accentInk: nearBlack ? fill : ink,
+      onAccent: nearBlack ? const Color(0xFF201E1D) : Colors.white,
       danger: kDangerDark,
+      warn: const Color(0xFFFFC53D),
       isDark: true,
     );
   }
-
-  /// Vurgu zeminindeki metin rengi.
-  Color get onAccent => Colors.white;
 
   @override
   FissioColors copyWith({Color? accent}) => isDark
@@ -124,7 +168,9 @@ class FissioColors extends ThemeExtension<FissioColors> {
       seg4: l(seg4, other.seg4),
       accent: l(accent, other.accent),
       accentInk: l(accentInk, other.accentInk),
+      onAccent: l(onAccent, other.onAccent),
       danger: l(danger, other.danger),
+      warn: l(warn, other.warn),
       isDark: t < .5 ? isDark : other.isDark,
     );
   }

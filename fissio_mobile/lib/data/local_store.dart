@@ -14,6 +14,10 @@ class LocalSnapshot {
   List<Expense> expenses;
   List<Category> categories;
 
+  /// Kategori bazlı aylık bütçe limitleri (tüm profiller). Senkron açıkken sunucudaki kopyanın önbelleği ve
+  /// henüz yüklenmemiş (pending) limitler; kapalıyken yalnızca cihazdaki (localOnly) limitler.
+  List<Budget> budgets;
+
   /// Cihazdaki fişlere verilen negatif kimlik sayacı (sunucu kimlikleriyle çakışmasın).
   int lastLocalId;
 
@@ -21,10 +25,12 @@ class LocalSnapshot {
     List<Profile>? profiles,
     List<Expense>? expenses,
     List<Category>? categories,
+    List<Budget>? budgets,
     this.lastLocalId = 0,
   }) : profiles = profiles ?? [],
        expenses = expenses ?? [],
-       categories = categories ?? [];
+       categories = categories ?? [],
+       budgets = budgets ?? [];
 
   int nextLocalId() => --lastLocalId;
 
@@ -38,6 +44,9 @@ class LocalSnapshot {
     categories: ((j['categories'] as List?) ?? [])
         .map((e) => Category.fromJson(e as Map<String, dynamic>))
         .toList(),
+    budgets: ((j['budgets'] as List?) ?? [])
+        .map((e) => Budget.fromLocalJson(e as Map<String, dynamic>))
+        .toList(),
     lastLocalId: (j['last_local_id'] as num?)?.toInt() ?? 0,
   );
 
@@ -46,6 +55,7 @@ class LocalSnapshot {
     'profiles': profiles.map((p) => p.toLocalJson()).toList(),
     'expenses': expenses.map((e) => e.toLocalJson()).toList(),
     'categories': categories.map((c) => {'id': c.id, 'name': c.name}).toList(),
+    'budgets': budgets.map((b) => b.toLocalJson()).toList(),
     'last_local_id': lastLocalId,
   };
 }

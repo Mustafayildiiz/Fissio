@@ -195,6 +195,65 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     );
   }
 
+  /// "Her ay tekrarlanır": açılınca ödeme günü fiş tarihinin günü olur; hatırlatıcı varsayılan açık.
+  void _toggleRecurring(bool on) {
+    setState(() => _draft.recurringDay = on ? _draft.date.day : 0);
+    if (on && _draft.recurringRemind) appState.notifier.requestPermission();
+  }
+
+  Future<void> _pickRecurringDay() async {
+    final day = await showChoiceSheet<int>(
+      context,
+      title: 'Aylık ödeme günü',
+      options: [for (var d = 1; d <= 31; d++) (d, 'Ayın $d. günü')],
+      selected: _draft.recurringDay,
+    );
+    if (day != null) setState(() => _draft.recurringDay = day);
+  }
+
+  Widget _recurringCard(FissioColors c) {
+    final on = _draft.recurringDay > 0;
+    return GroupedCard(
+      children: [
+        ListRow(
+          title: 'Her ay tekrarlanır',
+          subtitle: 'Elektrik, su, internet, kira, abonelik gibi sabit giderler',
+          leading: Icon(LucideIcons.repeat, size: 20, color: c.accentInk),
+          trailing: Switch(
+            key: const Key('recurring-switch'),
+            value: on,
+            activeTrackColor: c.accent,
+            activeThumbColor: c.onAccent,
+            onChanged: _toggleRecurring,
+          ),
+        ),
+        if (on)
+          ListRow(
+            key: const Key('recurring-day'),
+            title: 'Ödeme günü',
+            onTap: _pickRecurringDay,
+            chevron: true,
+            trailing: Text('Ayın ${_draft.recurringDay}. günü', style: FissioText.body(c, color: c.mute)),
+          ),
+        if (on)
+          ListRow(
+            title: 'Ödeme hatırlatıcısı',
+            subtitle: '3 gün kala ve ödeme gününde bildirim',
+            trailing: Switch(
+              key: const Key('recurring-remind-switch'),
+              value: _draft.recurringRemind,
+              activeTrackColor: c.accent,
+              activeThumbColor: c.onAccent,
+              onChanged: (v) {
+                setState(() => _draft.recurringRemind = v);
+                if (v) appState.notifier.requestPermission();
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
   Future<void> _showAddPhotoSheet() async {
     final bytes = await pickReceiptPhotos(
       context,
@@ -346,6 +405,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                     ],
                     onPick: _setCategory,
                   ),
+                  const SizedBox(height: 14),
+                  _recurringCard(c),
                   const SizedBox(height: 22),
                   SectionLabel('Ürünler · ${_rows.length}'),
                   const SizedBox(height: 8),

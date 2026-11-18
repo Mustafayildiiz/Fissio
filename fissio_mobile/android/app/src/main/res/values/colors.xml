@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="launch_bg">#F3F2F2</color>
+    <!-- Ana ekran widget'ı (Fissio tasarım sistemi: yüzey / mürekkep / marka kırmızısı) -->
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_ink">#201E1D</color>
+    <color name="widget_mute">#605D5D</color>
+    <color name="widget_accent">#EC3013</color>
+    <color name="widget_on_accent">#FFFFFF</color>
 </resources>

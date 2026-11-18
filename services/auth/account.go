@@ -106,6 +106,7 @@ func (h *handler) deleteAccount(c *gin.Context) {
 		{"expense.receipt_images", `DELETE FROM expense.receipt_images WHERE user_id = $1`},
 		{"expense.expenses", `DELETE FROM expense.expenses WHERE user_id = $1`},
 		{"expense.category_rules", `DELETE FROM expense.category_rules WHERE user_id = $1`},
+		{"expense.budgets", `DELETE FROM expense.budgets WHERE user_id = $1`},
 		{"expense.profiles", `DELETE FROM expense.profiles WHERE user_id = $1`},
 	} {
 		var exists bool

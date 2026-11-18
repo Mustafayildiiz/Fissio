@@ -37,6 +37,65 @@ class CategoryRule {
   );
 }
 
+/// Profil + kategori bazlı aylık harcama limiti. [profileUid] = [Profile.id] (client_uid). [serverId] bulutta
+/// kayıtlıysa sunucu kimliği; [state] fişlerle aynı anlamdadır (synced / pending / localOnly).
+class Budget {
+  final String profileUid;
+  final int categoryId;
+  final String categoryName;
+  final double limit;
+  final int? serverId;
+  final SyncState state;
+  const Budget({
+    required this.profileUid,
+    required this.categoryId,
+    required this.categoryName,
+    required this.limit,
+    this.serverId,
+    this.state = SyncState.synced,
+  });
+
+  Budget copyWith({double? limit, int? serverId, SyncState? state, String? categoryName}) => Budget(
+    profileUid: profileUid,
+    categoryId: categoryId,
+    categoryName: categoryName ?? this.categoryName,
+    limit: limit ?? this.limit,
+    serverId: serverId ?? this.serverId,
+    state: state ?? this.state,
+  );
+
+  /// Sunucu yanıtı; `profile_id` sayısal kimliğinden [profileUid] çözülür (bilinmiyorsa null döner).
+  static Budget? fromServerJson(Map<String, dynamic> j, String? Function(int serverProfileId) uidOf) {
+    final uid = uidOf((j['profile_id'] as num).toInt());
+    if (uid == null) return null;
+    return Budget(
+      profileUid: uid,
+      categoryId: (j['category_id'] as num).toInt(),
+      categoryName: (j['category_name'] as String?) ?? '',
+      limit: (j['monthly_limit'] as num).toDouble(),
+      serverId: (j['id'] as num?)?.toInt(),
+    );
+  }
+
+  factory Budget.fromLocalJson(Map<String, dynamic> j) => Budget(
+    profileUid: j['profile_uid'] as String,
+    categoryId: (j['category_id'] as num).toInt(),
+    categoryName: (j['category_name'] as String?) ?? '',
+    limit: (j['limit'] as num).toDouble(),
+    serverId: (j['server_id'] as num?)?.toInt(),
+    state: syncStateFrom(j['state'] as String?),
+  );
+
+  Map<String, dynamic> toLocalJson() => {
+    'profile_uid': profileUid,
+    'category_id': categoryId,
+    'category_name': categoryName,
+    'limit': limit,
+    if (serverId != null) 'server_id': serverId,
+    'state': state.name,
+  };
+}
+
 /// Kaydın bulutla ilişkisi: [synced] sunucuda; [pending] bulut senkronu açıkken henüz yüklenmedi
 /// (çevrimdışı kuyruk, bağlantı gelince otomatik yüklenir); [localOnly] senkron kapalıyken yalnızca
 /// cihazda (kullanıcı senkronu açana kadar sunucuya hiçbir koşulda gönderilmez).
@@ -223,6 +282,11 @@ class Expense {
   /// Taramada önerilen fiş kategorisi (yerel fişte, yüklenirken sunucunun kural öğrenmesi için saklanır).
   final int? suggestedCategoryId;
 
+  /// "Her ay tekrarlanır": aylık ödeme günü (1-31), 0 = tekrarlamaz. [recurringRemind] ödeme hatırlatıcı
+  /// tercihidir. Seri/projeksiyon hesabı `recurring.dart`'ta.
+  final int recurringDay;
+  final bool recurringRemind;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -239,8 +303,11 @@ class Expense {
     this.syncState = SyncState.synced,
     this.localImages = const [],
     this.suggestedCategoryId,
+    this.recurringDay = 0,
+    this.recurringRemind = true,
   });
 
+  bool get isRecurring => recurringDay > 0;
   bool get isLocal => syncState != SyncState.synced;
   int get imageCount => imageIds.length + localImages.length;
 
@@ -260,6 +327,8 @@ class Expense {
     SyncState? syncState,
     List<String>? localImages,
     int? suggestedCategoryId,
+    int? recurringDay,
+    bool? recurringRemind,
   }) => Expense(
     id: id ?? this.id,
     merchant: merchant ?? this.merchant,
@@ -276,6 +345,8 @@ class Expense {
     syncState: syncState ?? this.syncState,
     localImages: localImages ?? this.localImages,
     suggestedCategoryId: suggestedCategoryId ?? this.suggestedCategoryId,
+    recurringDay: recurringDay ?? this.recurringDay,
+    recurringRemind: recurringRemind ?? this.recurringRemind,
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -294,6 +365,8 @@ class Expense {
         .toList(),
     clientUid: (j['client_uid'] as String?) ?? '',
     profileServerId: (j['profile_id'] as num?)?.toInt(),
+    recurringDay: (j['recurring_day'] as num?)?.toInt() ?? 0,
+    recurringRemind: (j['recurring_remind'] as bool?) ?? true,
   );
 
   /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
@@ -312,6 +385,8 @@ class Expense {
     'state': syncState.name,
     'images': localImages,
     if (suggestedCategoryId != null) 'suggested_category_id': suggestedCategoryId,
+    if (recurringDay > 0) 'recurring_day': recurringDay,
+    if (recurringDay > 0) 'recurring_remind': recurringRemind,
   };
 
   factory Expense.fromLocalJson(Map<String, dynamic> j) {
@@ -335,6 +410,8 @@ class Expense {
       syncState: syncStateFrom(j['state'] as String?),
       localImages: ((j['images'] as List?) ?? []).cast<String>(),
       suggestedCategoryId: (j['suggested_category_id'] as num?)?.toInt(),
+      recurringDay: (j['recurring_day'] as num?)?.toInt() ?? 0,
+      recurringRemind: (j['recurring_remind'] as bool?) ?? true,
     );
   }
 }
@@ -379,6 +456,10 @@ class ReceiptDraft {
   /// Henüz sunucuya yüklenmemiş fiş fotoğrafları (tarama/çekimden gelir); kayıtta yüklenir.
   List<Uint8List> pendingImages;
 
+  /// "Her ay tekrarlanır" seçeneği: aylık ödeme günü (1-31), 0 = tekrarlamaz; hatırlatıcı tercihi.
+  int recurringDay;
+  bool recurringRemind;
+
   ReceiptDraft({
     this.id,
     this.clientUid,
@@ -394,6 +475,8 @@ class ReceiptDraft {
     this.receiptTotal,
     this.discount = 0,
     List<Uint8List>? pendingImages,
+    this.recurringDay = 0,
+    this.recurringRemind = true,
   }) : date = date ?? DateTime.now(),
        items = items ?? [],
        pendingImages = pendingImages ?? [];
@@ -421,6 +504,9 @@ class ReceiptDraft {
     if (suggestedCategoryId != null) 'suggested_category_id': suggestedCategoryId,
     'note': note,
     'items': items.map((i) => i.toJson()).toList(),
+    // 0 = tekrarlamaz (güncellemede işareti kaldırır).
+    'recurring_day': recurringDay,
+    'recurring_remind': recurringRemind,
   };
 
   factory ReceiptDraft.from(Expense e) {
@@ -450,6 +536,8 @@ class ReceiptDraft {
       note: e.note,
       items: items,
       discount: diff > 0 ? diff : 0,
+      recurringDay: e.recurringDay,
+      recurringRemind: e.recurringRemind,
     );
   }
 

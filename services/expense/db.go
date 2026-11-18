@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS expense.category_rules (
 		return err
 	}
 
+	if err := migrateBudgetsAndRecurring(db); err != nil {
+		return err
+	}
+
 	// Marka ve urun sozlugu kodda (category_lexicon.go); keywords kolonu ek/ozel marka anahtar
 	// kelimeleri icindir ve bos baslar.
 	seed := []string{
@@ -108,6 +112,28 @@ func migrateTaxonomy(db *sql.DB) error {
 	// "ELEKTRIK KESILDI" bilgi satiri fis kategorisini Fatura'ya cekmesin.
 	_, err := db.Exec(`UPDATE expense.categories SET keywords = array_remove(array_remove(keywords, 'elektrik'), 'dogalgaz')
 		WHERE keywords && ARRAY['elektrik','dogalgaz']`)
+	return err
+}
+
+// migrateBudgetsAndRecurring (idempotent):
+//   - expense.budgets: profil + kategori basina aylik harcama limiti (profil silinince ON DELETE CASCADE).
+//   - expenses.recurring_day (1-31, NULL = tekrarlamaz) ve recurring_remind: "Her ay tekrarlanir" isareti
+//     ve odeme hatirlatici tercihi. Seri/projeksiyon hesabi recurring.go'da.
+func migrateBudgetsAndRecurring(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS expense.budgets (
+	id            BIGSERIAL PRIMARY KEY,
+	user_id       BIGINT NOT NULL,
+	profile_id    BIGINT NOT NULL REFERENCES expense.profiles(id) ON DELETE CASCADE,
+	category_id   INT NOT NULL REFERENCES expense.categories(id),
+	monthly_limit NUMERIC(12,2) NOT NULL CHECK (monthly_limit > 0),
+	updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+	UNIQUE (profile_id, category_id)
+);
+CREATE INDEX IF NOT EXISTS idx_budgets_user ON expense.budgets (user_id);
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_day INT CHECK (recurring_day BETWEEN 1 AND 31);
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_remind BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;`)
 	return err
 }
 

@@ -210,6 +210,21 @@ type expenseInput struct {
 	// ClientUID: istemcinin urettigi kalici kimlik. Ayni (hesap, client_uid) tekrar gelirse kayit
 	// mukerrer olusmaz (cevrimdisi kuyruk tekrari, yedekten iceri aktarma). Bos ise sunucu uretir.
 	ClientUID string `json:"client_uid"`
+	// RecurringDay: "Her ay tekrarlanir" isareti; 1-31 aylik odeme gunu, 0/yok = tekrarlamaz (bkz. recurring.go).
+	RecurringDay int `json:"recurring_day"`
+	// RecurringRemind: odeme hatirlaticisi tercihi; verilmezse true.
+	RecurringRemind *bool `json:"recurring_remind"`
+}
+
+// remind hatirlatici tercihini dondurur (verilmediyse varsayilan: acik).
+func (in *expenseInput) remind() bool { return in.RecurringRemind == nil || *in.RecurringRemind }
+
+// recurringArg SQL parametresi: tekrarlamayan fisler icin NULL.
+func (in *expenseInput) recurringArg() any {
+	if in.RecurringDay == 0 {
+		return nil
+	}
+	return in.RecurringDay
 }
 
 // itemsForStorage kalemleri kalici biciminde ({name, amount, category_id}) dondurur.
@@ -276,6 +291,9 @@ type expenseOut struct {
 	ImageIDs     []int64       `json:"image_ids"`
 	ProfileID    int64         `json:"profile_id"`
 	ClientUID    string        `json:"client_uid"`
+	// RecurringDay 0 = tekrarlamaz.
+	RecurringDay    int  `json:"recurring_day"`
+	RecurringRemind bool `json:"recurring_remind"`
 }
 
 func (in *expenseInput) validate() (time.Time, string) {
@@ -295,6 +313,9 @@ func (in *expenseInput) validate() (time.Time, string) {
 	}
 	if in.ProfileID < 0 {
 		return time.Time{}, "invalid profile_id"
+	}
+	if in.RecurringDay < 0 || in.RecurringDay > 31 {
+		return time.Time{}, "recurring_day must be between 1 and 31"
 	}
 	if len([]rune(in.Merchant)) > 100 {
 		return time.Time{}, "merchant too long"
@@ -326,6 +347,7 @@ func isFKViolation(err error) bool {
 
 const selectExpense = `
 SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
+       COALESCE(e.recurring_day, 0), e.recurring_remind,
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -336,7 +358,7 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var d time.Time
 	var items []byte
 	var imageIDs pq.Int64Array
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &imageIDs)
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &imageIDs)
 	e.Date = d.Format(dateLayout)
 	e.Items = []expenseItem{}
 	e.ImageIDs = []int64{} // JSON'da null degil []
@@ -416,10 +438,10 @@ func insertExpense(q interface {
 }, userID, profileID int64, uid string, in expenseInput, d time.Time, itemsJSON string) (int64, bool, error) {
 	var id int64
 	err := q.QueryRow(
-		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		 ON CONFLICT (user_id, client_uid) DO NOTHING RETURNING id`,
-		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON).Scan(&id)
+		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = q.QueryRow(`SELECT id FROM expense.expenses WHERE user_id = $1 AND client_uid = $2`, userID, uid).Scan(&id)
 		return id, false, err
@@ -564,9 +586,10 @@ func (h *handler) updateExpense(c *gin.Context) {
 	defer tx.Rollback()
 	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
-		 profile_id = COALESCE($9::bigint, profile_id)
+		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11
 		 WHERE id=$7 AND user_id=$8`,
-		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo)
+		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo,
+		in.recurringArg(), in.remind())
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return

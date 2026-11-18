@@ -11,6 +11,8 @@ import 'package:fissio_mobile/theme_controller.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'fakes.dart';
+
 /// Bellek içi sahte sunucu (auth + expense): gerçek sunucunun JSON sözleşmesini taklit eder. İstekleri
 /// kaydeder (`log`), bağlantıyı kesebilir (`offline`) ve belirli yolları geçici olarak reddedebilir.
 class FakeBackend {
@@ -239,6 +241,40 @@ class FakeBackend {
       }
     }
 
+    // ---- bütçe limitleri ----
+    if (path == '/budgets' && m == 'GET') {
+      final pf = int.tryParse(req.url.queryParameters['profile_id'] ?? '');
+      return _json(200, [for (final b in u.budgets) if (pf == null || b['profile_id'] == pf) b]);
+    }
+    if (path == '/budgets' && m == 'PUT') {
+      final pid = j['profile_id'] as int;
+      if (!u.profiles.any((p) => p['id'] == pid)) return _err(404, 'not_found', 'profile not found');
+      final limit = (j['monthly_limit'] as num).toDouble();
+      if (limit < 0.01) return _err(400, 'bad_request', 'monthly_limit must be a positive number');
+      final ex = u.budgets.where((b) => b['profile_id'] == pid && b['category_id'] == j['category_id']).firstOrNull;
+      if (ex != null) {
+        ex['monthly_limit'] = limit;
+        return _json(200, ex);
+      }
+      final b = {
+        'id': ++_seq,
+        'profile_id': pid,
+        'category_id': j['category_id'],
+        'category_name': _catName(j['category_id']),
+        'monthly_limit': limit,
+        'spent': 0,
+        'status': 'ok',
+      };
+      u.budgets.add(b);
+      return _json(200, b);
+    }
+    final bm = RegExp(r'^/budgets/(\d+)$').firstMatch(path);
+    if (bm != null && m == 'DELETE') {
+      final n = u.budgets.length;
+      u.budgets.removeWhere((b) => b['id'] == int.parse(bm[1]!));
+      return u.budgets.length == n ? _err(404, 'not_found', 'budget not found') : _json(204, null);
+    }
+
     // ---- fişler ----
     if (path == '/expenses' && m == 'GET') {
       final limit = int.tryParse(req.url.queryParameters['limit'] ?? '') ?? 50;
@@ -322,6 +358,8 @@ class FakeBackend {
       'image_ids': <int>[],
       'profile_id': profileId,
       'client_uid': j['client_uid'] ?? 'srv-${++_seq}',
+      'recurring_day': j['recurring_day'] ?? 0,
+      'recurring_remind': j['recurring_remind'] ?? true,
     };
     u.expenses.add(e);
     return e;
@@ -338,6 +376,7 @@ class FakeUser {
   final List<String> sessions = [];
   final List<Map<String, dynamic>> profiles = [];
   final List<Map<String, dynamic>> expenses = [];
+  final List<Map<String, dynamic>> budgets = [];
 }
 
 class MemPrefs implements DeletablePrefsStore {
@@ -366,12 +405,14 @@ class FakeDevice implements DeviceInfoProvider {
 }
 
 class Harness {
-  Harness._(this.backend, this.prefs, this.local, this.connectivity, this.app);
+  Harness._(this.backend, this.prefs, this.local, this.connectivity, this.app, this.notifier, this.widget);
   final FakeBackend backend;
   final MemPrefs prefs;
   final MemoryLocalStore local;
   final FakeConnectivity connectivity;
   final AppState app;
+  final FakeNotifier notifier;
+  final FakeWidgetSync widget;
 
   factory Harness({
     FakeBackend? backend,
@@ -379,7 +420,10 @@ class Harness {
     MemoryLocalStore? local,
     OcrEngine? onDeviceOcr,
     OcrMode Function()? ocrMode,
+    DateTime Function()? clock,
   }) {
+    final notifier = FakeNotifier();
+    final widget = FakeWidgetSync();
     final b = backend ?? FakeBackend();
     final p = prefs ?? MemPrefs();
     final l = local ?? MemoryLocalStore();
@@ -393,8 +437,11 @@ class Harness {
       backgroundInterval: const Duration(hours: 1),
       onDeviceOcr: onDeviceOcr,
       ocrMode: ocrMode,
+      clock: clock,
+      notifier: notifier,
+      widgetSync: widget,
     );
-    return Harness._(b, p, l, c, app);
+    return Harness._(b, p, l, c, app, notifier, widget);
   }
 
   /// Hesabı sunucuda hazırlar ve giriş yapar.

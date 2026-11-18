@@ -1,6 +1,6 @@
 {
-    "name": "fissio_mobile",
-    "short_name": "fissio_mobile",
+    "name": "Fissio",
+    "short_name": "Fissio",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

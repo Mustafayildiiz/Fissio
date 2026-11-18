@@ -35,6 +35,10 @@ class BackupExpense {
   final String category;
   final String note;
   final List<BackupItem> items;
+
+  /// "Her ay tekrarlanır" (1-31, 0 = yok) ve hatırlatıcı tercihi; yalnızca JSON yedeğinde taşınır.
+  final int recurringDay;
+  final bool recurringRemind;
   const BackupExpense({
     required this.uid,
     required this.date,
@@ -43,6 +47,8 @@ class BackupExpense {
     required this.category,
     required this.note,
     required this.items,
+    this.recurringDay = 0,
+    this.recurringRemind = true,
   });
 }
 
@@ -177,6 +183,8 @@ BackupData buildBackup(
             category: e.categoryName,
             note: e.note,
             items: [for (final i in e.items) BackupItem(i.name, i.amount, i.categoryName ?? '')],
+            recurringDay: e.recurringDay,
+            recurringRemind: e.recurringRemind,
           ),
       ]),
     );
@@ -202,6 +210,8 @@ String exportJson(BackupData b) => const JsonEncoder.withIndent('  ').convert({
               'amount': e.amount,
               'category': e.category,
               'note': e.note,
+              if (e.recurringDay > 0) 'recurring_day': e.recurringDay,
+              if (e.recurringDay > 0) 'recurring_remind': e.recurringRemind,
               'items': [
                 for (final i in e.items) {'name': i.name, 'amount': i.amount, 'category': i.category},
               ],
@@ -306,6 +316,8 @@ BackupData _parseJson(String text) {
           amount: e['amount'] is num ? (e['amount'] as num).toDouble() : parseAmount('${e['amount'] ?? ''}'),
           category: '${e['category'] ?? ''}',
           note: '${e['note'] ?? ''}',
+          recurringDay: e['recurring_day'] is num ? (e['recurring_day'] as num).toInt() : 0,
+          recurringRemind: e['recurring_remind'] is bool ? e['recurring_remind'] as bool : true,
           rawItems: [
             if (e['items'] is List)
               for (final i in e['items'] as List)
@@ -339,6 +351,8 @@ bool _uidOk(String s) => RegExp(r'^[A-Za-z0-9._:-]{1,64}$').hasMatch(s);
   required String category,
   required String note,
   required List<({String name, double? amount, String category})> rawItems,
+  int recurringDay = 0,
+  bool recurringRemind = true,
 }) {
   final date = parseDate(dateRaw);
   if (date == null) return (value: null, error: 'tarih okunamadı ("$dateRaw").');
@@ -358,6 +372,8 @@ bool _uidOk(String s) => RegExp(r'^[A-Za-z0-9._:-]{1,64}$').hasMatch(s);
       category: category.trim(),
       note: _clip(note, 500),
       items: items,
+      recurringDay: recurringDay >= 1 && recurringDay <= 31 ? recurringDay : 0,
+      recurringRemind: recurringRemind,
     ),
     error: null,
   );
@@ -557,6 +573,8 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
           ],
           clientUid: uid,
           profileUid: profile.id,
+          recurringDay: be.recurringDay,
+          recurringRemind: be.recurringRemind,
         ),
       );
       imported++;

@@ -1,12 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Bütçe uyarıları ve ödeme hatırlatıcıları için yerel bildirimler (Android 13+ çalışma zamanı izni). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Cihaz yeniden başlayınca planlı ödeme hatırlatıcılarını yeniden kurar. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:usesCleartextTraffic="true"
-        android:label="fissio_mobile"
+        android:label="Fissio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Varsayılan ana ekran ikonu (kırmızı) MainActivity'nin LAUNCHER girişidir (flutter run bunu arar).
+             Diğer 6 renk aşağıdaki, varsayılan olarak kapalı activity-alias'lardır; renk seçimine göre uygulama
+             içinden MainActivity.kt ile açılıp kapatılır (aynı anda yalnızca biri etkin = tek ikon). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -28,7 +35,84 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- fissio://scan : ana ekran widget'ının hızlı tarama kısayolu. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
         </activity>
+
+        <!-- Diğer 6 renk için başlatıcı ikon takma adları (varsayılan kapalı). -->
+        <activity-alias android:name=".LauncherPurple" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="Fissio"
+            android:icon="@mipmap/ic_launcher_purple">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".LauncherGreen" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="Fissio"
+            android:icon="@mipmap/ic_launcher_green">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".LauncherDarkred" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="Fissio"
+            android:icon="@mipmap/ic_launcher_darkred">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".LauncherBlue" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="Fissio"
+            android:icon="@mipmap/ic_launcher_blue">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".LauncherGraphite" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="Fissio"
+            android:icon="@mipmap/ic_launcher_graphite">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".LauncherInk" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="Fissio"
+            android:icon="@mipmap/ic_launcher_ink">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Ana ekran widget'ı: bu ayki toplam harcama + hızlı tarama kısayolu. -->
+        <receiver android:name=".FissioWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/fissio_widget_info"/>
+        </receiver>
+
+        <!-- Planlı yerel bildirimler (flutter_local_notifications). -->
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -37,7 +121,7 @@
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+         https://developer.android.com/reference/android/Intent#ACTION_PROCESS_TEXT.
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
