@@ -80,7 +80,7 @@ class BudgetRow extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  progress.budget.categoryName,
+                  progress.budget.isTotal ? 'Toplam aylık bütçe' : progress.budget.categoryName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: FissioText.body(c, size: 15, weight: FontWeight.w600),
@@ -123,6 +123,11 @@ class BudgetsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Üst widget `const` verilebilir (Özet sayfası böyle); bu yüzden durumu burada kendimiz dinleriz.
+    return ListenableBuilder(listenable: app ?? appState, builder: (context, _) => _content(context));
+  }
+
+  Widget _content(BuildContext context) {
     final c = context.c;
     final progress = (app ?? appState).budgetProgress;
     void manage() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BudgetsPage()));
@@ -155,7 +160,7 @@ class BudgetsSection extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Kategori başına aylık limit belirle; %80\'e ulaşınca uyarı alırsın.',
+                      'Toplam ve kategori başına aylık limit belirle; %80\'e ulaşınca uyarı alırsın.',
                       style: FissioText.body(c, size: 14, color: c.mute),
                     ),
                   ),
@@ -215,11 +220,20 @@ class RecurringTile extends StatelessWidget {
                     TextSpan(
                       style: FissioText.body(c, size: 13, color: c.mute),
                       children: [
-                        TextSpan(text: '${fmtDate(item.nextDue)} · '),
-                        TextSpan(
-                          text: showDue ? daysLeftLabel(days) : 'ayın ${item.day}. günü',
-                          style: soon && showDue ? TextStyle(color: c.accentInk, fontWeight: FontWeight.w600) : null,
-                        ),
+                        if (item.isVariable) const TextSpan(text: 'Fatura · '),
+                        if (item.paidThisMonth) ...[
+                          TextSpan(
+                            text: 'Bu ay ödendi',
+                            style: TextStyle(color: c.accentInk, fontWeight: FontWeight.w600),
+                          ),
+                          TextSpan(text: ' · sonraki ${fmtDate(item.nextDue)}'),
+                        ] else ...[
+                          TextSpan(text: '${fmtDate(item.nextDue)} · '),
+                          TextSpan(
+                            text: showDue ? daysLeftLabel(days) : 'ayın ${item.day}. günü',
+                            style: soon && showDue ? TextStyle(color: c.accentInk, fontWeight: FontWeight.w600) : null,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -227,10 +241,60 @@ class RecurringTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            Text(fmtMoney(item.amount), style: FissioText.money(c, size: 15)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  key: Key('recurring-amount-${item.lastExpenseId}'),
+                  // Ödendi: gerçek tutar; değişken fatura: tahmini (≈); sabit: tutar.
+                  item.paidThisMonth
+                      ? fmtMoney(item.actualAmount)
+                      : (item.isVariable ? '≈ ${fmtMoney(item.expected)}' : fmtMoney(item.expected)),
+                  style: FissioText.money(c, size: 15),
+                ),
+                if (item.paidThisMonth)
+                  Text('Ödendi', key: const Key('paid-badge'), style: FissioText.body(c, size: 12, color: c.accentInk))
+                else if (item.hasRange)
+                  Text(
+                    '${fmtMoney(item.minAmount)} – ${fmtMoney(item.maxAmount)}',
+                    key: const Key('range-caption'),
+                    style: FissioText.body(c, size: 12, color: c.mute),
+                  )
+                else if (item.isVariable)
+                  Text('tahmini', style: FissioText.body(c, size: 12, color: c.mute)),
+              ],
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Projeksiyonun dökümü: bu ay ödenen (gerçek) + kalan (beklenen) ve değişken faturalar yüzünden tahmini aralık.
+class ProjectionBreakdown extends StatelessWidget {
+  const ProjectionBreakdown({super.key, required this.proj});
+  final RecurringProjection proj;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final style = FissioText.body(c, size: 13, color: c.mute);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Ödenen ${fmtMoney(proj.paidTotal)} · Kalan ${fmtMoney(proj.remainingTotal)}',
+          key: const Key('fixed-projection-split'),
+          style: style,
+        ),
+        if (proj.hasRange)
+          Text(
+            'Tahmini aralık ${fmtMoney(proj.minTotal)} – ${fmtMoney(proj.maxTotal)}',
+            key: const Key('fixed-projection-range'),
+            style: style,
+          ),
+      ],
     );
   }
 }
@@ -245,10 +309,18 @@ class FixedExpensesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(listenable: app ?? appState, builder: (context, _) => _content(context));
+  }
+
+  Widget _content(BuildContext context) {
     final c = context.c;
     final proj = (app ?? appState).recurring;
     final today = now ?? DateTime.now();
-    final upcoming = upcomingPaymentsOf(proj.items, today).take(3).toList();
+    // Yaklaşan (ödenmemiş) ödemeler + bu ay ödenmiş kalemler ("Ödendi" olarak, gerçek tutarla).
+    final upcoming = [
+      ...upcomingPaymentsOf(proj.items, today).where((i) => !i.paidThisMonth).take(3),
+      ...proj.items.where((i) => i.paidThisMonth).take(3),
+    ];
     void openAll() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RecurringPage()));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -297,6 +369,7 @@ class FixedExpensesSection extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text('${proj.items.length} tekrarlayan gider', style: FissioText.body(c, size: 13, color: c.mute)),
+                    ProjectionBreakdown(proj: proj),
                     if (upcoming.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Divider(height: 1, thickness: 1, color: c.line),

@@ -21,9 +21,10 @@ const (
 )
 
 type budgetOut struct {
-	ID           int64     `json:"id"`
-	ProfileID    int64     `json:"profile_id"`
-	CategoryID   int       `json:"category_id"`
+	ID        int64 `json:"id"`
+	ProfileID int64 `json:"profile_id"`
+	// CategoryID null = profilin TOPLAM aylik butcesi (tum kategorilerin toplami).
+	CategoryID   *int      `json:"category_id"`
 	CategoryName string    `json:"category_name"`
 	MonthlyLimit float64   `json:"monthly_limit"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -52,11 +53,12 @@ func budgetStatus(spent, limit float64) string {
 }
 
 const selectBudget = `
-SELECT b.id, b.profile_id, b.category_id, c.name, b.monthly_limit, b.updated_at,
+SELECT b.id, b.profile_id, b.category_id, COALESCE(c.name, 'Toplam bütçe'), b.monthly_limit, b.updated_at,
        COALESCE((SELECT SUM(e.amount) FROM expense.expenses e
-                 WHERE e.user_id = b.user_id AND e.profile_id = b.profile_id AND e.category_id = b.category_id
+                 WHERE e.user_id = b.user_id AND e.profile_id = b.profile_id
+                   AND (b.category_id IS NULL OR e.category_id = b.category_id)
                    AND e.spent_at >= $2 AND e.spent_at < $3), 0)
-FROM expense.budgets b JOIN expense.categories c ON c.id = b.category_id `
+FROM expense.budgets b LEFT JOIN expense.categories c ON c.id = b.category_id `
 
 func scanBudget(s scanner) (budgetOut, error) {
 	var b budgetOut
@@ -99,7 +101,7 @@ func (h *handler) listBudgets(c *gin.Context) {
 		args = append(args, pid)
 		q += ` AND b.profile_id = $4`
 	}
-	rows, err := h.db.Query(q+` ORDER BY b.profile_id, c.name`, args...)
+	rows, err := h.db.Query(q+` ORDER BY b.profile_id, (b.category_id IS NOT NULL), c.name`, args...)
 	if err != nil {
 		serverError(c)
 		return
@@ -121,11 +123,12 @@ func (h *handler) listBudgets(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// putBudget limiti olusturur ya da gunceller (profil + kategori basina tek satir).
+// putBudget limiti olusturur ya da gunceller (profil + kategori basina tek satir; category_id yoksa profilin toplam butcesi).
 func (h *handler) putBudget(c *gin.Context) {
 	var in struct {
-		ProfileID    int64   `json:"profile_id"`
-		CategoryID   int     `json:"category_id"`
+		ProfileID int64 `json:"profile_id"`
+		// CategoryID yok / null = profilin toplam aylik butcesi.
+		CategoryID   *int    `json:"category_id"`
 		MonthlyLimit float64 `json:"monthly_limit"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -136,8 +139,8 @@ func (h *handler) putBudget(c *gin.Context) {
 		badRequest(c, "monthly_limit must be a positive number")
 		return
 	}
-	if in.ProfileID < 0 || in.CategoryID <= 0 {
-		badRequest(c, "profile_id and category_id are required")
+	if in.ProfileID < 0 || (in.CategoryID != nil && *in.CategoryID <= 0) {
+		badRequest(c, "invalid profile_id or category_id")
 		return
 	}
 	limit := math.Round(in.MonthlyLimit*100) / 100
@@ -152,10 +155,19 @@ func (h *handler) putBudget(c *gin.Context) {
 		return
 	}
 	var id int64
-	err = h.db.QueryRow(
-		`INSERT INTO expense.budgets (user_id, profile_id, category_id, monthly_limit) VALUES ($1,$2,$3,$4)
-		 ON CONFLICT (profile_id, category_id) DO UPDATE SET monthly_limit = EXCLUDED.monthly_limit, updated_at = now()
-		 RETURNING id`, userID, pid, in.CategoryID, limit).Scan(&id)
+	if in.CategoryID == nil {
+		// Toplam butce: profil basina tek satir (kismi tekil indeks uq_budgets_total).
+		err = h.db.QueryRow(
+			`INSERT INTO expense.budgets (user_id, profile_id, category_id, monthly_limit) VALUES ($1,$2,NULL,$3)
+			 ON CONFLICT (profile_id) WHERE category_id IS NULL
+			 DO UPDATE SET monthly_limit = EXCLUDED.monthly_limit, updated_at = now()
+			 RETURNING id`, userID, pid, limit).Scan(&id)
+	} else {
+		err = h.db.QueryRow(
+			`INSERT INTO expense.budgets (user_id, profile_id, category_id, monthly_limit) VALUES ($1,$2,$3,$4)
+			 ON CONFLICT (profile_id, category_id) DO UPDATE SET monthly_limit = EXCLUDED.monthly_limit, updated_at = now()
+			 RETURNING id`, userID, pid, *in.CategoryID, limit).Scan(&id)
+	}
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return

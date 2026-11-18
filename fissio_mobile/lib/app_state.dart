@@ -99,7 +99,6 @@ class AppState extends ChangeNotifier {
 
   AuthUser? user;
   LocalSnapshot _snap = LocalSnapshot();
-  List<Expense> _cloudExpenses = [];
   List<Category> categories = [];
   String? activeProfileId;
   bool _syncEnabled = true;
@@ -108,6 +107,9 @@ class AppState extends ChangeNotifier {
   Set<String> _alertsSent = {};
   bool loading = false;
   String? error;
+
+  /// Son yenileme bağlantı yüzünden başarısız oldu: ekranlar cihazdaki son (önbellek) veriyi gösterir.
+  bool offline = false;
 
   VoidCallback? onSessionExpired;
 
@@ -127,7 +129,7 @@ class AppState extends ChangeNotifier {
   String get displayName => profileName ?? user?.name.nonEmpty ?? email ?? 'Profil';
 
   /// Bağlantı gelince buluta yüklenecek kayıt sayısı (senkron açık).
-  int get pendingCount => _sync.pendingCount + _sync.pendingBudgetCount;
+  int get pendingCount => _sync.pendingCount + _sync.pendingBudgetCount + _sync.pendingChangeCount;
 
   /// Yalnızca cihazda kalan (senkron kapalıyken eklenen) fiş + profil sayısı.
   int get localOnlyCount =>
@@ -137,6 +139,18 @@ class AppState extends ChangeNotifier {
 
   /// Yüklenmemiş (pending + localOnly) kayıt var mı — çıkışta bilgilendirme için.
   bool get hasUnsyncedData => pendingCount + localOnlyCount > 0;
+
+  /// Sunucudan çekilen fişlerin cihazdaki son hali (çevrimdışı açılışta gösterilir) + yüklenmeyi bekleyen
+  /// düzenlemeler üstüne işlenmiş, bekleyen silmeler çıkarılmış görünüm.
+  List<Expense> get _cloudExpenses {
+    if (_snap.pendingEdits.isEmpty && _snap.pendingDeletes.isEmpty) return _snap.cloudExpenses;
+    final edits = {for (final e in _snap.pendingEdits) e.id: e};
+    final deleted = _snap.pendingDeletes.toSet();
+    return [
+      for (final e in _snap.cloudExpenses)
+        if (!deleted.contains(e.id)) edits[e.id] ?? e,
+    ];
+  }
 
   List<Expense> _activeUnsorted() {
     final pid = activeProfileId;
@@ -270,7 +284,6 @@ class AppState extends ChangeNotifier {
     categories = List.of(_snap.categories);
     _syncEnabled = (await _read(_syncKey(id))) != '0';
     activeProfileId = await _read(_activeKey(id));
-    _cloudExpenses = [];
     _alertsSent = {};
     try {
       final raw = await _read(_alertsKey(id));
@@ -325,10 +338,11 @@ class AppState extends ChangeNotifier {
       await _delete(_activeKey(id));
       await _delete(_alertsKey(id));
     }
-    await _localSignOut();
+    // Hesap silindi: yerel veri zaten silindi, çıkış yolu diske yeniden bir şey yazmasın.
+    await _localSignOut(dropCache: false);
   }
 
-  Future<void> _localSignOut() async {
+  Future<void> _localSignOut({bool dropCache = true}) async {
     _stopBackground();
     final id = user?.id;
     api.setTokens(null, notify: false);
@@ -336,16 +350,27 @@ class AppState extends ChangeNotifier {
     await _delete(_tokensKey);
     await _delete(_userKey);
     if (id != null) await _delete(_activeKey(id));
+    if (id != null && dropCache) await _dropCloudCache(id);
     _resetMemory();
     notifyListeners();
     // Sonraki hesap önceki kullanıcının harcamasını / hatırlatıcılarını görmesin.
     await _clearDerivedOutputs();
   }
 
+  /// Çıkışta sunucudan önbelleğe alınmış fişler/limitler diskte bırakılmaz (paylaşılan cihaz gizliliği); girişte
+  /// yeniden çekilir. Yüklenmemiş kayıtlar (kuyruk, bekleyen düzenleme/silme) kaybolmasın diye kalır.
+  Future<void> _dropCloudCache(int id) async {
+    try {
+      _snap.cloudExpenses = [];
+      _snap.budgets = _snap.budgets.where((b) => b.state != SyncState.synced).toList();
+      await _local.save(id, _snap);
+    } catch (_) {}
+  }
+
   void _resetMemory() {
     user = null;
     _snap = LocalSnapshot();
-    _cloudExpenses = [];
+    offline = false;
     categories = [];
     activeProfileId = null;
     _syncEnabled = true;
@@ -453,8 +478,14 @@ class AppState extends ChangeNotifier {
       _applyCloud(ps, ex);
       await _refreshBudgets(ps);
       await _persistSnapshot();
+      offline = false;
     } on ApiException catch (e) {
-      error = e.message;
+      if (e.network) {
+        // Bağlantı yok: hata değil, cihazdaki son veriyle çalışma modu (okuma-geçişli önbellek).
+        offline = true;
+      } else {
+        error = e.message;
+      }
     }
     loading = false;
     notifyListeners();
@@ -471,7 +502,9 @@ class AppState extends ChangeNotifier {
       ];
       final keep = _snap.budgets.where((b) => b.state != SyncState.synced).toList();
       bool has(Budget b) => keep.any((k) => k.profileUid == b.profileUid && k.categoryId == b.categoryId);
-      _snap.budgets = [...server.where((b) => !has(b)), ...keep];
+      // Çevrimdışıyken silinmiş (henüz sunucuya bildirilmemiş) limitler geri gelmesin.
+      bool deleted(Budget b) => b.serverId != null && _snap.pendingBudgetDeletes.contains(b.serverId);
+      _snap.budgets = [...server.where((b) => !has(b) && !deleted(b)), ...keep];
     } on ApiException catch (e) {
       if (e.network) rethrow;
     }
@@ -489,7 +522,7 @@ class AppState extends ChangeNotifier {
         localAvatars[p.id] == null ? p : p.copyWith(localAvatarPath: localAvatars[p.id]),
       ...local,
     ];
-    _cloudExpenses = [
+    _snap.cloudExpenses = [
       for (final e in serverExpenses) e.copyWith(profileUid: byServerId[e.profileServerId] ?? ''),
     ];
     if (activeProfileId == null || !_snap.profiles.any((p) => p.id == activeProfileId)) {
@@ -608,7 +641,10 @@ class AppState extends ChangeNotifier {
     _snap.expenses = _snap.expenses.where((e) => e.profileUid != id).toList();
     _snap.budgets = _snap.budgets.where((b) => b.profileUid != id).toList();
     _snap.profiles = _snap.profiles.where((x) => x.id != id).toList();
-    _cloudExpenses = _cloudExpenses.where((e) => e.profileUid != id).toList();
+    final goneIds = {for (final e in _snap.cloudExpenses) if (e.profileUid == id) e.id};
+    _snap.cloudExpenses = _snap.cloudExpenses.where((e) => e.profileUid != id).toList();
+    _snap.pendingEdits = _snap.pendingEdits.where((e) => !goneIds.contains(e.id)).toList();
+    _snap.pendingDeletes = _snap.pendingDeletes.where((e) => !goneIds.contains(e)).toList();
     await _persistSnapshot();
     if (activeProfileId == id) {
       await selectProfile(_snap.profiles.first);
@@ -650,9 +686,18 @@ class AppState extends ChangeNotifier {
     // Sunucudaki fişi düzenleme: yalnızca senkron açıkken.
     if (d.id != null) {
       if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
-      final saved = await api.updateExpense(d.id!, d.toRequestBody());
+      final Expense saved;
+      try {
+        saved = await api.updateExpense(d.id!, d.toRequestBody());
+      } on ApiException catch (e) {
+        if (!e.network) rethrow;
+        // Bağlantı yok: düzenleme cihaz kuyruğuna alınır, bağlantı gelince PUT ile yüklenir.
+        return _queueEdit(d);
+      }
       // Liste yenilemesi (refresh) başarısız olsa bile bütçe kontrolü güncel tutarı görsün.
-      _cloudExpenses = [for (final x in _cloudExpenses) x.id == saved.id ? _withProfileUid(saved) : x];
+      _snap.cloudExpenses = [for (final x in _snap.cloudExpenses) x.id == saved.id ? _withProfileUid(saved) : x];
+      // Bu fişin önceki bekleyen düzenlemesi (varsa) artık geçersiz: sunucu en son hali tuttu.
+      _snap.pendingEdits = _snap.pendingEdits.where((x) => x.id != saved.id).toList();
       final ok = await _uploadPending(saved.id, d);
       await refresh();
       return SaveResult(imagesOk: ok);
@@ -679,7 +724,7 @@ class AppState extends ChangeNotifier {
       await _queueLocal(d, profile, SyncState.pending);
       return const SaveResult(queued: true);
     }
-    _cloudExpenses = [..._cloudExpenses.where((x) => x.id != saved.id), _withProfileUid(saved)];
+    _snap.cloudExpenses = [..._snap.cloudExpenses.where((x) => x.id != saved.id), _withProfileUid(saved)];
     var imagesOk = true;
     var queued = false;
     if (d.pendingImages.isNotEmpty) {
@@ -718,7 +763,7 @@ class AppState extends ChangeNotifier {
   Future<void> setBudget(int categoryId, double limit) async {
     final p = activeProfile;
     if (p == null || limit <= 0) return;
-    final name = _categoryName(categoryId) ?? '';
+    final name = categoryId == kTotalBudgetCategoryId ? kTotalBudgetName : (_categoryName(categoryId) ?? '');
     final existing = _budgetOf(p.id, categoryId);
     Budget make(SyncState state, {int? serverId, double? lim}) => Budget(
       profileUid: p.id,
@@ -765,7 +810,14 @@ class AppState extends ChangeNotifier {
       try {
         await api.deleteBudget(existing.serverId!);
       } on ApiException catch (e) {
-        if (e.status != 404) rethrow; // sunucuda zaten yok
+        if (e.network) {
+          // Bağlantı yok: silme kuyruğa alınır (yerelde hemen kalkar), bağlantı gelince sunucuya bildirilir.
+          if (!_snap.pendingBudgetDeletes.contains(existing.serverId)) {
+            _snap.pendingBudgetDeletes = [..._snap.pendingBudgetDeletes, existing.serverId!];
+          }
+        } else if (e.status != 404) {
+          rethrow; // 404: sunucuda zaten yok
+        }
       }
     }
     _snap.budgets = _snap.budgets.where((b) => !(b.profileUid == existing.profileUid && b.categoryId == categoryId)).toList();
@@ -943,6 +995,38 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sunucudaki bir fişin çevrimdışı düzenlemesi: görünümde hemen yansır ([SyncState.pending]), bağlantı gelince
+  /// `PUT /expenses/:id` ile yüklenir (bkz. [SyncService]). Aynı fişin önceki bekleyen düzenlemesinin yerini alır.
+  Future<SaveResult> _queueEdit(ReceiptDraft d) async {
+    final id = d.id!;
+    final prior = _snap.pendingEdits.where((e) => e.id == id).firstOrNull;
+    final orig = prior ?? _snap.cloudExpenses.where((e) => e.id == id).firstOrNull;
+    if (orig == null) throw ApiException('Fiş bulunamadı.');
+    final extra = await _storeImages(d.pendingImages);
+    _zero(d);
+    d.clientUid = orig.clientUid;
+    final edited = _fromDraft(
+      d,
+      id: id,
+      profile: _profile(orig.profileUid) ?? activeProfile!,
+      state: SyncState.pending,
+      images: [...?prior?.localImages, ...extra],
+    ).copyWith(imageIds: orig.imageIds, profileServerId: orig.profileServerId);
+    _snap.pendingEdits = [..._snap.pendingEdits.where((e) => e.id != id), edited];
+    await _persistSnapshot();
+    notifyListeners();
+    return const SaveResult(queued: true);
+  }
+
+  /// Aktif profilde [merchant] + [categoryId] ile eşleşen AKTİF tekrarlayan seri (yoksa null). Yeni fiş formu,
+  /// aynı kurumun yeni ay faturasını girerken "Her ay tekrarlanır"ı (gün, tür, tahmin) otomatik önerir; böylece
+  /// fiş seriyi sürdürür ve o ayın kalemi otomatik "ödendi" olur.
+  RecurringItem? seriesFor(String merchant, int? categoryId) {
+    if (categoryId == null || merchant.trim().isEmpty) return null;
+    final key = recurringSeriesKey(merchant, categoryId);
+    return recurring.items.where((i) => i.seriesKey == key).firstOrNull;
+  }
+
   Future<SaveResult> _updateLocal(ReceiptDraft d) async {
     final old = _snap.expenses.where((e) => e.id == d.id).firstOrNull;
     if (old == null) throw ApiException('Fiş bulunamadı.');
@@ -976,7 +1060,17 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
-    await api.deleteExpense(id);
+    try {
+      await api.deleteExpense(id);
+    } on ApiException catch (e) {
+      if (!e.network) rethrow;
+      // Bağlantı yok: silme cihaz kuyruğuna alınır (liste hemen güncellenir), bağlantı gelince yüklenir.
+      _snap.pendingEdits = _snap.pendingEdits.where((x) => x.id != id).toList();
+      if (!_snap.pendingDeletes.contains(id)) _snap.pendingDeletes = [..._snap.pendingDeletes, id];
+      await _persistSnapshot();
+      notifyListeners();
+      return;
+    }
     await refresh();
   }
 

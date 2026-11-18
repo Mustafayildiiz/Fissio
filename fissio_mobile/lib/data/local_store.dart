@@ -18,6 +18,18 @@ class LocalSnapshot {
   /// henüz yüklenmemiş (pending) limitler; kapalıyken yalnızca cihazdaki (localOnly) limitler.
   List<Budget> budgets;
 
+  /// Sunucudan en son çekilen fişlerin önbelleği (okuma-geçişli): çevrimdışı açılışta geçmiş fişler, raporlar ve
+  /// sabit gider projeksiyonu buradan gösterilir. [expenses] (kuyruk) ile KARIŞMAZ: yüklenecek şey değildir.
+  List<Expense> cloudExpenses;
+
+  /// Çevrimdışıyken yapılan, henüz sunucuya yüklenmemiş düzenlemeler (sunucu kimlikli fişin yeni hali) ve silmeler
+  /// (sunucu fiş kimlikleri). Görünümde önbelleğin üstüne işlenir; bağlantı gelince PUT / DELETE ile yüklenir.
+  List<Expense> pendingEdits;
+  List<int> pendingDeletes;
+
+  /// Çevrimdışıyken silinen bütçe limitlerinin sunucu kimlikleri.
+  List<int> pendingBudgetDeletes;
+
   /// Cihazdaki fişlere verilen negatif kimlik sayacı (sunucu kimlikleriyle çakışmasın).
   int lastLocalId;
 
@@ -26,11 +38,19 @@ class LocalSnapshot {
     List<Expense>? expenses,
     List<Category>? categories,
     List<Budget>? budgets,
+    List<Expense>? cloudExpenses,
+    List<Expense>? pendingEdits,
+    List<int>? pendingDeletes,
+    List<int>? pendingBudgetDeletes,
     this.lastLocalId = 0,
   }) : profiles = profiles ?? [],
        expenses = expenses ?? [],
        categories = categories ?? [],
-       budgets = budgets ?? [];
+       budgets = budgets ?? [],
+       cloudExpenses = cloudExpenses ?? [],
+       pendingEdits = pendingEdits ?? [],
+       pendingDeletes = pendingDeletes ?? [],
+       pendingBudgetDeletes = pendingBudgetDeletes ?? [];
 
   int nextLocalId() => --lastLocalId;
 
@@ -47,6 +67,14 @@ class LocalSnapshot {
     budgets: ((j['budgets'] as List?) ?? [])
         .map((e) => Budget.fromLocalJson(e as Map<String, dynamic>))
         .toList(),
+    cloudExpenses: ((j['cloud_expenses'] as List?) ?? [])
+        .map((e) => Expense.fromLocalJson(e as Map<String, dynamic>))
+        .toList(),
+    pendingEdits: ((j['pending_edits'] as List?) ?? [])
+        .map((e) => Expense.fromLocalJson(e as Map<String, dynamic>))
+        .toList(),
+    pendingDeletes: ((j['pending_deletes'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
+    pendingBudgetDeletes: ((j['pending_budget_deletes'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
     lastLocalId: (j['last_local_id'] as num?)?.toInt() ?? 0,
   );
 
@@ -56,6 +84,10 @@ class LocalSnapshot {
     'expenses': expenses.map((e) => e.toLocalJson()).toList(),
     'categories': categories.map((c) => {'id': c.id, 'name': c.name}).toList(),
     'budgets': budgets.map((b) => b.toLocalJson()).toList(),
+    'cloud_expenses': cloudExpenses.map((e) => e.toLocalJson()).toList(),
+    'pending_edits': pendingEdits.map((e) => e.toLocalJson()).toList(),
+    'pending_deletes': pendingDeletes,
+    'pending_budget_deletes': pendingBudgetDeletes,
     'last_local_id': lastLocalId,
   };
 }

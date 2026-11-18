@@ -148,6 +148,18 @@ components:
         recurring_remind:
           type: boolean
           description: Ödeme hatırlatıcı tercihi (istemci yerel bildirim planlar); verilmezse true.
+        recurring_kind:
+          type: string
+          enum: [fixed, variable]
+          description: >-
+            Tekrar türü: `fixed` her ay aynı tutar (kira, abonelik); `variable` tutarı her ay değişen fatura
+            (elektrik, su, doğalgaz). Boş = fixed. Değişken faturada projeksiyon son 3 ayın hareketli ortalamasını
+            (min-maks aralığıyla) kullanır.
+        recurring_estimate:
+          type: number
+          description: >-
+            Değişken fatura için kullanıcının tahmini aylık tutarı; geçmişte 2'den az ay varsa projeksiyonda
+            kullanılır. 0/yok = tahmin yok. Yalnızca tekrarlayan değişken faturada saklanır (diğerlerinde 0).
         items:
           type: array
           items: { $ref: '#/components/schemas/Item' }
@@ -156,13 +168,18 @@ components:
       properties:
         id: { type: integer, format: int64 }
         profile_id: { type: integer, format: int64 }
-        category_id: { type: integer }
-        category_name: { type: string }
+        category_id:
+          type: integer
+          nullable: true
+          description: Kategori kimliği; `null` = profilin TOPLAM aylık bütçesi (tüm kategorilerin toplamı).
+        category_name: { type: string, description: Toplam bütçede "Toplam bütçe" }
         monthly_limit: { type: number }
         updated_at: { type: string, format: date-time }
         spent:
           type: number
-          description: İstenen ayda (varsayılan bu ay) bu profilde bu kategoriye harcanan FİŞ tutarı toplamı.
+          description: >-
+            İstenen ayda (varsayılan bu ay) bu profilde bu kategoriye harcanan FİŞ tutarı toplamı; toplam bütçede
+            (category_id null) tüm kategorilerin toplamı.
         status:
           type: string
           enum: [ok, warning, exceeded]
@@ -181,6 +198,23 @@ components:
         last_expense_id: { type: integer, format: int64 }
         last_date: { type: string, format: date }
         next_due: { type: string, format: date, description: Bir sonraki ödeme tarihi }
+        kind: { type: string, enum: [fixed, variable] }
+        estimate: { type: number, description: Kullanıcının tahmini tutarı (değişken fatura; 0 = yok) }
+        expected_amount:
+          type: number
+          description: >-
+            Bir sonraki (ya da bu ayki ödenmemiş) kalem için beklenen tutar. Sabit giderde son fiş tutarı; değişken
+            faturada son 3 AYLIK fiş tutarının hareketli ortalaması (geçmiş 2 aydan azsa tahmin, o da yoksa son tutar).
+        min_amount: { type: number, description: Tahmini aralığın alt sınırı (sabit giderde expected_amount) }
+        max_amount: { type: number, description: Tahmini aralığın üst sınırı (sabit giderde expected_amount) }
+        history_count: { type: integer, description: Hareketli ortalamaya giren ay sayısı }
+        paid_this_month:
+          type: boolean
+          description: Bu ay serinin fişi girilmiş (ödendi / gerçekleşti).
+        actual_amount: { type: number, description: Bu ayki fişin tutarı (paid_this_month ise) }
+        month_amount:
+          type: number
+          description: Bu ayın projeksiyonuna giren tutar — ödendiyse gerçek, değilse beklenen.
     Expense:
       allOf:
         - $ref: '#/components/schemas/ExpenseInput'
@@ -691,7 +725,10 @@ paths:
         '404': { description: Profil yok ya da başkasına ait }
     put:
       tags: [expense]
-      summary: Limit koy / güncelle (profil + kategori başına tek limit)
+      summary: Limit koy / güncelle (profil + kategori başına tek limit; kategorisiz = toplam aylık bütçe)
+      description: >-
+        `category_id` verilmezse (ya da null) profilin TOPLAM aylık bütçesi yazılır (profil başına tek satır).
+        Açıkça 0 ya da negatif `category_id` reddedilir.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -699,10 +736,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [category_id, monthly_limit]
+              required: [monthly_limit]
               properties:
                 profile_id: { type: integer, format: int64, description: Boş/0 = varsayılan profil }
-                category_id: { type: integer }
+                category_id: { type: integer, nullable: true, description: Boş/null = toplam aylık bütçe }
                 monthly_limit: { type: number, minimum: 0.01 }
       responses:
         '200':
@@ -731,6 +768,12 @@ paths:
         girildiğinden projeksiyon seri başınadır (çift sayım yok): serinin güncel hali en son fiştir; en son fiş
         "tekrarlanır" işaretliyse seri aktiftir, işaretsizse bitmiştir. Bu ay için fiş girilmişse bir sonraki
         ödeme gelecek aydadır.
+
+
+        Sabit / değişken: sabit giderde beklenen tutar son fiştir; değişken faturada (`recurring_kind=variable`)
+        son 3 aylık fiş tutarlarının hareketli ortalaması ve min-maks aralığıdır (ayda birden fazla fiş varsa ayın en
+        son fişi). Bu ay serinin fişi girilmişse kalem otomatik "ödendi"dir ve projeksiyona tahmin değil gerçek tutar
+        girer (`monthly_total` = ödenenlerin gerçek + ödenmemişlerin beklenen tutarları).
       security: [{ bearer: [] }]
       parameters:
         - { name: profile_id, in: query, description: Yalnızca bu profil (verilmezse hesabın tüm profilleri), schema: { type: integer, format: int64 } }
@@ -743,6 +786,10 @@ paths:
                 type: object
                 properties:
                   monthly_total: { type: number }
+                  paid_total: { type: number, description: Bu ay ödenen kalemlerin gerçek tutarları toplamı }
+                  remaining_total: { type: number, description: Ödenmemiş kalemlerin beklenen tutarları toplamı }
+                  min_total: { type: number, description: Tahmini aralığın alt sınırı (ödenenler gerçek) }
+                  max_total: { type: number, description: Tahmini aralığın üst sınırı (ödenenler gerçek) }
                   count: { type: integer }
                   items:
                     type: array

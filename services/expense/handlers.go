@@ -214,6 +214,12 @@ type expenseInput struct {
 	RecurringDay int `json:"recurring_day"`
 	// RecurringRemind: odeme hatirlaticisi tercihi; verilmezse true.
 	RecurringRemind *bool `json:"recurring_remind"`
+	// RecurringKind: "fixed" (her ay ayni tutar: kira, abonelik) | "variable" (tutar degisir: elektrik, su,
+	// dogalgaz faturasi); bos = fixed.
+	RecurringKind string `json:"recurring_kind"`
+	// RecurringEstimate: degisken fatura icin kullanicinin tahmini aylik tutari (gecmis fatura yokken
+	// projeksiyonda kullanilir); 0/yok = tahmin yok.
+	RecurringEstimate float64 `json:"recurring_estimate"`
 }
 
 // remind hatirlatici tercihini dondurur (verilmediyse varsayilan: acik).
@@ -225,6 +231,22 @@ func (in *expenseInput) recurringArg() any {
 		return nil
 	}
 	return in.RecurringDay
+}
+
+// kind tekrar turunu dondurur: yalnizca "variable" degisken, digerleri sabit.
+func (in *expenseInput) kind() string {
+	if in.RecurringKind == recurringVariable {
+		return recurringVariable
+	}
+	return recurringFixed
+}
+
+// estimateArg SQL parametresi: yalnizca tekrarlayan DEGISKEN faturada ve tahmin verildiyse dolu, aksi halde NULL.
+func (in *expenseInput) estimateArg() any {
+	if in.RecurringDay == 0 || in.kind() != recurringVariable || in.RecurringEstimate <= 0 {
+		return nil
+	}
+	return in.RecurringEstimate
 }
 
 // itemsForStorage kalemleri kalici biciminde ({name, amount, category_id}) dondurur.
@@ -294,6 +316,9 @@ type expenseOut struct {
 	// RecurringDay 0 = tekrarlamaz.
 	RecurringDay    int  `json:"recurring_day"`
 	RecurringRemind bool `json:"recurring_remind"`
+	// RecurringKind fixed | variable; RecurringEstimate degisken faturanin tahmini tutari (0 = yok).
+	RecurringKind     string  `json:"recurring_kind"`
+	RecurringEstimate float64 `json:"recurring_estimate"`
 }
 
 func (in *expenseInput) validate() (time.Time, string) {
@@ -317,6 +342,13 @@ func (in *expenseInput) validate() (time.Time, string) {
 	if in.RecurringDay < 0 || in.RecurringDay > 31 {
 		return time.Time{}, "recurring_day must be between 1 and 31"
 	}
+	if in.RecurringKind != "" && in.RecurringKind != recurringFixed && in.RecurringKind != recurringVariable {
+		return time.Time{}, "recurring_kind must be fixed or variable"
+	}
+	if math.IsNaN(in.RecurringEstimate) || math.IsInf(in.RecurringEstimate, 0) || in.RecurringEstimate < 0 || in.RecurringEstimate >= 1e10 {
+		return time.Time{}, "recurring_estimate must be a positive number"
+	}
+	in.RecurringEstimate = math.Round(in.RecurringEstimate*100) / 100
 	if len([]rune(in.Merchant)) > 100 {
 		return time.Time{}, "merchant too long"
 	}
@@ -347,7 +379,7 @@ func isFKViolation(err error) bool {
 
 const selectExpense = `
 SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
-       COALESCE(e.recurring_day, 0), e.recurring_remind,
+       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0),
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -358,7 +390,7 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var d time.Time
 	var items []byte
 	var imageIDs pq.Int64Array
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &imageIDs)
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &imageIDs)
 	e.Date = d.Format(dateLayout)
 	e.Items = []expenseItem{}
 	e.ImageIDs = []int64{} // JSON'da null degil []
@@ -438,10 +470,10 @@ func insertExpense(q interface {
 }, userID, profileID int64, uid string, in expenseInput, d time.Time, itemsJSON string) (int64, bool, error) {
 	var id int64
 	err := q.QueryRow(
-		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		 ON CONFLICT (user_id, client_uid) DO NOTHING RETURNING id`,
-		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind()).Scan(&id)
+		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = q.QueryRow(`SELECT id FROM expense.expenses WHERE user_id = $1 AND client_uid = $2`, userID, uid).Scan(&id)
 		return id, false, err
@@ -586,10 +618,10 @@ func (h *handler) updateExpense(c *gin.Context) {
 	defer tx.Rollback()
 	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
-		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11
+		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11, recurring_kind = $12, recurring_estimate = $13
 		 WHERE id=$7 AND user_id=$8`,
 		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo,
-		in.recurringArg(), in.remind())
+		in.recurringArg(), in.remind(), in.kind(), in.estimateArg())
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return

@@ -51,8 +51,8 @@ func TestRecurringProjectionCountsSeriesOnce(t *testing.T) {
 		// Kira: Nisan'da girilmis, bu ay henuz girilmemis.
 		{ID: 4, ProfileID: 1, Merchant: "Ev sahibi", CategoryID: 8, Amount: 12000, Date: day(2026, time.April, 1), Day: 1, Remind: false},
 	}
-	items, total := buildRecurring(rows, today)
-	if len(items) != 2 || total != 12400 {
+	items, totals := buildRecurring(rows, today)
+	if total := totals.Monthly; len(items) != 2 || total != 12400 {
 		t.Fatalf("items=%d total=%v: %+v", len(items), total, items)
 	}
 	byMerchant := map[string]recurringOut{}
@@ -81,8 +81,8 @@ func TestRecurringSeriesEndsWhenLatestIsNotMarkedAndProfilesAreSeparate(t *testi
 		// Ayni isletme baska profilde ayri seri.
 		{ID: 3, ProfileID: 2, Merchant: "Netflix", CategoryID: 9, Amount: 120, Date: day(2026, time.April, 3), Day: 3},
 	}
-	items, total := buildRecurring(rows, today)
-	if len(items) != 1 || items[0].ProfileID != 2 || total != 120 {
+	items, totals := buildRecurring(rows, today)
+	if total := totals.Monthly; len(items) != 1 || items[0].ProfileID != 2 || total != 120 {
 		t.Fatalf("items=%+v total=%v", items, total)
 	}
 }

@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../api.dart';
 import '../app_state.dart';
+import '../budgets.dart' show parseMoneyInput;
 import '../dialogs.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -76,20 +77,31 @@ class _Row {
 
 /// Fiş oluştur / düzenle: bilgiler ve ürünler tek ekranda.
 class ReceiptFormPage extends StatefulWidget {
-  const ReceiptFormPage({super.key, this.initial, this.initialDraft});
+  const ReceiptFormPage({super.key, this.initial, this.initialDraft, this.app});
   final Expense? initial; // doluysa düzenleme
   final ReceiptDraft? initialDraft; // OCR taramasından gelen taslak
+
+  /// Verilmezse global [appState] (testlerde sahte uygulama durumu verilir).
+  final AppState? app;
 
   @override
   State<ReceiptFormPage> createState() => _ReceiptFormPageState();
 }
 
 class _ReceiptFormPageState extends State<ReceiptFormPage> {
+  AppState get _app => widget.app ?? appState;
   late final ReceiptDraft _draft;
   late final TextEditingController _merchant;
   late final TextEditingController _note;
+  late final TextEditingController _estimate;
   late final List<_Row> _rows;
   bool _busy = false;
+
+  /// Kullanıcı "Her ay tekrarlanır" ayarına kendisi dokundu: otomatik seri önerisi bir daha üzerine yazmaz.
+  bool _recurringTouched = false;
+
+  /// Otomatik olarak devam ettirilen tekrarlayan serinin adı (bilgi notu için).
+  String? _inheritedFrom;
 
   bool get _editing => widget.initial != null;
 
@@ -106,6 +118,9 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         : (widget.initialDraft ?? ReceiptDraft());
     _merchant = TextEditingController(text: _draft.merchant);
     _note = TextEditingController(text: _draft.note);
+    _estimate = TextEditingController(
+      text: _draft.recurringEstimate > 0 ? _draft.recurringEstimate.toStringAsFixed(2).replaceAll('.', ',') : '',
+    );
     _rows = _draft.items
         .map(
           (i) => _Row(
@@ -118,13 +133,15 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         )
         .toList();
     if (_rows.isEmpty) _rows.add(_Row('', null));
-    if (appState.categories.isEmpty) appState.refresh();
+    if (_app.categories.isEmpty) _app.refresh();
+    _inheritSeries();
   }
 
   @override
   void dispose() {
     _merchant.dispose();
     _note.dispose();
+    _estimate.dispose();
     for (final r in _rows) {
       r.dispose();
     }
@@ -145,7 +162,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     final id = await showChoiceSheet<int>(
       context,
       title: 'Kategori',
-      options: [for (final c in appState.categories) (c.id, c.name)],
+      options: [for (final c in _app.categories) (c.id, c.name)],
       selected: _draft.categoryId,
     );
     if (id != null) _setCategory(id);
@@ -153,19 +170,40 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
 
   /// Fiş kategorisini kullanıcı seçti: "kontrol edin" uyarısı kalkar. Otomatik öneriden farklıysa
   /// kayıtta sunucu bunu işletme için kişisel kural olarak öğrenir.
-  void _setCategory(int id) => setState(() {
-        _draft.categoryId = id;
-        _draft.categoryNeedsReview = false;
-      });
+  void _setCategory(int id) {
+    setState(() {
+      _draft.categoryId = id;
+      _draft.categoryNeedsReview = false;
+    });
+    _inheritSeries();
+  }
+
+  /// Yeni fiş, aktif profildeki bir tekrarlayan serinin (aynı kurum + kategori) yeni ay faturasıysa "Her ay
+  /// tekrarlanır"ı, günü, türü ve tahmini seriden devralır: fiş seriyi sürdürür ve o ayın beklenen kalemi
+  /// otomatik "ödendi" olur. Kullanıcı ayara dokunduysa ya da fiş düzenleniyorsa karışılmaz.
+  void _inheritSeries() {
+    if (_editing || _recurringTouched || _draft.recurringDay > 0) return;
+    final s = _app.seriesFor(_merchant.text, _draft.categoryId);
+    if (s == null) return;
+    setState(() {
+      _draft
+        ..recurringDay = s.day
+        ..recurringKind = s.kind
+        ..recurringEstimate = s.estimate
+        ..recurringRemind = s.remind;
+      _estimate.text = s.estimate > 0 ? s.estimate.toStringAsFixed(2).replaceAll('.', ',') : '';
+      _inheritedFrom = s.title;
+    });
+  }
 
   String? _categoryName(int? id) =>
-      appState.categories.where((x) => x.id == id).map((x) => x.name).firstOrNull;
+      _app.categories.where((x) => x.id == id).map((x) => x.name).firstOrNull;
 
   Future<void> _pickItemCategory(int i) async {
     final id = await showChoiceSheet<int>(
       context,
       title: 'Ürün kategorisi',
-      options: [for (final c in appState.categories) (c.id, c.name)],
+      options: [for (final c in _app.categories) (c.id, c.name)],
       selected: _rows[i].categoryId,
     );
     if (id != null) {
@@ -197,8 +235,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
 
   /// "Her ay tekrarlanır": açılınca ödeme günü fiş tarihinin günü olur; hatırlatıcı varsayılan açık.
   void _toggleRecurring(bool on) {
-    setState(() => _draft.recurringDay = on ? _draft.date.day : 0);
-    if (on && _draft.recurringRemind) appState.notifier.requestPermission();
+    _recurringTouched = true;
+    setState(() {
+      _draft.recurringDay = on ? _draft.date.day : 0;
+      if (!on) _inheritedFrom = null;
+    });
+    if (on && _draft.recurringRemind) _app.notifier.requestPermission();
   }
 
   Future<void> _pickRecurringDay() async {
@@ -208,7 +250,10 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (var d = 1; d <= 31; d++) (d, 'Ayın $d. günü')],
       selected: _draft.recurringDay,
     );
-    if (day != null) setState(() => _draft.recurringDay = day);
+    if (day != null) {
+      _recurringTouched = true;
+      setState(() => _draft.recurringDay = day);
+    }
   }
 
   Widget _recurringCard(FissioColors c) {
@@ -245,9 +290,58 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
               activeTrackColor: c.accent,
               activeThumbColor: c.onAccent,
               onChanged: (v) {
+                _recurringTouched = true;
                 setState(() => _draft.recurringRemind = v);
-                if (v) appState.notifier.requestPermission();
+                if (v) _app.notifier.requestPermission();
               },
+            ),
+          ),
+        if (on)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SegmentedControl<RecurringKind>(
+                  key: const Key('recurring-kind'),
+                  value: _draft.recurringKind,
+                  fontSize: 13,
+                  onChanged: (k) {
+                    _recurringTouched = true;
+                    setState(() => _draft.recurringKind = k);
+                  },
+                  items: const [
+                    SegmentItem(RecurringKind.fixed, 'Sabit tutar'),
+                    SegmentItem(RecurringKind.variable, 'Değişken (fatura)'),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _draft.recurringKind == RecurringKind.fixed
+                      ? 'Her ay aynı tutar: kira, abonelik, internet.'
+                      : 'Tutarı her ay değişir: elektrik, su, doğalgaz. Projeksiyon son 3 ayın ortalamasını '
+                            '(min-maks aralığıyla) kullanır; yeni ayın faturası girilince gerçek tutarla güncellenir.',
+                  style: FissioText.body(c, size: 13, color: c.mute).copyWith(height: 1.35),
+                ),
+              ],
+            ),
+          ),
+        if (on && _draft.recurringKind == RecurringKind.variable)
+          RowField(
+            key: const Key('recurring-estimate'),
+            label: 'Tahmini tutar',
+            controller: _estimate,
+            hint: 'İsteğe bağlı, örn. 850',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            labelWidth: 120,
+          ),
+        if (on && _inheritedFrom != null)
+          Padding(
+            key: const Key('recurring-inherited'),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+            child: Text(
+              '"$_inheritedFrom" tekrarlayan giderinin devamı olarak işaretlendi; bu ayın kalemi ödendi sayılacak.',
+              style: FissioText.body(c, size: 13, color: c.accentInk).copyWith(height: 1.35),
             ),
           ),
       ],
@@ -285,11 +379,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     _draft
       ..merchant = _merchant.text.trim()
       ..note = _note.text.trim()
+      ..recurringEstimate = _draft.recurringKind == RecurringKind.variable ? (parseMoneyInput(_estimate.text) ?? 0) : 0
       ..items = items;
     setState(() => _busy = true);
     try {
       final wasNew = _draft.id == null;
-      final res = await appState.saveDraft(_draft);
+      final res = await _app.saveDraft(_draft);
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
       showMessage(
@@ -343,11 +438,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         controller: _merchant,
                         hint: 'Marka adı girin',
                         textInputAction: TextInputAction.next,
+                        onChanged: (_) => _inheritSeries(),
                       ),
                       ListenableBuilder(
-                        listenable: appState,
+                        listenable: _app,
                         builder: (_, _) {
-                          final name = appState.categories
+                          final name = _app.categories
                               .where((x) => x.id == _draft.categoryId)
                               .map((x) => x.name)
                               .firstOrNull;
@@ -595,7 +691,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       children: [
         _itemFields(c, i),
         ListenableBuilder(
-          listenable: appState,
+          listenable: _app,
           builder: (_, _) => ItemCategoryChip(
             name: _categoryName(r.categoryId),
             review: r.review,

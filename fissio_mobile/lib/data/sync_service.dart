@@ -64,8 +64,15 @@ class SyncService {
   /// Yüklenmeyi bekleyen bütçe limitleri.
   int get pendingBudgetCount => snapshot().budgets.where((b) => b.state == SyncState.pending).length;
 
-  /// Kuyrukta (fiş/profil/avatar/bütçe) gönderilecek bir şey var mı?
-  bool get hasWork => pendingCount > 0 || pendingAvatarCount > 0 || pendingBudgetCount > 0;
+  /// Çevrimdışı yapılmış düzenleme / fiş silme / limit silme sayısı.
+  int get pendingChangeCount {
+    final s = snapshot();
+    return s.pendingEdits.length + s.pendingDeletes.length + s.pendingBudgetDeletes.length;
+  }
+
+  /// Kuyrukta (fiş/profil/avatar/bütçe/düzenleme/silme) gönderilecek bir şey var mı?
+  bool get hasWork =>
+      pendingCount > 0 || pendingAvatarCount > 0 || pendingBudgetCount > 0 || pendingChangeCount > 0;
 
   Future<void> _persist() async {
     final id = userId();
@@ -168,6 +175,53 @@ class SyncService {
       }
     }
 
+    // 2b) Sunucudaki fişlerin çevrimdışı düzenlemeleri (PUT) ve silmeleri (DELETE). Fiş sunucuda yoksa (404)
+    // kayıt sessizce düşer; ağ hatasında kuyrukta kalır.
+    for (final e in List<Expense>.of(snap.pendingEdits)) {
+      if (!enabled()) return FlushOutcome.disabled;
+      try {
+        await api.updateExpense(e.id, bulkBody(e, otherId)..remove('client_uid'));
+        if (e.localImages.isNotEmpty) {
+          final bytes = <Uint8List>[];
+          for (final p in e.localImages) {
+            final b = await local.readImage(p);
+            if (b != null) bytes.add(b);
+          }
+          if (bytes.isNotEmpty) await api.uploadImages(e.id, bytes);
+          for (final p in e.localImages) {
+            await local.deleteImage(p);
+          }
+        }
+        snap.pendingEdits.removeWhere((x) => x.id == e.id);
+        await _persist();
+        onChanged?.call();
+      } on ApiException catch (x) {
+        if (x.network) rethrow;
+        if (x.status == 404) {
+          snap.pendingEdits.removeWhere((y) => y.id == e.id);
+          await _persist();
+        } else {
+          partial = true;
+        }
+      }
+    }
+    for (final id in List<int>.of(snap.pendingDeletes)) {
+      if (!enabled()) return FlushOutcome.disabled;
+      try {
+        await api.deleteExpense(id);
+      } on ApiException catch (x) {
+        if (x.network) rethrow;
+        if (x.status != 404) {
+          partial = true;
+          continue;
+        }
+      }
+      snap.pendingDeletes.remove(id);
+      snap.cloudExpenses.removeWhere((x) => x.id == id);
+      await _persist();
+      onChanged?.call();
+    }
+
     // 3) Bütçe limitleri: profil sunucuda varsa (profil + kategori başına tek limit; PUT idempotent).
     for (final b in List<Budget>.of(snap.budgets)) {
       if (b.state != SyncState.pending) continue;
@@ -189,6 +243,21 @@ class SyncService {
         if (e.network) rethrow;
         partial = true;
       }
+    }
+    // 4) Çevrimdışıyken silinen limitler (sunucu kimliğiyle; 404 = zaten yok).
+    for (final id in List<int>.of(snap.pendingBudgetDeletes)) {
+      if (!enabled()) return FlushOutcome.disabled;
+      try {
+        await api.deleteBudget(id);
+      } on ApiException catch (e) {
+        if (e.network) rethrow;
+        if (e.status != 404) {
+          partial = true;
+          continue;
+        }
+      }
+      snap.pendingBudgetDeletes.remove(id);
+      await _persist();
     }
     return partial ? FlushOutcome.partial : FlushOutcome.done;
   }
@@ -228,5 +297,8 @@ class SyncService {
     // Çevrimdışı kuyrukta girilen "Her ay tekrarlanır" işareti sunucuya da taşınır.
     'recurring_day': e.recurringDay,
     'recurring_remind': e.recurringRemind,
+    'recurring_kind': e.recurringKind.name,
+    if (e.recurringDay > 0 && e.recurringKind == RecurringKind.variable && e.recurringEstimate > 0)
+      'recurring_estimate': e.recurringEstimate,
   };
 }

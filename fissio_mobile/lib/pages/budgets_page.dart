@@ -4,6 +4,7 @@ import '../api.dart';
 import '../app_state.dart';
 import '../budgets.dart';
 import '../dialogs.dart';
+import '../models.dart' show kTotalBudgetCategoryId;
 import '../theme.dart';
 import '../widgets.dart';
 import 'budget_widgets.dart';
@@ -72,6 +73,31 @@ class BudgetsPage extends StatelessWidget {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
                     children: [
+                      // Profilin TOPLAM aylık bütçesi: tüm kategorilerin o ayki toplamına karşı.
+                      const SectionLabel('Toplam aylık bütçe'),
+                      const SizedBox(height: 8),
+                      GroupedCard(
+                        children: [
+                          if (progress[kTotalBudgetCategoryId] case final p?)
+                            BudgetRow(
+                              key: const ValueKey('budget-total'),
+                              progress: p,
+                              onTap: () => _edit(context, kTotalBudgetCategoryId, 'Toplam aylık bütçe', p.budget.limit),
+                            )
+                          else
+                            ListRow(
+                              key: const ValueKey('budget-total'),
+                              title: 'Toplam aylık bütçe',
+                              subtitle: 'Bu ay tüm kategoriler toplamında geçmek istemediğin tutar',
+                              onTap: () => _edit(context, kTotalBudgetCategoryId, 'Toplam aylık bütçe', null),
+                              chevron: true,
+                              trailing: Text('Limit yok', style: FissioText.body(c, size: 14, color: c.mute)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 22),
+                      const SectionLabel('Kategori limitleri'),
+                      const SizedBox(height: 8),
                       GroupedCard(
                         children: [
                           for (final cat in appState.categories)

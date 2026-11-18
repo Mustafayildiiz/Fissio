@@ -95,7 +95,7 @@
         </activity-alias>
 
         <!-- Ana ekran widget'ı: bu ayki toplam harcama + hızlı tarama kısayolu. -->
-        <receiver android:name=".FissioWidgetProvider" android:exported="false">
+        <receiver android:name=".FissioWidgetProvider" android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>

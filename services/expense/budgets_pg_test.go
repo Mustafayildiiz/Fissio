@@ -48,10 +48,10 @@ func TestPGBudgetsAreScopedByAccountAndProfile(t *testing.T) {
 	_, _, raw = e.putBudget(alice, aHome.ID, cafe, 3000)
 
 	// Profil izolasyonu: Kisisel'in limitleri Ev'de gorunmez.
-	if got := e.budgets(alice, fmt.Sprintf("?profile_id=%d", aPersonal.ID)); len(got) != 1 || got[0].CategoryID != market {
+	if got := e.budgets(alice, fmt.Sprintf("?profile_id=%d", aPersonal.ID)); len(got) != 1 || got[0].CategoryID == nil || *got[0].CategoryID != market {
 		t.Fatalf("personal budgets: %+v", got)
 	}
-	if got := e.budgets(alice, fmt.Sprintf("?profile_id=%d", aHome.ID)); len(got) != 1 || got[0].CategoryID != cafe {
+	if got := e.budgets(alice, fmt.Sprintf("?profile_id=%d", aHome.ID)); len(got) != 1 || got[0].CategoryID == nil || *got[0].CategoryID != cafe {
 		t.Fatalf("home budgets: %+v", got)
 	}
 	if got := e.budgets(alice, ""); len(got) != 2 {
@@ -175,6 +175,7 @@ func TestPGRecurringFieldsRoundTripAndProjectionIsolation(t *testing.T) {
 		Count        int            `json:"count"`
 		Items        []recurringOut `json:"items"`
 	}
+	// Not: bu sabit tarihli fisler "bugun"e gore gecmiste kalir; seri odenmemis sayilir ve beklenen tutar son fistir.
 	get := func(uid int64, q string) recResp {
 		code, b := e.as(uid, "GET", "/recurring"+q, nil)
 		e.want(code, 200, b, "recurring")

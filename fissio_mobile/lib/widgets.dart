@@ -904,6 +904,38 @@ class ErrorBanner extends StatelessWidget {
   }
 }
 
+/// Bağlantı yokken (okuma-geçişli yerel önbellekten çalışırken) gösterilen sakin bilgi bandı: hata değildir.
+class OfflineBanner extends StatelessWidget {
+  const OfflineBanner({super.key, this.pending = 0});
+
+  /// Bağlantı gelince buluta yüklenecek bekleyen kayıt/değişiklik sayısı.
+  final int pending;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      key: const Key('offline-banner'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
+      child: Row(
+        children: [
+          Icon(LucideIcons.wifiOff, color: c.mute, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              pending > 0
+                  ? 'Çevrimdışısın; cihazdaki son veriler gösteriliyor. $pending değişiklik bağlantı gelince yüklenecek.'
+                  : 'Çevrimdışısın; cihazdaki son veriler gösteriliyor.',
+              style: FissioText.body(c, size: 14, color: c.mute),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 void showMessage(BuildContext context, String msg) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()

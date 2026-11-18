@@ -39,8 +39,16 @@ class CategoryRule {
 
 /// Profil + kategori bazlı aylık harcama limiti. [profileUid] = [Profile.id] (client_uid). [serverId] bulutta
 /// kayıtlıysa sunucu kimliği; [state] fişlerle aynı anlamdadır (synced / pending / localOnly).
+/// [Budget.categoryId] değeri: kategori değil, profilin TOPLAM aylık bütçesi (tüm kategorilerin toplamı).
+const kTotalBudgetCategoryId = 0;
+
+/// Toplam bütçenin görünen adı.
+const kTotalBudgetName = 'Toplam bütçe';
+
 class Budget {
   final String profileUid;
+
+  /// Kategori kimliği; [kTotalBudgetCategoryId] (0) = profilin toplam aylık bütçesi.
   final int categoryId;
   final String categoryName;
   final double limit;
@@ -54,6 +62,8 @@ class Budget {
     this.serverId,
     this.state = SyncState.synced,
   });
+
+  bool get isTotal => categoryId == kTotalBudgetCategoryId;
 
   Budget copyWith({double? limit, int? serverId, SyncState? state, String? categoryName}) => Budget(
     profileUid: profileUid,
@@ -70,8 +80,9 @@ class Budget {
     if (uid == null) return null;
     return Budget(
       profileUid: uid,
-      categoryId: (j['category_id'] as num).toInt(),
-      categoryName: (j['category_name'] as String?) ?? '',
+      // Sunucuda toplam bütçe `category_id: null` ile gelir.
+      categoryId: (j['category_id'] as num?)?.toInt() ?? kTotalBudgetCategoryId,
+      categoryName: (j['category_name'] as String?) ?? (j['category_id'] == null ? kTotalBudgetName : ''),
       limit: (j['monthly_limit'] as num).toDouble(),
       serverId: (j['id'] as num?)?.toInt(),
     );
@@ -95,6 +106,12 @@ class Budget {
     'state': state.name,
   };
 }
+
+/// Tekrarlayan giderin türü: [fixed] her ay aynı tutar (kira, abonelik); [variable] tutarı her ay değişen
+/// fatura (elektrik, su, doğalgaz) — projeksiyonda geçmiş ayların hareketli ortalaması / tahmini tutar kullanılır.
+enum RecurringKind { fixed, variable }
+
+RecurringKind recurringKindFrom(String? v) => v == 'variable' ? RecurringKind.variable : RecurringKind.fixed;
 
 /// Kaydın bulutla ilişkisi: [synced] sunucuda; [pending] bulut senkronu açıkken henüz yüklenmedi
 /// (çevrimdışı kuyruk, bağlantı gelince otomatik yüklenir); [localOnly] senkron kapalıyken yalnızca
@@ -287,6 +304,10 @@ class Expense {
   final int recurringDay;
   final bool recurringRemind;
 
+  /// Tekrar türü (sabit / değişken fatura) ve değişken fatura için kullanıcının tahmini tutarı (0 = yok).
+  final RecurringKind recurringKind;
+  final double recurringEstimate;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -305,6 +326,8 @@ class Expense {
     this.suggestedCategoryId,
     this.recurringDay = 0,
     this.recurringRemind = true,
+    this.recurringKind = RecurringKind.fixed,
+    this.recurringEstimate = 0,
   });
 
   bool get isRecurring => recurringDay > 0;
@@ -329,6 +352,8 @@ class Expense {
     int? suggestedCategoryId,
     int? recurringDay,
     bool? recurringRemind,
+    RecurringKind? recurringKind,
+    double? recurringEstimate,
   }) => Expense(
     id: id ?? this.id,
     merchant: merchant ?? this.merchant,
@@ -347,6 +372,8 @@ class Expense {
     suggestedCategoryId: suggestedCategoryId ?? this.suggestedCategoryId,
     recurringDay: recurringDay ?? this.recurringDay,
     recurringRemind: recurringRemind ?? this.recurringRemind,
+    recurringKind: recurringKind ?? this.recurringKind,
+    recurringEstimate: recurringEstimate ?? this.recurringEstimate,
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -367,6 +394,8 @@ class Expense {
     profileServerId: (j['profile_id'] as num?)?.toInt(),
     recurringDay: (j['recurring_day'] as num?)?.toInt() ?? 0,
     recurringRemind: (j['recurring_remind'] as bool?) ?? true,
+    recurringKind: recurringKindFrom(j['recurring_kind'] as String?),
+    recurringEstimate: (j['recurring_estimate'] as num?)?.toDouble() ?? 0,
   );
 
   /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
@@ -387,6 +416,10 @@ class Expense {
     if (suggestedCategoryId != null) 'suggested_category_id': suggestedCategoryId,
     if (recurringDay > 0) 'recurring_day': recurringDay,
     if (recurringDay > 0) 'recurring_remind': recurringRemind,
+    if (recurringDay > 0) 'recurring_kind': recurringKind.name,
+    if (recurringEstimate > 0) 'recurring_estimate': recurringEstimate,
+    // Sunucudan önbelleğe alınan (senkronlanmış) fişlerin fotoğraf kimlikleri.
+    if (imageIds.isNotEmpty) 'image_ids': imageIds,
   };
 
   factory Expense.fromLocalJson(Map<String, dynamic> j) {
@@ -412,6 +445,9 @@ class Expense {
       suggestedCategoryId: (j['suggested_category_id'] as num?)?.toInt(),
       recurringDay: (j['recurring_day'] as num?)?.toInt() ?? 0,
       recurringRemind: (j['recurring_remind'] as bool?) ?? true,
+      recurringKind: recurringKindFrom(j['recurring_kind'] as String?),
+      recurringEstimate: (j['recurring_estimate'] as num?)?.toDouble() ?? 0,
+      imageIds: ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
     );
   }
 }
@@ -460,6 +496,10 @@ class ReceiptDraft {
   int recurringDay;
   bool recurringRemind;
 
+  /// Sabit tutarlı mı, değişken fatura mı; değişken için isteğe bağlı tahmini aylık tutar (0 = yok).
+  RecurringKind recurringKind;
+  double recurringEstimate;
+
   ReceiptDraft({
     this.id,
     this.clientUid,
@@ -477,6 +517,8 @@ class ReceiptDraft {
     List<Uint8List>? pendingImages,
     this.recurringDay = 0,
     this.recurringRemind = true,
+    this.recurringKind = RecurringKind.fixed,
+    this.recurringEstimate = 0,
   }) : date = date ?? DateTime.now(),
        items = items ?? [],
        pendingImages = pendingImages ?? [];
@@ -507,6 +549,9 @@ class ReceiptDraft {
     // 0 = tekrarlamaz (güncellemede işareti kaldırır).
     'recurring_day': recurringDay,
     'recurring_remind': recurringRemind,
+    'recurring_kind': recurringKind.name,
+    // 0 = tahmin yok (güncellemede kaldırır); yalnızca tekrarlayan değişken faturada anlamlıdır.
+    'recurring_estimate': recurringDay > 0 && recurringKind == RecurringKind.variable ? recurringEstimate : 0,
   };
 
   factory ReceiptDraft.from(Expense e) {
@@ -538,6 +583,8 @@ class ReceiptDraft {
       discount: diff > 0 ? diff : 0,
       recurringDay: e.recurringDay,
       recurringRemind: e.recurringRemind,
+      recurringKind: e.recurringKind,
+      recurringEstimate: e.recurringEstimate,
     );
   }
 

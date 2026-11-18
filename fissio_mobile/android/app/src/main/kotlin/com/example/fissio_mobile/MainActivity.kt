@@ -1,6 +1,7 @@
 package com.example.fissio_mobile
 
 import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import io.flutter.embedding.android.FlutterActivity
@@ -8,6 +9,17 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    /**
+     * Uygulama arka plandayken (ya da süreci sistem tarafından öldürülmüşken) widget'a dokunulunca görev zaten
+     * vardır ve `singleTop` yüzünden yeni intent [onNewIntent]'e gelir. `Activity.getIntent()` güncellenmezse
+     * `home_widget`'ın `initiallyLaunchedFromHomeWidget` çağrısı eski (MAIN) intent'i okur ve `fissio://scan`
+     * kaybolur; bu yüzden en yeni intent kaydedilir.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->

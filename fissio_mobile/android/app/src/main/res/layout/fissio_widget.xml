@@ -24,7 +24,7 @@
         android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:maxLines="1"
-        android:text="@string/widget_signed_out"
+        android:text="@string/widget_empty_total"
         android:textColor="@color/widget_ink"
         android:textSize="26sp"
         android:textStyle="bold" />
@@ -38,7 +38,8 @@
         android:textColor="@color/widget_mute"
         android:textSize="12sp" />
 
-    <Space
+    <!-- RemoteViews yalnızca izinli sınıfları şişirir (Space/View değil): boşluk için FrameLayout. -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />

@@ -47,7 +47,8 @@ double monthTotalFor(List<Expense> expenses, String? profileUid, DateTime now) {
   return (t * 100).round() / 100;
 }
 
-/// Bir profilin bütçe satırları ve içinde bulunulan aydaki harcamaları (kategori adına göre sıralı).
+/// Bir profilin bütçe satırları ve içinde bulunulan aydaki harcamaları. Toplam aylık bütçe ([Budget.isTotal])
+/// varsa İLK sırada gelir ve tüm kategorilerin o ayki toplamını sayar; kategori limitleri ada göre sıralıdır.
 List<BudgetProgress> computeBudgetProgress(
   List<Expense> expenses,
   List<Budget> budgets,
@@ -55,15 +56,21 @@ List<BudgetProgress> computeBudgetProgress(
   DateTime now,
 ) {
   final spent = <int, double>{};
+  var all = 0.0;
   for (final e in expenses) {
     if (e.profileUid != profileUid || !_sameMonth(e.date, now)) continue;
     spent[e.categoryId] = (spent[e.categoryId] ?? 0) + e.amount;
+    all += e.amount;
   }
+  double cents(double v) => (v * 100).round() / 100;
   final out = [
     for (final b in budgets)
       if (b.profileUid == profileUid)
-        BudgetProgress(budget: b, spent: ((spent[b.categoryId] ?? 0) * 100).round() / 100),
-  ]..sort((a, b) => a.budget.categoryName.compareTo(b.budget.categoryName));
+        BudgetProgress(budget: b, spent: cents(b.isTotal ? all : (spent[b.categoryId] ?? 0))),
+  ]..sort((a, b) {
+      if (a.budget.isTotal != b.budget.isTotal) return a.budget.isTotal ? -1 : 1;
+      return a.budget.categoryName.compareTo(b.budget.categoryName);
+    });
   return out;
 }
 
@@ -75,9 +82,15 @@ class BudgetAlert {
   /// 80 ya da 100.
   final int threshold;
 
-  String get title => threshold >= kBudgetExceededPercent
-      ? '${progress.budget.categoryName} bütçesi aşıldı'
-      : '${progress.budget.categoryName} bütçesinin %$kBudgetWarnPercent\'ine ulaştın';
+  String get title {
+    final total = progress.budget.isTotal;
+    if (threshold >= kBudgetExceededPercent) {
+      return total ? 'Aylık toplam bütçe aşıldı' : '${progress.budget.categoryName} bütçesi aşıldı';
+    }
+    return total
+        ? 'Aylık toplam bütçenin %$kBudgetWarnPercent\'ine ulaştın'
+        : '${progress.budget.categoryName} bütçesinin %$kBudgetWarnPercent\'ine ulaştın';
+  }
 
   String get body =>
       'Bu ay ${fmtMoney(progress.spent)} harcadın; limit ${fmtMoney(progress.budget.limit)}.';

@@ -39,6 +39,9 @@ class WidgetKeys {
   static const total = 'fissio_month_total';
   static const month = 'fissio_month_label';
   static const androidProvider = 'FissioWidgetProvider';
+
+  /// `androidName` uygulama kimliğine (applicationId) göre çözülür; sınıfın tam adını açıkça veriyoruz.
+  static const androidQualifiedProvider = 'com.example.fissio_mobile.FissioWidgetProvider';
   static const iosWidget = 'FissioWidget';
   static const appGroup = 'group.com.example.fissioMobile';
 }
@@ -57,7 +60,11 @@ class PluginWidgetSync implements WidgetSync {
       await HomeWidget.saveWidgetData<String>(WidgetKeys.profile, payload?.profileName ?? '');
       await HomeWidget.saveWidgetData<String>(WidgetKeys.total, payload?.monthTotalText ?? '');
       await HomeWidget.saveWidgetData<String>(WidgetKeys.month, payload?.monthLabel ?? '');
-      await HomeWidget.updateWidget(androidName: WidgetKeys.androidProvider, iOSName: WidgetKeys.iosWidget);
+      await HomeWidget.updateWidget(
+        qualifiedAndroidName: WidgetKeys.androidQualifiedProvider,
+        androidName: WidgetKeys.androidProvider,
+        iOSName: WidgetKeys.iosWidget,
+      );
     } catch (e) {
       // Eklenti yok (test/masaüstü) ya da widget kurulu değil: uygulama akışı etkilenmez.
       pluginWarn('Ana ekran widget\'ı güncellenemedi', e);

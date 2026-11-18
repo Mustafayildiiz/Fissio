@@ -116,23 +116,32 @@ func migrateTaxonomy(db *sql.DB) error {
 }
 
 // migrateBudgetsAndRecurring (idempotent):
-//   - expense.budgets: profil + kategori basina aylik harcama limiti (profil silinince ON DELETE CASCADE).
+//   - expense.budgets: profil + kategori basina aylik harcama limiti (profil silinince ON DELETE CASCADE);
+//     category_id NULL = profilin toplam aylik butcesi.
 //   - expenses.recurring_day (1-31, NULL = tekrarlamaz) ve recurring_remind: "Her ay tekrarlanir" isareti
-//     ve odeme hatirlatici tercihi. Seri/projeksiyon hesabi recurring.go'da.
+//     ve odeme hatirlatici tercihi; recurring_kind (fixed|variable) ve recurring_estimate (degisken fatura tahmini).
+//     Seri/projeksiyon hesabi recurring.go'da.
 func migrateBudgetsAndRecurring(db *sql.DB) error {
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS expense.budgets (
 	id            BIGSERIAL PRIMARY KEY,
 	user_id       BIGINT NOT NULL,
 	profile_id    BIGINT NOT NULL REFERENCES expense.profiles(id) ON DELETE CASCADE,
-	category_id   INT NOT NULL REFERENCES expense.categories(id),
+	category_id   INT REFERENCES expense.categories(id),
 	monthly_limit NUMERIC(12,2) NOT NULL CHECK (monthly_limit > 0),
 	updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
 	UNIQUE (profile_id, category_id)
 );
 CREATE INDEX IF NOT EXISTS idx_budgets_user ON expense.budgets (user_id);
+-- category_id NULL = profilin TOPLAM aylik butcesi (tum kategoriler). UNIQUE (profile_id, category_id) NULL'lari
+-- birbirinden farkli sayar; profil basina tek toplam limit icin kismi tekil indeks gerekir.
+ALTER TABLE expense.budgets ALTER COLUMN category_id DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_budgets_total ON expense.budgets (profile_id) WHERE category_id IS NULL;
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_day INT CHECK (recurring_day BETWEEN 1 AND 31);
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_remind BOOLEAN NOT NULL DEFAULT TRUE;
+-- Tekrar turu: sabit (kira, abonelik) / degisken (elektrik, su, dogalgaz faturasi) ve degisken icin tahmini tutar.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_kind TEXT NOT NULL DEFAULT 'fixed' CHECK (recurring_kind IN ('fixed','variable'));
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_estimate NUMERIC(12,2) CHECK (recurring_estimate > 0);
 CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;`)
 	return err
 }

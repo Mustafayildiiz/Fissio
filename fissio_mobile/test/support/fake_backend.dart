@@ -260,7 +260,7 @@ class FakeBackend {
         'id': ++_seq,
         'profile_id': pid,
         'category_id': j['category_id'],
-        'category_name': _catName(j['category_id']),
+        'category_name': j['category_id'] == null ? 'Toplam bütçe' : _catName(j['category_id']),
         'monthly_limit': limit,
         'spent': 0,
         'status': 'ok',
@@ -360,6 +360,8 @@ class FakeBackend {
       'client_uid': j['client_uid'] ?? 'srv-${++_seq}',
       'recurring_day': j['recurring_day'] ?? 0,
       'recurring_remind': j['recurring_remind'] ?? true,
+      'recurring_kind': j['recurring_kind'] ?? 'fixed',
+      'recurring_estimate': j['recurring_estimate'] ?? 0,
     };
     u.expenses.add(e);
     return e;

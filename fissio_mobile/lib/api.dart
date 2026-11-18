@@ -528,13 +528,18 @@ class ApiClient {
     return j.cast<Map<String, dynamic>>();
   }
 
-  /// Limit koyar/günceller (profil + kategori başına tek limit).
+  /// Limit koyar/günceller (profil + kategori başına tek limit). [categoryId] [kTotalBudgetCategoryId] (0)
+  /// ise profilin TOPLAM aylık bütçesi (sunucuda `category_id` null).
   Future<Map<String, dynamic>> putBudget(int profileServerId, int categoryId, double limit) async =>
       await _send(
             'PUT',
             _expense,
             '/budgets',
-            body: {'profile_id': profileServerId, 'category_id': categoryId, 'monthly_limit': limit},
+            body: {
+              'profile_id': profileServerId,
+              if (categoryId != kTotalBudgetCategoryId) 'category_id': categoryId,
+              'monthly_limit': limit,
+            },
           )
           as Map<String, dynamic>;
 

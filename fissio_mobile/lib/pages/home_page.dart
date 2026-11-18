@@ -60,6 +60,9 @@ class _HomePageState extends State<HomePage> {
                     if (appState.error != null) ...[
                       ErrorBanner(appState.error!, onRetry: appState.refresh),
                       const SizedBox(height: 16),
+                    ] else if (appState.offline) ...[
+                      OfflineBanner(pending: appState.pendingCount),
+                      const SizedBox(height: 16),
                     ],
                     _TotalBlock(stats: stats, period: _period),
                     const Rule2(margin: EdgeInsets.symmetric(vertical: 20)),

@@ -24,34 +24,61 @@ class FissioWidgetProvider : HomeWidgetProvider() {
         appWidgetIds: IntArray,
         widgetData: SharedPreferences,
     ) {
+        appWidgetIds.forEach { widgetId ->
+            // Hiçbir koşulda çökmesin: veri okunamazsa bile "0,00 ₺" ile düzgün çizilir.
+            val views = try {
+                buildViews(context, widgetData)
+            } catch (e: Exception) {
+                fallbackViews(context)
+            }
+            appWidgetManager.updateAppWidget(widgetId, views)
+        }
+    }
+
+    private fun buildViews(context: Context, widgetData: SharedPreferences): RemoteViews {
+        // Uygulama henüz hiç veri yazmadıysa (widget yeni eklendi) anahtar yoktur: "0,00 ₺" gösterilir.
+        val hasData = widgetData.contains("fissio_signed_in")
         val signedIn = widgetData.getBoolean("fissio_signed_in", false)
         val total = widgetData.getString("fissio_month_total", null).orEmpty()
         val profile = widgetData.getString("fissio_profile", null).orEmpty()
         val month = widgetData.getString("fissio_month_label", null).orEmpty()
 
-        appWidgetIds.forEach { widgetId ->
-            val views = RemoteViews(context.packageName, R.layout.fissio_widget).apply {
-                if (signedIn && total.isNotEmpty()) {
-                    setTextViewText(R.id.widget_total, total)
+        return RemoteViews(context.packageName, R.layout.fissio_widget).apply {
+            when {
+                !hasData -> {
+                    setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))
+                    setTextViewText(R.id.widget_subtitle, context.getString(R.string.widget_empty_hint))
+                    setViewVisibility(R.id.widget_subtitle, View.VISIBLE)
+                }
+                signedIn -> {
+                    setTextViewText(
+                        R.id.widget_total,
+                        total.ifEmpty { context.getString(R.string.widget_empty_total) },
+                    )
                     setTextViewText(
                         R.id.widget_subtitle,
                         listOf(profile, month).filter { it.isNotEmpty() }.joinToString(" · "),
                     )
                     setViewVisibility(R.id.widget_subtitle, View.VISIBLE)
-                } else {
+                }
+                else -> {
+                    // Çıkış / hesap silme: önceki kullanıcının tutarı gösterilmez.
                     setTextViewText(R.id.widget_total, context.getString(R.string.widget_signed_out))
                     setViewVisibility(R.id.widget_subtitle, View.GONE)
                 }
-
-                // Widget'a dokunmak uygulamayı açar; "Hızlı tara" doğrudan tarama ekranını (fissio://scan).
-                setOnClickPendingIntent(R.id.widget_root, launchIntent(context, null, 0))
-                setOnClickPendingIntent(R.id.widget_scan, launchIntent(context, Uri.parse("fissio://scan"), 1))
-                // Oturum yokken tarama kısayolu gizlenir (giriş yapılmadan tarama açılamaz).
-                setViewVisibility(R.id.widget_scan, if (signedIn) View.VISIBLE else View.GONE)
             }
-            appWidgetManager.updateAppWidget(widgetId, views)
+            // Widget'a dokunmak uygulamayı açar; "Fiş tara" doğrudan tarama ekranını (fissio://scan). Oturum
+            // yoksa uygulama giriş ekranını açar, giriş sonrası tarama ekranı bekleyen istek olarak açılır.
+            setOnClickPendingIntent(R.id.widget_root, launchIntent(context, null, 0))
+            setOnClickPendingIntent(R.id.widget_scan, launchIntent(context, Uri.parse("fissio://scan"), 1))
         }
     }
+
+    private fun fallbackViews(context: Context): RemoteViews =
+        RemoteViews(context.packageName, R.layout.fissio_widget).apply {
+            setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))
+            setViewVisibility(R.id.widget_subtitle, View.GONE)
+        }
 
     /**
      * Uygulamayı açan PendingIntent. Başlatıcı ikonu renge göre değiştirildiği için (MainActivity ya da bir

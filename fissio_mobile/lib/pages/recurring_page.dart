@@ -46,9 +46,12 @@ class RecurringPage extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${proj.items.length} tekrarlayan gider · her seri bir kez sayılır (en son fişteki tutar).',
+                        '${proj.items.length} tekrarlayan gider · her seri bir kez sayılır: ödenenler gerçek tutarla, '
+                        'kalanlar beklenen tutarla (değişken faturalar son 3 ayın ortalamasıyla).',
                         style: FissioText.body(c, size: 14, color: c.mute),
                       ),
+                      const SizedBox(height: 4),
+                      ProjectionBreakdown(proj: proj),
                       const Rule2(margin: EdgeInsets.symmetric(vertical: 20)),
                       const SectionLabel('Yaklaşan ödemeler · 30 gün'),
                       const SizedBox(height: 8),
