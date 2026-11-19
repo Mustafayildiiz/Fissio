@@ -58,7 +58,10 @@ class MainActivity : FlutterActivity() {
     private fun selectLauncherIcon(key: String): Boolean {
         return try {
             val pm = packageManager
-            fun component(name: String) = ComponentName(packageName, "$packageName.$name")
+            // Takma adlar SINIF (namespace) paketindedir; applicationId (packageName) farklı olabilir, bu yüzden bileşen
+            // sınıf adı `$packageName` değil MainActivity'nin paketinden türetilir.
+            val classPackage = MainActivity::class.java.name.substringBeforeLast('.')
+            fun component(name: String) = ComponentName(packageName, "$classPackage.$name")
             pm.setComponentEnabledSetting(
                 component(ALIASES.getValue(key)),
                 PackageManager.COMPONENT_ENABLED_STATE_ENABLED,

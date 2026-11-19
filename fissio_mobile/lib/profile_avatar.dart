@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'app_state.dart';
+import 'data/image_disk_cache.dart';
 import 'models.dart';
 import 'widgets.dart';
 
@@ -71,12 +72,13 @@ class _ProfileAvatarViewState extends State<ProfileAvatarView> {
       );
     } else if (p != null && p.serverId != null && p.avatarVersion > 0) {
       child = _photo(
-        Image.network(
-          appState.api.avatarUrl(p.serverId!, p.avatarVersion),
+        CachedNetImage(
+          url: appState.api.avatarUrl(p.serverId!, p.avatarVersion),
           headers: appState.api.authHeaders,
           fit: BoxFit.cover,
           gaplessPlayback: true,
-          errorBuilder: (context, error, stack) => _initials(),
+          loading: _initials(),
+          error: (context) => _initials(),
         ),
       );
     } else {

@@ -9,6 +9,7 @@ import '../app_state.dart';
 import '../data/data_transfer.dart';
 import '../data/file_transfer.dart';
 import '../dialogs.dart';
+import '../models.dart' show Expense;
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -59,6 +60,44 @@ class _DataManagementPageState extends State<DataManagementPage> {
       }
     } on ApiException catch (e) {
       if (mounted) showMessage(context, e.message);
+    }
+  }
+
+  /// Çakışan çevrimdışı düzenlemeleri tek tek sorar: kullanıcının hali mi, sunucudaki (başka cihazda yapılmış) hal mi.
+  Future<void> _resolveConflicts() async {
+    for (final x in _app.editConflicts) {
+      if (!mounted) return;
+      String desc(Expense e) => '${e.merchant.isEmpty ? 'Fiş' : e.merchant} · ${fmtMoney(e.amount)}';
+      final keepMine = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Düzenleme çakışması'),
+          content: Text(
+            'Bu fiş, sen çevrimdışıyken başka bir yerde de değiştirildi.\n\n'
+            'Senin düzenlemen: ${desc(x.mine)}\n'
+            'Sunucudaki: ${x.server == null ? '-' : desc(x.server!)}',
+          ),
+          actions: [
+            TextButton(
+              key: const Key('conflict-take-server'),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Sunucudakini al'),
+            ),
+            TextButton(
+              key: const Key('conflict-keep-mine'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Benimkini koru'),
+            ),
+          ],
+        ),
+      );
+      if (keepMine == null) return; // pencere kapatıldı: kalanlar sonra
+      try {
+        await _app.resolveEditConflict(x.mine.id, keepMine: keepMine);
+      } on ApiException catch (e) {
+        if (mounted) showMessage(context, e.message);
+        return;
+      }
     }
   }
 
@@ -254,6 +293,7 @@ class _DataManagementPageState extends State<DataManagementPage> {
                                 child: Text(
                                   pending > 0
                                       ? '$pending kayıt bağlantı gelince buluta yüklenecek.'
+                                            '${_app.failedSyncCount > 0 ? '\n${_app.failedSyncCount} kayıt sunucu tarafından kabul edilmedi; fişi düzenleyin ya da silin.' : ''}'
                                       : '$localOnly kayıt yalnızca bu cihazda.',
                                   key: const Key('sync-status'),
                                   style: FissioText.body(c, size: 13, color: c.mute),
@@ -264,6 +304,26 @@ class _DataManagementPageState extends State<DataManagementPage> {
                                   onPressed: () => _app.flushNow(force: true),
                                   child: const Text('Şimdi yükle'),
                                 ),
+                            ],
+                          ),
+                        ),
+                      if (_app.conflictedEditCount > 0)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${_app.conflictedEditCount} düzenleme sunucudakiyle çakıştı.',
+                                  key: const Key('conflict-status'),
+                                  style: FissioText.body(c, size: 13, color: c.mute),
+                                ),
+                              ),
+                              TextButton(
+                                key: const Key('conflict-resolve'),
+                                onPressed: _resolveConflicts,
+                                child: const Text('İncele'),
+                              ),
                             ],
                           ),
                         ),

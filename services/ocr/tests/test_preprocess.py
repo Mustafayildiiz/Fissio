@@ -129,36 +129,29 @@ class DedupeTests(unittest.TestCase):
         self.assertEqual(len(dedupe_blocks([full, price])), 2)
 
 
-class TurkishGlyphTests(unittest.TestCase):
-    # expense/accuracy_test.go TestFixTurkishGlyphs ile aynı vektörler.
-    CASES = {
-        "Fİ$": "FİŞ",
-        "Fİ$ NO:0298": "FİŞ NO:0298",
-        "PE$İN": "PEŞİN",
-        "KA$AR PEYNİR": "KAŞAR PEYNİR",
-        "$EKER 1KG": "ŞEKER 1KG",
-        "BİM A.$.": "BİM A.Ş.",
-        "MİGROS TİCARET A.$": "MİGROS TİCARET A.Ş",
-        "ABC LTD.$Tİ.": "ABC LTD.ŞTİ.",
-        "TE$EKKÜRLER": "TEŞEKKÜRLER",
-        "pe$in fiyatına": "peşin fiyatına",
-        "KA$AR %08 *120,00": "KAŞAR %08 *120,00",
-        "$12,50": "$12,50",
-        "EKMEK %08 $3,95": "EKMEK %08 $3,95",
-        "TOPLAM $45,00": "TOPLAM $45,00",
-        "KEK 35 G %08 *$070": "KEK 35 G %08 *$070",
-        "SUT %08 $": "SUT %08 $",
-        "US$ 1,00": "US$ 1,00",
-        "FIYAT US$": "FIYAT US$",
-        "KU$ YEMİ": "KUŞ YEMİ",
-        "BU$AN 5,00": "BUŞAN 5,00",
-    }
+def load_testdata(name: str):
+    """`<repo>/testdata/<name>` (Go ve Dart testleriyle ortak altın vektörler); imajda /testdata bağlanır."""
+    import json
+    import os
 
+    parents = Path(__file__).resolve().parents
+    repo_td = str(parents[3] / "testdata") if len(parents) > 3 else None
+    candidates = [os.environ.get("FISSIO_TESTDATA"), repo_td, "/testdata"]
+    for base in candidates:
+        if base and (Path(base) / name).is_file():
+            return json.loads((Path(base) / name).read_text(encoding="utf-8"))
+    raise unittest.SkipTest(f"testdata/{name} bulunamadı (FISSIO_TESTDATA ya da /testdata bağlayın)")
+
+
+class TurkishGlyphTests(unittest.TestCase):
+    # testdata/glyphs.json: Go (accuracy_test.go) ve Dart (receipt_parser_test.dart) aynı dosyayı okur.
     def test_vectors(self) -> None:
-        for raw, want in self.CASES.items():
-            with self.subTest(raw=raw):
-                self.assertEqual(fix_turkish_glyphs(raw), want)
-                self.assertEqual(fix_turkish_glyphs(want), want)  # idempotent
+        cases = load_testdata("glyphs.json")["cases"]
+        self.assertGreaterEqual(len(cases), 20)
+        for c in cases:
+            with self.subTest(raw=c["in"]):
+                self.assertEqual(fix_turkish_glyphs(c["in"]), c["out"])
+                self.assertEqual(fix_turkish_glyphs(c["out"]), c["out"])  # idempotent
 
 
 class TiltedRowsTests(unittest.TestCase):
@@ -200,6 +193,19 @@ class TiltedRowsTests(unittest.TestCase):
     def test_no_tilt_is_unchanged(self) -> None:
         text, _ = PaddleOcrEngine._reconstruct_receipt_lines(self._tilted_blocks(slope=0.0))
         self.assertEqual(text.splitlines()[0], "URUN0 1,00")
+
+
+class SharedRowVectorsTests(unittest.TestCase):
+    """testdata/rows.json: Dart `reconstructRows` aynı vektörleri okur (bkz. receipt_parser/on-device testleri)."""
+
+    def test_vectors(self) -> None:
+        cases = load_testdata("rows.json")["cases"]
+        self.assertGreaterEqual(len(cases), 5)
+        for c in cases:
+            with self.subTest(case=c["name"]):
+                blocks = [OcrTextBlock(b["text"], 0.95, [tuple(p) for p in b["box"]]) for b in c["blocks"]]
+                text, _ = PaddleOcrEngine._reconstruct_receipt_lines(blocks)
+                self.assertEqual(text.split(chr(10)), c["rows"])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import 'package:fissio_mobile/models.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:fissio_mobile/data/image_disk_cache.dart';
 import 'package:fissio_mobile/pages/receipt_form_page.dart';
 import 'package:fissio_mobile/pages/receipt_images.dart';
 import 'package:flutter/material.dart';
@@ -41,7 +42,7 @@ void main() {
       _wrap(ReceiptImageStrip(expense: _expense(const [1, 2, 3]))),
     );
     expect(find.text('Fiş fotoğrafları (3)'), findsOneWidget);
-    expect(find.byType(Image), findsNWidgets(3));
+    expect(find.byType(CachedNetImage), findsNWidgets(3));
   });
 
   testWidgets('10 fotoğrafa ulaşınca "Fotoğraf ekle" gizlenir', (tester) async {

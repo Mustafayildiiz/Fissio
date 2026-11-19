@@ -1,0 +1,6 @@
+# Yayın imzası: bu dosyayı key.properties olarak kopyalayıp doldurun (key.properties ve *.jks git'e GİRMEZ).
+# Anahtar üretimi:  keytool -genkey -v -keystore ~/fissio-upload.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+storeFile=C:/anahtarlar/fissio-upload.jks
+storePassword=
+keyAlias=upload
+keyPassword=

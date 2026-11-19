@@ -62,6 +62,7 @@ class PaddleOcrEngine(OcrEngine):
         self._config = config or OcrConfig.from_env()
         self._predictor = predictor
         self._lock = threading.Lock()
+        self._infer_lock = threading.Lock()
         self._rec_info: dict[str, Any] = {}
 
     @property
@@ -183,8 +184,7 @@ class PaddleOcrEngine(OcrEngine):
                 logger.exception("OCR tanıma modeli incelenemedi")
             return self._predictor
 
-    @staticmethod
-    def _decode_image_to_ndarray(image_input: ImageInput) -> Any:
+    def _decode_image_to_ndarray(self, image_input: ImageInput) -> Any:
         """
         Convert supported ImageInput into a 3-channel RGB/BGR numpy.ndarray in memory.
         Never writes temporary files to disk (preserving NFR-2 / FR-2.3 privacy guarantees).
@@ -248,10 +248,20 @@ class PaddleOcrEngine(OcrEngine):
 
         try:
             with Image.open(io.BytesIO(raw_bytes)) as pil_img:
+                # Yalnızca başlık okunmuş durumda boyutu denetle: piksel dizisine açmadan önce
+                # reddet (küçük dosya -> dev bitmap; decompression bomb).
+                width, height = pil_img.size
+                max_pixels = self._config.max_image_pixels
+                if max_pixels > 0 and width * height > max_pixels:
+                    raise InvalidImageInputError(
+                        f"Image too large: {width}x{height} px exceeds {max_pixels} pixel limit"
+                    )
                 # Apply EXIF orientation for mobile camera captures
                 transposed = ImageOps.exif_transpose(pil_img)
                 rgb_img = transposed.convert("RGB")
                 return np.asarray(rgb_img)
+        except InvalidImageInputError:
+            raise
         except Exception as exc:
             raise InvalidImageInputError(f"Failed to decode image bytes: {exc}") from exc
 
@@ -388,11 +398,14 @@ class PaddleOcrEngine(OcrEngine):
 
         try:
             predictor = self._get_or_create_predictor()
-            try:
-                raw_output = predictor.ocr(img_array, cls=self._config.use_angle_cls)
-            except TypeError:
-                # Newer PaddleOCR predictors may not accept `cls` in `.ocr()`
-                raw_output = predictor.ocr(img_array)
+            # PaddlePredictor iş parçacığı güvenli DEĞİL: eşzamanlı .ocr() çağrıları sürecin tamamını SIGSEGV ile
+            # düşürür (gözlendi). Süreç içinde çıkarım seri yapılır; gerçek paralellik için çoklu süreç (OCR_WORKERS).
+            with self._infer_lock:
+                try:
+                    raw_output = predictor.ocr(img_array, cls=self._config.use_angle_cls)
+                except TypeError:
+                    # Newer PaddleOCR predictors may not accept `cls` in `.ocr()`
+                    raw_output = predictor.ocr(img_array)
 
             blocks = self._parse_raw_paddle_output(
                 raw_output, drop_score=self._config.drop_score

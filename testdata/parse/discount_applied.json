@@ -1,0 +1,24 @@
+{
+  "name": "discount_applied",
+  "note": "Kalemler - indirim = toplam: discount_total 5.",
+  "text": "MARKET\n12.05.2026\nEKMEK 10,00\nSUT 20,00\nINDIRIM -5,00\nTOPLAM 25,00",
+  "expect": {
+    "merchant": "MARKET",
+    "amount": 25,
+    "date": "2026-05-12",
+    "item_count": 2,
+    "needs_review": false,
+    "discount_total": 5,
+    "items": [
+      {
+        "name": "EKMEK",
+        "amount": 10
+      },
+      {
+        "name": "SUT",
+        "amount": 20
+      }
+    ]
+  },
+  "known_divergence": []
+}

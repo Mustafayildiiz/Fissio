@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+
+	"fissio/expense/internal/scan"
 )
 
 func main() {
@@ -18,36 +20,85 @@ func main() {
 	}
 	defer db.Close()
 
+	// Havuz siniri: tek serviste kontrolsuz baglanti birikmesi Postgres'in max_connections'ini (varsayilan 100) tuketmesin.
+	db.SetMaxOpenConns(envInt("DB_MAX_OPEN_CONNS", 25))
+	db.SetMaxIdleConns(envInt("DB_MAX_IDLE_CONNS", 5))
+	db.SetConnMaxLifetime(30 * time.Minute)
+
 	waitForDB(db)
 	if err := migrate(db); err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}
 
-	// Access token'i auth servisi imzalar: JWT_ACCESS_SECRET (yoksa eski JWT_SECRET) iki serviste ayni olmali.
-	secret := os.Getenv("JWT_ACCESS_SECRET")
-	if secret == "" {
-		secret = os.Getenv("JWT_SECRET")
+	if err := checkProductionSecrets(os.Getenv); err != nil {
+		log.Fatal(err)
 	}
-	if secret == "" {
-		log.Fatal("JWT_ACCESS_SECRET (or JWT_SECRET) is required")
+	// Access token'i auth servisi imzalar: HS256 (JWT_ACCESS_SECRET/JWT_SECRET iki serviste ayni) ya da EdDSA
+	// (JWT_ED25519_PUBLIC_KEY: yalniz genel anahtar; bkz. accesskeys.go).
+	verifier, err := loadAccessVerifier()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	h := &handler{db: db, ocrFactory: NewOcrEngineFactoryFromEnv()}
+	// Servisler arasi iletisim: auth'un ic API'si (oturum dogrulama) ve bu servisin ic API'si (hesap verisi silme).
+	internalToken := os.Getenv("INTERNAL_TOKEN")
+	if internalToken == "" {
+		log.Fatal("INTERNAL_TOKEN is required")
+	}
+	authURL := os.Getenv("AUTH_INTERNAL_URL")
+	if authURL == "" {
+		authURL = "http://auth:9090"
+	}
+
+	h := &handler{db: db, ocrFactory: scan.NewOcrEngineFactoryFromEnv()}
 	// Iptal edilen oturum (cikis, uzaktan cikis, hesap silme) en gec 10 sn icinde reddedilir.
-	sessions := newSessionChecker(db, 10*time.Second)
-	r := buildRouter(h, []byte(secret), sessions.alive)
+	sessions := newSessionChecker(authURL, internalToken, 10*time.Second)
+	r := buildRouterWith(h, verifier, sessions.alive)
+
+	// Ic API ayri portta (host'a yayinlanmaz); bkz. internal.go.
+	internalPort := os.Getenv("INTERNAL_PORT")
+	if internalPort == "" {
+		internalPort = "9090"
+	}
+	go func() {
+		isrv := &http.Server{
+			Addr:              ":" + internalPort,
+			Handler:           buildInternalRouter(h, internalToken),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      2 * time.Minute, // hesap verisi silme (buyuk hesaplar) uzun surebilir
+			IdleTimeout:       60 * time.Second,
+		}
+		log.Fatal(isrv.ListenAndServe())
+	}()
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	log.Fatal(r.Run(":" + port))
+	// Zaman asimlari: yavas/askida istemci (slowloris) baglanti tutamaz. WriteTimeout govde okumayi da kapsar:
+	// 6 sayfa yukleme + en fazla scanTotalTimeout OCR + ayristirma icin genis tutulur.
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      4 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 // buildRouter tum rotalari kurar (testler de gercek rota tablosunu kullanir). alive nil ise oturum kontrolu yapilmaz.
-func buildRouter(h *handler, secret []byte, alive func(sid string) (bool, error)) *gin.Engine {
+func buildRouter(h *handler, secret []byte, alive func(sid string, userID int64) (bool, error)) *gin.Engine {
+	return buildRouterWith(h, hmacVerifier(secret), alive)
+}
+
+// buildRouterWith buildRouter'in dogrulayici (HS256/EdDSA) alan halidir.
+func buildRouterWith(h *handler, v accessVerifier, alive func(sid string, userID int64) (bool, error)) *gin.Engine {
 	r := gin.Default()
-	r.Use(cors())
+	r.Use(corsFor(os.Getenv("CORS_ALLOWED_ORIGINS"), os.Getenv("APP_ENV")))
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := h.db.Ping(); err != nil {
@@ -57,7 +108,7 @@ func buildRouter(h *handler, secret []byte, alive func(sid string) (bool, error)
 		c.JSON(http.StatusOK, gin.H{"service": "expense", "status": "ok", "time": time.Now().UTC()})
 	})
 
-	api := r.Group("/", authMiddleware(secret, alive))
+	api := r.Group("/", authMiddlewareWith(v, alive))
 	api.GET("/profiles", h.listProfiles)
 	api.POST("/profiles", h.createProfile)
 	api.PUT("/profiles/:id", h.renameProfile)
@@ -71,6 +122,7 @@ func buildRouter(h *handler, secret []byte, alive func(sid string) (bool, error)
 	api.POST("/expenses", h.createExpense)
 	api.POST("/expenses/bulk", h.bulkExpenses)
 	api.GET("/expenses", h.listExpenses)
+	api.GET("/expenses/ids", h.listExpenseIDs) // /expenses/:id'den ONCE: sabit yol parametreye yakalanmasin
 	api.GET("/expenses/:id", h.getExpense)
 	api.PUT("/expenses/:id", h.updateExpense)
 	api.DELETE("/expenses/:id", h.deleteExpense)
@@ -98,15 +150,3 @@ func waitForDB(db *sql.DB) {
 }
 
 // cors: gelistirme icin tum kokenlere izin verir (web istemcisi). Yayinda kisitlanmali.
-func cors() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-OCR-Engine")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
-}

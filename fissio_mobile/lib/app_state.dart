@@ -7,12 +7,16 @@ import 'package:flutter/foundation.dart' show ChangeNotifier, VoidCallback;
 import 'api.dart';
 import 'budgets.dart';
 import 'data/connectivity.dart';
+import 'data/image_disk_cache.dart';
 import 'data/local_store.dart';
 import 'data/sync_service.dart';
 import 'data/uid.dart';
 import 'models.dart';
 import 'ocr/ocr_engine.dart';
 import 'ocr/on_device_ocr_engine.dart';
+import 'receipt_parser/merge.dart' show mergePageTexts;
+import 'receipt_parser/parser.dart' show parseReceiptText;
+import 'receipt_parser/normalize.dart' show foldTR;
 import 'recurring.dart';
 import 'services/notifier.dart';
 import 'services/widget_sync.dart';
@@ -130,6 +134,41 @@ class AppState extends ChangeNotifier {
 
   /// Bağlantı gelince buluta yüklenecek kayıt sayısı (senkron açık).
   int get pendingCount => _sync.pendingCount + _sync.pendingBudgetCount + _sync.pendingChangeCount;
+
+  /// Sunucunun kabul etmediği / gönderilemeyen kuyruk kaydı sayısı (kullanıcı düzenleyebilir ya da silebilir).
+  int get failedSyncCount => _sync.failedCount;
+
+  /// Sunucuda o arada (başka cihazda) değişmiş fişlere yapılmış, gönderilmeyen çevrimdışı düzenleme sayısı
+  /// (bkz. [resolveEditConflict]).
+  int get conflictedEditCount => _sync.conflictedEditCount;
+
+  /// Çakışan düzenlemeler: kullanıcının hali ve (biliniyorsa) sunucudaki güncel hali.
+  List<({Expense mine, Expense? server})> get editConflicts => [
+    for (final e in _snap.pendingEdits)
+      if (e.isEditConflict) (mine: e, server: _snap.cloudExpenses.where((x) => x.id == e.id).firstOrNull),
+  ];
+
+  /// Çakışmayı çözer. [keepMine]: düzenleme sunucudaki GÜNCEL sürümün üstüne yazılmak üzere yeniden kuyruğa alınır
+  /// (ve hemen gönderilmeye çalışılır); aksi halde düzenleme (ve ona eklenmiş cihaz fotoğrafları) atılır, sunucudaki
+  /// hal kalır.
+  Future<void> resolveEditConflict(int id, {required bool keepMine}) async {
+    final i = _snap.pendingEdits.indexWhere((e) => e.id == id && e.isEditConflict);
+    if (i < 0) return;
+    final edit = _snap.pendingEdits[i];
+    if (keepMine) {
+      final server = _snap.cloudExpenses.where((e) => e.id == id).firstOrNull;
+      _snap.pendingEdits[i] = edit.copyWith(clearSyncError: true, updatedAt: server?.updatedAt);
+    } else {
+      for (final p in edit.localImages) {
+        await _local.deleteImage(p);
+      }
+      _snap.pendingEdits = _snap.pendingEdits.where((e) => e.id != id).toList();
+    }
+    await _persistSnapshot();
+    notifyListeners();
+    // _exclusive yeniden girilir değil: gönderim, durum değişikliği bittikten sonra ayrı çağrıyla.
+    if (keepMine && _syncEnabled) await flushNow(force: true);
+  }
 
   /// Yalnızca cihazda kalan (senkron kapalıyken eklenen) fiş + profil sayısı.
   int get localOnlyCount =>
@@ -351,6 +390,8 @@ class AppState extends ChangeNotifier {
     await _delete(_userKey);
     if (id != null) await _delete(_activeKey(id));
     if (id != null && dropCache) await _dropCloudCache(id);
+    // Önbellekteki fiş fotoğrafları / avatarlar da hesaba aittir: sonraki kullanıcıya kalmasın.
+    if (dropCache) await ImageDiskCache.instance.clear();
     _resetMemory();
     notifyListeners();
     // Sonraki hesap önceki kullanıcının harcamasını / hatırlatıcılarını görmesin.
@@ -362,6 +403,7 @@ class AppState extends ChangeNotifier {
   Future<void> _dropCloudCache(int id) async {
     try {
       _snap.cloudExpenses = [];
+      _snap.cloudSyncedAt = null; // önbelleksiz artımlı yenileme geçmişi gizlerdi: sonraki giriş tam çeker
       _snap.budgets = _snap.budgets.where((b) => b.state != SyncState.synced).toList();
       await _local.save(id, _snap);
     } catch (_) {}
@@ -378,6 +420,8 @@ class AppState extends ChangeNotifier {
     loading = false;
     error = null;
     _flushBackoffUntil = null;
+    _flushFailures = 0;
+    _needsRefresh = false;
   }
 
   void _handleUnauthorized() {
@@ -389,7 +433,9 @@ class AppState extends ChangeNotifier {
 
   void _startBackground() {
     _stopBackground();
+    _dayKey = _todayKey();
     _tick = Timer.periodic(backgroundInterval, (_) {
+      _checkDayRollover();
       api.ensureFresh();
       unawaited(flushNow());
     });
@@ -412,8 +458,27 @@ class AppState extends ChangeNotifier {
   /// Uygulama ön plana gelince: token'ı yenile ve kuyruğu boşalt.
   Future<void> onAppResumed() async {
     if (!loggedIn) return;
+    _checkDayRollover();
     await api.ensureFresh();
     await flushNow(force: true);
+  }
+
+  String _dayKey = '';
+  String _todayKey() {
+    final n = _clock();
+    return '${n.year}-${n.month}-${n.day}';
+  }
+
+  /// Gün (dolayısıyla ay) değiştiyse dinleyicileri uyandırır: bütçe/sabit gider/yaklaşan ödeme/widget türevleri
+  /// `_clock()` ile hesaplandığı için başka bir olay olmadan eski günde kalırdı (gece yarısı, ay dönümü).
+  void _checkDayRollover() {
+    final k = _todayKey();
+    if (_dayKey.isNotEmpty && k != _dayKey) {
+      _dayKey = k;
+      notifyListeners();
+    } else {
+      _dayKey = k;
+    }
   }
 
   /// Her başarılı API isteğinden sonra, kuyrukta kayıt varsa boşaltmayı dener (bağlantı geri geldi demektir).
@@ -428,15 +493,57 @@ class AppState extends ChangeNotifier {
     if (!loggedIn) return FlushOutcome.nothing;
     final until = _flushBackoffUntil;
     if (!force && until != null && _clock().isBefore(until)) return FlushOutcome.busy;
-    final o = await _sync.flush();
+    // refresh() ile aynı sıraya girer: sunucu listesi çekilirken kuyruk boşalıp (ör. profil "synced" olup) bayat
+    // bir listeyle ezilmesin. Kilit refresh'in içinde alınır; burada iç içe geçmez.
+    final o = await _exclusive(_sync.flush);
     if (o == FlushOutcome.partial) {
-      _flushBackoffUntil = _clock().add(const Duration(seconds: 60));
+      // Üstel geri çekilme: kalıcı reddedilen bir kayıt her 60 sn'de tüm geçmişi indirtmesin (60 sn → en çok 15 dk).
+      _flushFailures++;
+      const steps = [60, 120, 240, 480, 900];
+      final secs = steps[_flushFailures > steps.length ? steps.length - 1 : _flushFailures - 1];
+      _flushBackoffUntil = _clock().add(Duration(seconds: secs));
+    } else if (o == FlushOutcome.done || o == FlushOutcome.nothing) {
+      _flushFailures = 0;
+      _flushBackoffUntil = null;
     }
-    if (o == FlushOutcome.done || o == FlushOutcome.partial) {
-      await refresh();
-    }
+    // Hiçbir kayıt ilerlemediyse (aynı hata tekrarlandı) sunucudan yeniden indirmenin anlamı yok.
+    if (o == FlushOutcome.done || (o == FlushOutcome.partial && _sync.progressed)) _needsRefresh = true;
+    // Eşzamanlı başka bir flushNow kuyruğu boşaltmış olabilir (bu çağrı "nothing" görür); yine de dönmeden önce
+    // o çalışmanın getirdiği değişiklikler sunucudan çekilmiş olsun.
+    if (_needsRefresh) await _refreshIfNeeded();
     return o;
   }
+
+  /// Kuyruk boşaldı ama sunucudaki liste henüz yeniden çekilmedi.
+  bool _needsRefresh = false;
+  Future<void> _refreshIfNeeded() => _exclusive(() async {
+    if (_needsRefresh) await _refreshNow();
+  });
+
+  /// Ağ yazma/okuma işlemlerini (refresh, flush) sıraya dizer; aynı anda yalnızca biri çalışır. Future zinciri
+  /// yerine bekleyen başına bir Completer kullanılır: her bekleyen KENDİ zone'unda uyanır (testlerde gerçek ve
+  /// sahte asenkron bölgeler karışsa da kilit takılmaz). İşlem içinden tekrar [_exclusive] çağrılmaz.
+  bool _exclusiveBusy = false;
+  final List<Completer<void>> _exclusiveWaiters = [];
+  Future<T> _exclusive<T>(Future<T> Function() op) async {
+    if (_exclusiveBusy) {
+      final turn = Completer<void>();
+      _exclusiveWaiters.add(turn);
+      await turn.future; // sahipliği devralınmış olarak uyanır (_exclusiveBusy hâlâ true)
+    } else {
+      _exclusiveBusy = true;
+    }
+    try {
+      return await op();
+    } finally {
+      if (_exclusiveWaiters.isEmpty) {
+        _exclusiveBusy = false;
+      } else {
+        _exclusiveWaiters.removeAt(0).complete(); // sıradakine devret
+      }
+    }
+  }
+  int _flushFailures = 0;
 
   // --- Bulut senkronu ---
 
@@ -464,18 +571,33 @@ class AppState extends ChangeNotifier {
 
   // --- Veri yükleme ---
 
-  Future<void> refresh() async {
+  Future<void> refresh() => _exclusive(_refreshNow);
+
+  Future<void> _refreshNow() async {
     if (!loggedIn) return;
+    final uid = user?.id;
+    _needsRefresh = false;
     loading = true;
     error = null;
     notifyListeners();
     try {
       final cats = await api.categories();
       final ps = await api.profiles();
-      final ex = await api.expenses();
+      final ex = await _fetchCloudExpenses();
+      // Yanıtlar beklenirken hesap değiştiyse (çıkış / başka hesapla giriş) bu veri yeni hesaba yazılmaz.
+      if (user?.id != uid) return;
       categories = cats;
       _snap.categories = cats;
-      _applyCloud(ps, ex);
+      _applyCloud(ps, ex.list);
+      _snap.cloudSyncedAt = ex.syncedAt;
+      // Sunucuda artık olmayan fişin çakışmış düzenlemesi çözülemez (gönderilse 404 ile düşerdi): bırakılır.
+      final cloudIds = {for (final e in _snap.cloudExpenses) e.id};
+      for (final e in _snap.pendingEdits.where((e) => e.isEditConflict && !cloudIds.contains(e.id))) {
+        for (final p in e.localImages) {
+          await _local.deleteImage(p);
+        }
+      }
+      _snap.pendingEdits = _snap.pendingEdits.where((e) => !e.isEditConflict || cloudIds.contains(e.id)).toList();
       await _refreshBudgets(ps);
       await _persistSnapshot();
       offline = false;
@@ -486,9 +608,79 @@ class AppState extends ChangeNotifier {
       } else {
         error = e.message;
       }
+    } finally {
+      // Beklenmeyen bir hata (ör. bozuk JSON) yükleniyor durumunda asılı bırakmasın.
+      loading = false;
+      notifyListeners();
     }
-    loading = false;
-    notifyListeners();
+  }
+
+  /// Artımlı istekte `since`, görülen en yeni `updated_at`ten bu kadar geriden başlar: sunucu `updated_at`'i işlem
+  /// içinde atar, uzun bir işlem (500'lük toplu kayıt) daha sonraki zamanlar görünür olduktan SONRA görünür olabilir.
+  /// Kimliğe göre üzerine yazıldığından tekrar gelen satırlar zararsızdır.
+  static const cloudDeltaOverlap = Duration(minutes: 5);
+
+  /// Sunucu fişleri. Önbellek ve [LocalSnapshot.cloudSyncedAt] varsa ARTIMLI: yalnızca o andan sonra değişenler
+  /// (`since`) + tüm kimlikler (silinenler için) çekilir ve önbelleğe işlenir. Yoksa (ilk açılış) ya da artımlı yol
+  /// ağ dışı bir hatayla başarısız olursa (eski sunucu, bozuk yanıt...) tam liste çekilir. Ağ hatası olduğu gibi
+  /// fırlatılır (tam liste de aynı nedenle başarısız olurdu; çağıran çevrimdışı moda geçer).
+  Future<({List<Expense> list, String? syncedAt})> _fetchCloudExpenses() async {
+    final since = _snap.cloudSyncedAt;
+    final sinceAt = since == null ? null : DateTime.tryParse(since);
+    if (sinceAt != null && _snap.cloudExpenses.isNotEmpty) {
+      try {
+        // Sıra önemli: önce değişenler, sonra kimlikler. Tersinde iki çağrı arasında eklenen fiş delta'da olup
+        // kimliklerde olmaz ve silinmiş sanılırdı.
+        final changed = await api.expensesSince(sinceAt.subtract(cloudDeltaOverlap).toUtc().toIso8601String());
+        final ids = (await api.expenseIds()).toSet();
+        final byId = {for (final e in _snap.cloudExpenses) e.id: e};
+        for (final e in changed) {
+          byId[e.id] = e;
+        }
+        byId.removeWhere((id, _) => !ids.contains(id));
+        return (list: byId.values.toList(), syncedAt: _maxUpdatedAt(changed, since));
+      } on ApiException catch (e) {
+        if (e.network) rethrow;
+      } catch (_) {
+        // beklenmeyen yanıt biçimi: tam listeye düş
+      }
+    }
+    final all = await api.expenses();
+    return (list: all, syncedAt: _maxUpdatedAt(all, null));
+  }
+
+  /// En yeni `updated_at` (ham metin aynen). Metin olarak KARŞILAŞTIRILMAZ: RFC3339Nano sondaki sıfırları atar
+  /// (".12Z" > ".123Z" olur); zaman olarak çözülüp karşılaştırılır.
+  static String? _maxUpdatedAt(Iterable<Expense> rows, String? prev) {
+    var best = prev;
+    var bestAt = prev == null ? null : DateTime.tryParse(prev);
+    for (final e in rows) {
+      final raw = e.updatedAt;
+      final at = raw == null ? null : DateTime.tryParse(raw);
+      if (at == null) continue;
+      if (bestAt == null || at.isAfter(bestAt)) {
+        best = raw;
+        bestAt = at;
+      }
+    }
+    return best;
+  }
+
+  /// Fotoğraf ekleme/silme `updated_at`'i değiştirmez (artımlı yenilemede gelmez): fişin taze kopyası tek tek alınır.
+  Future<void> _refreshOne(int id) async {
+    try {
+      final fresh = await api.expense(id);
+      final old = _snap.cloudExpenses.where((e) => e.id == id).firstOrNull;
+      var copy = _withProfileUid(fresh);
+      if (copy.profileUid.isEmpty && old != null) copy = copy.copyWith(profileUid: old.profileUid);
+      _snap.cloudExpenses = [
+        for (final e in _snap.cloudExpenses) e.id == id ? copy : e,
+        if (old == null) copy,
+      ];
+      await _persistSnapshot();
+    } on ApiException {
+      // sonraki tam yenilemede düzelir
+    }
   }
 
   /// Sunucudaki limitler yerel önbelleğe alınır: yüklenmemiş (pending/localOnly) limitler korunur, sunucudan
@@ -523,7 +715,8 @@ class AppState extends ChangeNotifier {
       ...local,
     ];
     _snap.cloudExpenses = [
-      for (final e in serverExpenses) e.copyWith(profileUid: byServerId[e.profileServerId] ?? ''),
+      // Artımlı yenilemede önbellekten gelen kopyanın profil eşlemesi korunur (sunucudan gelende profileUid boştur).
+      for (final e in serverExpenses) e.copyWith(profileUid: byServerId[e.profileServerId] ?? e.profileUid),
     ];
     if (activeProfileId == null || !_snap.profiles.any((p) => p.id == activeProfileId)) {
       activeProfileId = _snap.profiles.firstOrNull?.id;
@@ -856,7 +1049,22 @@ class AppState extends ChangeNotifier {
   // --- Tekrarlayan giderler ---
 
   /// Aktif profilin tekrarlayan giderleri ve "Aylık Sabit Gider Projeksiyonu".
-  RecurringProjection get recurring => buildRecurring(_activeUnsorted(), _clock());
+  // buildRecurring tüm fişleri tarar (regex'li seri anahtarı): her notify'da, her satırda yeniden hesaplanmasın diye
+  // veri sürümüne (her notifyListeners'ta artar) ve güne bağlı önbelleklenir.
+  int _rev = 0;
+  RecurringProjection? _recurringCache;
+  int _recurringCacheRev = -1;
+  String _recurringCacheDay = '';
+
+  RecurringProjection get recurring {
+    final day = _todayKey();
+    if (_recurringCache == null || _recurringCacheRev != _rev || _recurringCacheDay != day) {
+      _recurringCache = buildRecurring(_activeUnsorted(), _clock());
+      _recurringCacheRev = _rev;
+      _recurringCacheDay = day;
+    }
+    return _recurringCache!;
+  }
 
   /// Önümüzdeki 30 gün içinde ödemesi gelen tekrarlayan giderler (aktif profil).
   List<RecurringItem> get upcomingPayments => upcomingPaymentsOf(recurring.items, _clock());
@@ -872,6 +1080,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void notifyListeners() {
+    _rev++;
     super.notifyListeners();
     // Fiş ekleme/silme/güncelleme, profil değişimi, yenileme, senkron/çıkış... hepsi buradan geçer; widget ve
     // hatırlatıcılar değişiklik olduğunda (aynı veri tekrar gönderilmez) güncellenir.
@@ -890,6 +1099,7 @@ class AppState extends ChangeNotifier {
       profileName: activeProfile?.name ?? '',
       monthTotalText: fmtMoney(monthTotalFor(_activeUnsorted(), activeProfileId, now)),
       monthLabel: '${kMonthNames[now.month - 1]} ${now.year}',
+      monthKey: '${now.year}-${now.month}',
     );
   }
 
@@ -961,7 +1171,7 @@ class AppState extends ChangeNotifier {
       amount: d.savedAmount,
       date: d.date,
       categoryId: cid,
-      categoryName: _categoryName(cid) ?? 'Diğer',
+      categoryName: _categoryName(cid) ?? kOtherCategory,
       note: d.note,
       items: [
         for (final i in d.items)
@@ -981,6 +1191,9 @@ class AppState extends ChangeNotifier {
       suggestedCategoryId: d.suggestedCategoryId,
       recurringDay: d.recurringDay,
       recurringRemind: d.recurringRemind,
+      // Çevrimdışı kuyruktaki değişken fatura (elektrik, su...) sunucuya "sabit" olarak gitmesin.
+      recurringKind: d.recurringKind,
+      recurringEstimate: d.recurringEstimate,
     );
   }
 
@@ -1011,7 +1224,9 @@ class AppState extends ChangeNotifier {
       profile: _profile(orig.profileUid) ?? activeProfile!,
       state: SyncState.pending,
       images: [...?prior?.localImages, ...extra],
-    ).copyWith(imageIds: orig.imageIds, profileServerId: orig.profileServerId);
+      // Düzenlemenin dayandığı sunucu sürümü kuyruğa alınırken sabitlenir (gönderimde değil): arada yapılan bir
+      // yenileme önbelleği başka cihazın yeni sürümüyle güncellese de PUT o değişikliği sessizce ezmez (409).
+    ).copyWith(imageIds: orig.imageIds, profileServerId: orig.profileServerId, updatedAt: orig.updatedAt);
     _snap.pendingEdits = [..._snap.pendingEdits.where((e) => e.id != id), edited];
     await _persistSnapshot();
     notifyListeners();
@@ -1071,6 +1286,8 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    // Silinen fişin (ör. çakışmış) bekleyen düzenlemesi de anlamını yitirdi.
+    _snap.pendingEdits = _snap.pendingEdits.where((x) => x.id != id).toList();
     await refresh();
   }
 
@@ -1089,12 +1306,14 @@ class AppState extends ChangeNotifier {
     }
     if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
     await api.uploadImages(e.id, images);
+    await _refreshOne(e.id);
     await refresh();
   }
 
   Future<void> removeCloudImage(int expenseId, int imageId) async {
     if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
     await api.deleteImage(expenseId, imageId);
+    await _refreshOne(expenseId);
     await refresh();
   }
 
@@ -1118,7 +1337,7 @@ class AppState extends ChangeNotifier {
   Future<Profile> ensureProfileForImport({required String uid, required String name}) async {
     final byUid = _profile(uid);
     if (byUid != null) return byUid;
-    final byName = _snap.profiles.where((p) => p.name.toLowerCase() == name.trim().toLowerCase()).firstOrNull;
+    final byName = _snap.profiles.where((p) => foldTR(p.name) == foldTR(name.trim())).firstOrNull;
     if (byName != null) return byName;
     final state = _syncEnabled ? SyncState.pending : SyncState.localOnly;
     final p = Profile(id: uid, name: name.trim().isEmpty ? 'İçe aktarılan' : name.trim(), state: state);
@@ -1141,7 +1360,7 @@ class AppState extends ChangeNotifier {
     if (_syncEnabled) await flushNow(force: true);
   }
 
-  int? _otherCategoryId() => categories.where((c) => c.name == 'Diğer').firstOrNull?.id;
+  int? _otherCategoryId() => categories.where((c) => c.name == kOtherCategory).firstOrNull?.id;
 
   /// Taramada cihaz içi OCR mı kullanılacak? Senkron kapalıysa her zaman; `onDevice` her zaman; `server`
   /// hiçbir zaman (ağ hatası hariç); `auto` yalnızca bağlantı yokken.
@@ -1165,13 +1384,59 @@ class AppState extends ChangeNotifier {
   /// Fişi okur ve ayrıştırır. Sunucu OCR'ı denenirken ağ hatası olursa (bağlantı yok / sunucuya ulaşılamıyor)
   /// hata vermeden cihaz içi OCR'a düşer; doğrulama gibi ağ dışı hatalar olduğu gibi iletilir.
   Future<ScanResult> scanAndParseReceipt(List<Uint8List> pages, {String? engine}) async {
-    if (await _preferOnDeviceOcr()) return _onDeviceOcr.scan(pages);
+    if (await _preferOnDeviceOcr()) return _refineOnDeviceWithServer(await _onDeviceOcr.scan(pages));
     final ocrEngine = ocrFactory.resolve(api, engineName: engine);
     try {
       return await ocrEngine.scan(pages);
     } on ApiException catch (e) {
       if (!e.network) rethrow;
       return _onDeviceOcr.scan(pages);
+    }
+  }
+
+  /// Kısmi taramada (bazı sayfalar okunamadı) YALNIZ okunamayan sayfaları yeniden tarar, metinleri sayfa sırasıyla
+  /// birleştirip yeniden ayrıştırır. [pages] ilk taramadaki tam sayfa listesidir (sırası aynı).
+  Future<ScanResult> rescanFailedPages(ScanResult prev, List<Uint8List> pages, {String? engine}) async {
+    final failed = prev.ocr.failedPages;
+    final texts = prev.ocr.pageTexts;
+    if (failed.isEmpty || texts.length != pages.length) return prev;
+    final idx = [for (final n in failed) if (n >= 1 && n <= pages.length) n - 1];
+    final sub = await scanAndParseReceipt([for (final i in idx) pages[i]], engine: engine);
+    final merged = List<String>.of(texts);
+    final stillFailed = <int>[];
+    for (var k = 0; k < idx.length; k++) {
+      final subTexts = sub.ocr.pageTexts;
+      final text = k < subTexts.length ? subTexts[k] : '';
+      if (sub.ocr.failedPages.contains(k + 1) || (text.trim().isEmpty && subTexts.isNotEmpty)) {
+        stillFailed.add(idx[k] + 1);
+      } else if (k < subTexts.length) {
+        merged[idx[k]] = text;
+      }
+    }
+    final raw = mergePageTexts(merged.where((t) => t.trim().isNotEmpty).toList());
+    final ocr = sub.ocr.copyWith(rawText: raw, pageTexts: merged, failedPages: stillFailed);
+    ParsedReceipt parsed;
+    try {
+      parsed = await api.parseReceiptText(raw);
+    } catch (_) {
+      parsed = parseReceiptText(raw, now: DateTime.now()).toParsedReceipt(otherCategoryId: _otherCategoryId());
+    }
+    if (stillFailed.isNotEmpty) parsed = parsed.copyWith(needsReview: true);
+    return (ocr: ocr, parsed: parsed);
+  }
+
+  /// Cihazda okunan metin için sunucu ayrıştırıcısını kullanır (kategori kuralları, toplam mutabakatı, marka
+  /// sözlüğü): YALNIZCA bulut senkronu açık ve çevrimiçiyken ve yalnızca metin gider (fotoğraf asla). Senkron
+  /// kapalı/çevrimdışıysa ya da çağrı başarısızsa yerel ayrıştırma sonucu aynen kalır; hiçbir istek atılmaz.
+  Future<ScanResult> _refineOnDeviceWithServer(ScanResult local) async {
+    final text = local.ocr.rawText;
+    if (!_syncEnabled || text.trim().isEmpty || utf8.encode(text).length > 20000) return local;
+    try {
+      if (!await _connectivity.isOnline()) return local;
+      final parsed = await api.parseReceiptText(text);
+      return (ocr: local.ocr, parsed: parsed);
+    } catch (_) {
+      return local;
     }
   }
 

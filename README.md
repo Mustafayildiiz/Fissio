@@ -1,42 +1,57 @@
 # Fissio
 
-Akıllı fiş işleme ve mikro harcama yönetimi. Fişin fotoğrafını çekin; Fissio metni okuyup mağaza, tarih, toplam ve ürün kalemlerini çıkarır, kategorilere ayırır ve harcamalarınızı raporlar.
+AkÄ±llÄ± fiÅŸ iÅŸleme ve mikro harcama yÃ¶netimi. FiÅŸin fotoÄŸrafÄ±nÄ± Ã§ekin; Fissio metni okuyup maÄŸaza, tarih, toplam ve Ã¼rÃ¼n kalemlerini Ã§Ä±karÄ±r, kategorilere ayÄ±rÄ±r ve harcamalarÄ±nÄ±zÄ± raporlar.
 
-## Özellikler
+## Ã–zellikler
 
-- **Fiş tarama (OCR):** Kamera veya galeriden, uzun fişler için en fazla 6 sayfa. Sunucu OCR (PaddleOCR) ya da cihaz içi OCR (ML Kit).
-- **Otomatik ayrıştırma:** Mağaza, tarih, toplam, ürün kalemleri; toplam uyuşmazlığında inceleme uyarısı.
-- **Otomatik kategorilendirme:** 11 kategorili sözlük + düzeltmelerinizden öğrenen kişisel kurallar.
-- **Profiller:** Her hesapta birden fazla harcama profili (varsayılan "Kişisel").
-- **Çevrimdışı kullanım ve bulut eşitleme:** Bağlantı yokken fişler cihazda kuyruğa alınır, bağlantı gelince eşitlenir. Eşitleme kapalıyken hiçbir veri sunucuya gitmez.
-- **Güvenli hesap:** E-posta doğrulama kodu (OTP), kısa ömürlü erişim + yenilenen oturum belirteci, oturum yönetimi, kod ile şifre sıfırlama, hesap silme.
-- **Veri taşıma:** JSON yedek ve CSV dışa/içe aktarma.
-- **Kişiselleştirme:** Açık/koyu tema, vurgu rengi, fiş detay görünümü.
+- **FiÅŸ tarama (OCR):** Kamera veya galeriden, uzun fiÅŸler iÃ§in en fazla 6 sayfa. Sunucu OCR (PaddleOCR) ya da cihaz iÃ§i OCR (ML Kit). Bir sayfa okunamazsa yalnÄ±zca o sayfa yeniden taranabilir.
+- **Otomatik ayrÄ±ÅŸtÄ±rma:** MaÄŸaza, tarih, toplam, Ã¼rÃ¼n kalemleri; toplam uyuÅŸmazlÄ±ÄŸÄ±nda inceleme uyarÄ±sÄ±. AynÄ± ayrÄ±ÅŸtÄ±rma mantÄ±ÄŸÄ± sunucuda (Go) ve cihazda (Dart) ortak altÄ±n vektÃ¶rlerle (`testdata/`) sÄ±nanÄ±r.
+- **Otomatik kategorilendirme:** 11 kategorili sÃ¶zlÃ¼k + dÃ¼zeltmelerinizden Ã¶ÄŸrenen kiÅŸisel kurallar.
+- **BÃ¼tÃ§eler, sabit giderler, ana ekran widget'Ä±:** Kategori/toplam bÃ¼tÃ§e uyarÄ±larÄ±, sabit ve deÄŸiÅŸken faturalar (gecikmiÅŸ Ã¶deme hatÄ±rlatmasÄ± dahil).
+- **Profiller:** Her hesapta birden fazla harcama profili (varsayÄ±lan "KiÅŸisel").
+- **Ã‡evrimdÄ±ÅŸÄ± kullanÄ±m ve bulut eÅŸitleme:** BaÄŸlantÄ± yokken fiÅŸler cihazda kuyruÄŸa alÄ±nÄ±r, baÄŸlantÄ± gelince eÅŸitlenir. EÅŸitleme kapalÄ±yken hiÃ§bir veri (okunan metin dahil) sunucuya gitmez.
+- **GÃ¼venli hesap:** E-posta doÄŸrulama kodu (OTP), kÄ±sa Ã¶mÃ¼rlÃ¼ eriÅŸim + yenilenen oturum belirteci, oturum yÃ¶netimi, kod ile ÅŸifre sÄ±fÄ±rlama, hesap silme.
+- **Veri taÅŸÄ±ma:** JSON yedek ve CSV dÄ±ÅŸa/iÃ§e aktarma.
+- **KiÅŸiselleÅŸtirme:** AÃ§Ä±k/koyu tema, vurgu rengi, fiÅŸ detay gÃ¶rÃ¼nÃ¼mÃ¼.
 
 ## Mimari
 
-| Bileşen | Teknoloji | Port |
+| BileÅŸen | Teknoloji | EriÅŸim |
 |---|---|---|
-| `services/auth` | Go (gin) | 8081 |
-| `services/expense` | Go (gin) | 8082 |
-| `services/ocr` | Python 3.11, FastAPI, PaddleOCR | 8083 |
-| PostgreSQL | postgres:16 | yalnızca Docker iç ağı |
+| `services/auth` | Go (gin) | geliÅŸtirmede `localhost:8081` |
+| `services/expense` | Go (gin); `internal/receiptparse` (saf ayrÄ±ÅŸtÄ±rma), `internal/scan` (OCR istemcisi) | geliÅŸtirmede `localhost:8082` |
+| `services/ocr` | Python 3.11, FastAPI, PaddleOCR | **yalnÄ±zca Docker iÃ§ aÄŸÄ±** (`http://ocr:8080`; kimlik doÄŸrulamasÄ± yoktur, host'a aÃ§Ä±lmaz) |
+| PostgreSQL | postgres:16 | yalnÄ±zca Docker iÃ§ aÄŸÄ±; ÅŸemalar `auth` ve `expense` |
 | `fissio_mobile/` | Flutter | - |
 
-## Hızlı başlangıç
+Servisler birbirinin veritabanÄ± ÅŸemasÄ±na dokunmaz: oturum doÄŸrulama ve hesap silme, ayrÄ± bir iÃ§ portta (`INTERNAL_PORT`, host'a yayÄ±nlanmaz) `INTERNAL_TOKEN` ile korunan iÃ§ API'ler Ã¼zerinden yapÄ±lÄ±r.
+
+## HÄ±zlÄ± baÅŸlangÄ±Ã§
 
 ### Backend
 
 ```bash
-cp .env.example .env        # varsayılanlar geliştirme için yeterli
+cp .env.example .env        # varsayÄ±lanlar geliÅŸtirme iÃ§in yeterli
 docker compose up --build
 ```
 
 - Auth: http://localhost:8081/health
 - Expense: http://localhost:8082/health
-- OCR: http://localhost:8083
-- PostgreSQL dışarı açılmaz (yalnızca Docker iç ağı).
-- Geliştirmede e-posta doğrulama kodu SMTP olmadan loga yazılır: `docker compose logs auth | grep DEV-OTP`
+- OCR ve PostgreSQL dÄ±ÅŸarÄ± aÃ§Ä±lmaz. Yerel hata ayÄ±klama iÃ§in `docker-compose.override.yml` ile `ports: ["127.0.0.1:8083:8080"]` eklenebilir.
+- GeliÅŸtirmede e-posta doÄŸrulama kodu SMTP olmadan (`SMTP_HOST` boÅŸ) loga yazÄ±lÄ±r: `docker compose logs auth | grep DEV-OTP`
+- Bu makinede `docker compose build` bazen "bake" hatasÄ± verir; Ã§Ã¶zÃ¼m: `docker build -t fissio-auth services/auth` (expense, ocr iÃ§in aynÄ±sÄ±), ardÄ±ndan `docker compose up -d --no-build`.
+
+### YayÄ±n (production)
+
+```bash
+# .env: APP_ENV=production, gÃ¼Ã§lÃ¼ sÄ±rlar, FISSIO_DOMAIN=api.ornek.com (bkz. .env.example "YayÄ±n sertleÅŸtirmesi")
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+- **Caddy** otomatik TLS ile tek origin sunar (`/auth/*` â†’ auth, geri kalanÄ± â†’ expense); auth/expense host portlarÄ± kapanÄ±r.
+- `APP_ENV=production` iken zayÄ±f/varsayÄ±lan sÄ±rlarla servisler baÅŸlamaz.
+- Ã–nerilen: servis baÅŸÄ±na DB rolleri (`db/10-roles.sh`, mevcut veritabanÄ± iÃ§in `db/migrate-roles.sql`) ve asimetrik JWT (`docker compose run --rm auth /app genkey`).
+- Mobil derleme: `flutter build apk --release --dart-define=API_BASE=https://api.ornek.com` (release derlemeler dÃ¼z HTTP'ye baÄŸlanamaz). YayÄ±n imzasÄ± iÃ§in `fissio_mobile/android/key.properties.example`.
 
 ### Mobil
 
@@ -46,34 +61,34 @@ flutter pub get
 flutter run
 ```
 
-Android emülatöründe backend adresi `http://10.0.2.2:8081` (auth), diğer platformlarda `localhost`.
+Android emÃ¼latÃ¶rÃ¼nde backend adresi `http://10.0.2.2:8081` (auth) / `:8082` (expense), diÄŸer platformlarda `localhost`; gerÃ§ek cihazda `--dart-define=API_HOST=192.168.x.x`. DÃ¼z HTTP yalnÄ±zca debug/profile derlemelerinde aÃ§Ä±ktÄ±r.
 
-## Mobil kullanım
+## Mobil kullanÄ±m
 
-- **Yeni fiş (+):** Doğrudan tarama sayfasını açar. Fişi taramak istemezseniz tarama ekranındaki **Manuel** anahtarıyla formu elle doldurabilirsiniz.
-- **Fiş okuma ayarları** (Ayarlar > Tercihler > Fiş okuma):
-  - Mod: **Otomatik** (bağlantı varken sunucu, yoksa cihaz), **Sunucu** veya **Cihaz içi** OCR.
+- **Yeni fiÅŸ (+):** DoÄŸrudan tarama sayfasÄ±nÄ± aÃ§ar. FiÅŸi taramak istemezseniz tarama ekranÄ±ndaki **Manuel** anahtarÄ±yla formu elle doldurabilirsiniz.
+- **FiÅŸ okuma ayarlarÄ±** (Ayarlar > Tercihler > FiÅŸ okuma):
+  - Mod: **Otomatik** (baÄŸlantÄ± varken sunucu, yoksa cihaz), **Sunucu** veya **Cihaz iÃ§i** OCR. EÅŸitleme kapalÄ±yken fotoÄŸraf her zaman cihazda kalÄ±r; eÅŸitleme aÃ§Ä±k ve Ã§evrimiÃ§iyken cihazda okunan *metin* sunucu ayrÄ±ÅŸtÄ±rÄ±cÄ±sÄ±ndan geÃ§er (fotoÄŸraf gitmez).
   - **Sunucu OCR motoru:** PP-OCRv4 Mobile / Custom OCR.
-  - Seçimler kalıcıdır ve tarama ekranında otomatik uygulanır.
-- **Veri yönetimi** (Ayarlar): bulut eşitleme anahtarı, dışa ve içe aktarma.
+  - SeÃ§imler kalÄ±cÄ±dÄ±r ve tarama ekranÄ±nda otomatik uygulanÄ±r.
+- **Veri yÃ¶netimi** (Ayarlar): bulut eÅŸitleme anahtarÄ±, dÄ±ÅŸa ve iÃ§e aktarma.
 
 ## Testler
 
 ```bash
-# Go servisleri
-cd services/auth && go test ./...
-cd services/expense && go test ./...
+# Go servisleri (PG'li testler iÃ§in FISSIO_TEST_DATABASE_URL; auth ve expense'i sÄ±rayla Ã§alÄ±ÅŸtÄ±rÄ±n)
+cd services/auth && go test -count=1 ./...
+cd services/expense && go test -count=1 ./...
 
-# OCR servisi (imaj içinde)
-docker run --rm -v "$(pwd)/services/ocr:/app" -w /app fissio-ocr:latest python -m pytest tests/ -q -p no:cacheprovider
+# OCR servisi (imaj iÃ§inde; testdata ve docs baÄŸlanÄ±r, aksi halde ilgili testler atlanÄ±r)
+docker run --rm -v "$(pwd)/services/ocr:/app" -v "$(pwd)/testdata:/testdata" -v "$(pwd)/docs:/docs" -w /app fissio-ocr:latest python -m pytest tests/ -q -p no:cacheprovider
 
 # Mobil
 cd fissio_mobile && flutter analyze && flutter test
 ```
 
-PostgreSQL gerektiren testler `FISSIO_TEST_DATABASE_URL` tanımlı değilse atlanır. Ayrıntılar için `CLAUDE.md` dosyasına bakın.
+PostgreSQL gerektiren testler `FISSIO_TEST_DATABASE_URL` tanÄ±mlÄ± deÄŸilse atlanÄ±r (iÃ§inde "test" geÃ§en atÄ±labilir bir veritabanÄ± verin; ÅŸemalarÄ± siler). Go, Python ve Dart ortak altÄ±n vektÃ¶rleri `testdata/` altÄ±ndan okur (bkz. `testdata/README.md`). CI: `.github/workflows/ci.yml`.
 
-## Dokümantasyon
+## DokÃ¼mantasyon
 
-- API sözleşmesi: `docs/openapi.yaml`
-- Geliştirici rehberi: `CLAUDE.md`
+- API sÃ¶zleÅŸmesi: `docs/openapi.yaml`
+- GeliÅŸtirici rehberi: `CLAUDE.md`

@@ -5,8 +5,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fissio}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fissio_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-fissio}
+      # Servis başına roller (yalnız ilk volume kurulumunda oluşur, bkz. db/10-roles.sh; mevcut DB için db/migrate-roles.sql)
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-fissio_auth_dev_password}
+      EXPENSE_DB_PASSWORD: ${EXPENSE_DB_PASSWORD:-fissio_expense_dev_password}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./db/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     # Port disariya acilmaz (NFR-3): yalnizca ic ag
     healthcheck:
@@ -19,7 +23,11 @@ services:
   auth:
     build: ./services/auth
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-fissio}:${POSTGRES_PASSWORD:-fissio_dev_password}@postgres:5432/${POSTGRES_DB:-fissio}?sslmode=disable
+      # Varsayılan süper kullanıcı (geriye dönük uyum); yayında AUTH_DATABASE_URL ile fissio_auth rolüne geçin (.env.example).
+      DATABASE_URL: ${AUTH_DATABASE_URL:-postgres://${POSTGRES_USER:-fissio}:${POSTGRES_PASSWORD:-fissio_dev_password}@postgres:5432/${POSTGRES_DB:-fissio}?sslmode=disable}
+      APP_ENV: ${APP_ENV:-development}
+      # İsteğe bağlı asimetrik JWT: `docker compose run --rm auth /app genkey` ile çift üretin (yalnız auth özel anahtarı alır).
+      JWT_ED25519_PRIVATE_KEY: ${JWT_ED25519_PRIVATE_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-dev_only_change_me}
       # Access token (15 dk) ve refresh token hash anahtari; bos ise JWT_SECRET'ten turetilir.
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-}
@@ -31,11 +39,26 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # Servisler arasi ic API (ayri port 9090, host'a YAYINLANMAZ; ek olarak bu paylasilan anahtari ister).
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev_internal_token_change_me}
+      EXPENSE_INTERNAL_URL: ${EXPENSE_INTERNAL_URL:-http://expense:9090}
+      GIN_MODE: release
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "8081:8080"
+    restart: unless-stopped
+    # Kaynak limitleri: tek servis hostu tüketemesin (OCR en ağırı; OCR_MAX_CONCURRENT ile uyumlu)
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks: [internal]
 
   ocr:
@@ -52,25 +75,58 @@ services:
       OCR_DET_LIMIT_SIDE_LEN: ${OCR_DET_LIMIT_SIDE_LEN:-1600}
     # Model agirliklari her yeniden olusturmada tekrar inmesin
     volumes:
-      - ocr_models:/root/.paddleocr
-    ports:
-      - "8083:8080"
+      - ocr_models:/home/app/.paddleocr
+    # OCR servisi kimlik dogrulamasi icermez: host'a/LAN'a PORT ACILMAZ, yalnizca ic agdan
+    # (expense -> http://ocr:8080) erisilir. Yerel hata ayiklama icin gecici olarak
+    # docker-compose.override.yml ile `ports: ["127.0.0.1:8083:8080"]` eklenebilir.
+    restart: unless-stopped
+    # Kaynak limitleri: tek servis hostu tüketemesin (OCR en ağırı; OCR_MAX_CONCURRENT ile uyumlu)
+    mem_limit: 4g
+    cpus: 3
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status == 200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # Model agirliklari ilk acilista iner/yuklenir
+      start_period: 120s
     networks: [internal]
 
   expense:
     build: ./services/expense
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-fissio}:${POSTGRES_PASSWORD:-fissio_dev_password}@postgres:5432/${POSTGRES_DB:-fissio}?sslmode=disable
+      DATABASE_URL: ${EXPENSE_DATABASE_URL:-postgres://${POSTGRES_USER:-fissio}:${POSTGRES_PASSWORD:-fissio_dev_password}@postgres:5432/${POSTGRES_DB:-fissio}?sslmode=disable}
+      APP_ENV: ${APP_ENV:-development}
+      # Asimetrik JWT kipinde yalnızca genel anahtar (token üretemez); doluysa JWT_SECRET kullanılmaz.
+      JWT_ED25519_PUBLIC_KEY: ${JWT_ED25519_PUBLIC_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-dev_only_change_me}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-}
       OCR_SERVICE_URL: ${OCR_SERVICE_URL:-http://ocr:8080}
       OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
       CATEGORY_MIN_CONFIDENCE: ${CATEGORY_MIN_CONFIDENCE:-0.5}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev_internal_token_change_me}
+      AUTH_INTERNAL_URL: ${AUTH_INTERNAL_URL:-http://auth:9090}
+      GIN_MODE: release
     depends_on:
       postgres:
         condition: service_healthy
+      # Oturum dogrulamasi auth'un ic API'sine (GET /internal/sessions/:sid) dayanir; auth hazir olmadan expense 503 verirdi.
+      auth:
+        condition: service_healthy
     ports:
       - "8082:8080"
+    restart: unless-stopped
+    # Kaynak limitleri: tek servis hostu tüketemesin (OCR en ağırı; OCR_MAX_CONCURRENT ile uyumlu)
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks: [internal]
 
 volumes:

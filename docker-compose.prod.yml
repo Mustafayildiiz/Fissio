@@ -1,0 +1,39 @@
+# Yayın katmanı: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# - Caddy 80/443'ü açar (otomatik TLS); auth/expense host portları KAPANIR (yalnız Caddy üzerinden erişilir).
+# - APP_ENV=production: zayıf/varsayılan sırlarla servisler başlamaz (.env.example "Yayın sertleştirmesi").
+# - X-Forwarded-For yalnızca Caddy'den (Docker ağı) kabul edilir: hız sınırı ve oturum IP'si gerçek istemciyi görür.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      FISSIO_DOMAIN: ${FISSIO_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      auth:
+        condition: service_healthy
+      expense:
+        condition: service_healthy
+    networks: [internal]
+
+  auth:
+    ports: !reset []
+    environment:
+      APP_ENV: production
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
+
+  expense:
+    ports: !reset []
+    environment:
+      APP_ENV: production
+
+volumes:
+  caddy_data:
+  caddy_config:

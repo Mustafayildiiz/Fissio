@@ -7,10 +7,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"fissio/expense/internal/receiptparse"
 )
 
 // Kullanicinin kategori duzeltmelerinden ogrenilen kisisel kurallar (expense.category_rules).
-// Kural anahtari normalizeKey ile uretilir; fis/kalem ayristirilirken RuleSet olarak Parse'a girer.
+// Kural anahtari receiptparse.NormalizeKey/MerchantKey ile uretilir; fis/kalem ayristirilirken
+// receiptparse.RuleSet olarak ParseWith'e girer.
+
+// maxRulesPerUser: kullanici basina tutulan en fazla kural (en eskiler silinir).
+const maxRulesPerUser = 2000
 
 type queryer interface {
 	Query(query string, args ...any) (*sql.Rows, error)
@@ -20,8 +26,8 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-func loadRules(q queryer, userID int64) (RuleSet, error) {
-	rs := RuleSet{Merchant: map[string]int{}, Item: map[string]int{}}
+func loadRules(q queryer, userID int64) (receiptparse.RuleSet, error) {
+	rs := receiptparse.RuleSet{Merchant: map[string]int{}, Item: map[string]int{}}
 	rows, err := q.Query(`SELECT kind, pattern, category_id FROM expense.category_rules WHERE user_id = $1`, userID)
 	if err != nil {
 		return rs, err
@@ -63,6 +69,35 @@ func saveRules(db execer, userID int64, updates []ruleUpdate) error {
 		   SELECT id FROM expense.category_rules WHERE user_id = $1 ORDER BY updated_at DESC, id DESC OFFSET $2)`,
 		userID, maxRulesPerUser)
 	return err
+}
+
+// ruleUpdate bir kullanici duzeltmesinden turetilen kural yazimidir.
+type ruleUpdate struct {
+	Kind       string // "merchant" | "item"
+	Pattern    string // receiptparse.NormalizeKey / MerchantKey sonucu
+	CategoryID int
+}
+
+// collectRuleUpdates, kullanicinin onerilen kategoriyi degistirdigi fis/kalemler icin kural uretir.
+// Yalnizca oneri (suggested_category_id) verilmis VE secilenden farkliysa kural yazilir; onaylanan
+// oneriler ve elle (onerisiz) secimler kural uretmez.
+func collectRuleUpdates(in expenseInput) []ruleUpdate {
+	var out []ruleUpdate
+	if in.SuggestedCategoryID > 0 && in.CategoryID > 0 && in.SuggestedCategoryID != in.CategoryID {
+		if k := receiptparse.MerchantKey(in.Merchant); k != "" {
+			out = append(out, ruleUpdate{"merchant", k, in.CategoryID})
+		}
+	}
+	seen := map[string]bool{}
+	for _, it := range in.Items {
+		if it.SuggestedCategoryID > 0 && it.CategoryID > 0 && it.SuggestedCategoryID != it.CategoryID {
+			if k := receiptparse.NormalizeKey(it.Name); k != "" && !seen[k] {
+				seen[k] = true
+				out = append(out, ruleUpdate{"item", k, it.CategoryID})
+			}
+		}
+	}
+	return out
 }
 
 type categoryRuleOut struct {

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -72,6 +74,7 @@ type deleteAccountInput struct {
 }
 
 // deleteAccount KVKK/GDPR: sifre onayiyla hesabi ve tum verilerini (profiller, fisler, gorseller, kurallar, oturumlar) kalici siler.
+// expense verisi expense servisinin internal API'siyle silinir (auth expense semasina SQL atmaz).
 func (h *handler) deleteAccount(c *gin.Context) {
 	var in deleteAccountInput
 	if err := c.ShouldBindJSON(&in); err != nil || in.Password == "" {
@@ -94,45 +97,19 @@ func (h *handler) deleteAccount(c *gin.Context) {
 		return
 	}
 
+	// 1) Hesabi "silinmekte" isaretle ve TUM oturumlari iptal et: yeni yazma/giris olmaz. Bu adim kalicidir; sonraki
+	//    adimlar basarisiz olursa sweepDeletions (dakikada bir) tamamlar.
 	tx, err := h.db.Begin()
 	if err != nil {
 		internalErr(c, err)
 		return
 	}
 	defer tx.Rollback()
-	// expense semasi ayni veritabaninda; henuz olusmamis olabilir (to_regclass ile korunur).
-	// receipt_images, expenses silinince ON DELETE CASCADE ile temizlenir.
-	for _, q := range []struct{ table, stmt string }{
-		{"expense.receipt_images", `DELETE FROM expense.receipt_images WHERE user_id = $1`},
-		{"expense.expenses", `DELETE FROM expense.expenses WHERE user_id = $1`},
-		{"expense.category_rules", `DELETE FROM expense.category_rules WHERE user_id = $1`},
-		{"expense.budgets", `DELETE FROM expense.budgets WHERE user_id = $1`},
-		{"expense.profiles", `DELETE FROM expense.profiles WHERE user_id = $1`},
-	} {
-		var exists bool
-		if err := tx.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, q.table).Scan(&exists); err != nil {
-			internalErr(c, err)
-			return
-		}
-		if !exists {
-			continue
-		}
-		if _, err := tx.Exec(q.stmt, id); err != nil {
-			internalErr(c, err)
-			return
-		}
+	if _, err := tx.Exec(`UPDATE auth.users SET deleting_at = COALESCE(deleting_at, now()) WHERE id = $1`, id); err != nil {
+		internalErr(c, err)
+		return
 	}
-	// sessions silinince refresh_tokens cascade ile gider.
-	for _, stmt := range []string{
-		`DELETE FROM auth.sessions WHERE user_id = $1`,
-		`DELETE FROM auth.users WHERE id = $1`,
-	} {
-		if _, err := tx.Exec(stmt, id); err != nil {
-			internalErr(c, err)
-			return
-		}
-	}
-	if _, err := tx.Exec(`DELETE FROM auth.email_otps WHERE email = $1`, email); err != nil {
+	if _, err := tx.Exec(`UPDATE auth.sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, id); err != nil {
 		internalErr(c, err)
 		return
 	}
@@ -140,5 +117,62 @@ func (h *handler) deleteAccount(c *gin.Context) {
 		internalErr(c, err)
 		return
 	}
+
+	// 2) expense verisini internal API ile sildir, sonra auth satirlarini kaldir.
+	if err := h.finishAccountDeletion(c.Request.Context(), id); err != nil {
+		// Hesap artik kullanilamaz (oturumlar iptal, giris engelli); silme arka planda tamamlanacak.
+		log.Printf("account deletion deferred for user %d: %v", id, err)
+		c.JSON(http.StatusAccepted, gin.H{"status": "deletion_pending"})
+		return
+	}
+	// expense oturum sonucunu kisa sure onbellekler: o pencerede gecen son yazmalarin yetim veri birakmamasi icin
+	// ikinci (en iyi cabayla) temizlik. Kalici cozum degil; hesap zaten silindi.
+	if h.purgeRecheck > 0 && h.purger != nil {
+		time.AfterFunc(h.purgeRecheck, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := h.purger.PurgeUser(ctx, id); err != nil {
+				log.Printf("deletion recheck purge for user %d failed: %v", id, err)
+			}
+		})
+	}
 	c.Status(http.StatusNoContent)
+}
+
+// finishAccountDeletion expense verisini (internal API) ve ardindan kullanicinin auth satirlarini kalici siler.
+// Idempotenttir; expense temizligi basarisiz olursa auth satirlari KORUNUR (silme yeniden denenebilsin) ve hata doner.
+func (h *handler) finishAccountDeletion(ctx context.Context, id int64) error {
+	var email string
+	err := h.db.QueryRow(`SELECT email FROM auth.users WHERE id = $1`, id).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // zaten silinmis
+	}
+	if err != nil {
+		return err
+	}
+	if h.purger == nil {
+		return errors.New("user purger not configured")
+	}
+	if err := h.purger.PurgeUser(ctx, id); err != nil {
+		return err
+	}
+	tx, err := h.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// sessions silinince refresh_tokens cascade ile gider.
+	for _, q := range []struct {
+		stmt string
+		arg  any
+	}{
+		{`DELETE FROM auth.sessions WHERE user_id = $1`, id},
+		{`DELETE FROM auth.users WHERE id = $1`, id},
+		{`DELETE FROM auth.email_otps WHERE email = $1`, email},
+	} {
+		if _, err := tx.Exec(q.stmt, q.arg); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

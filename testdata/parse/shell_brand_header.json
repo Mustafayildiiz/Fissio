@@ -1,0 +1,20 @@
+{
+  "name": "shell_brand_header",
+  "note": "Bilinen marka iceren baslik satiri ilk satira tercih edilir.",
+  "text": "ATATURK CAD.\nSHELL AKARYAKIT\nTARIH 03.10.2026\nKURSUNSUZ 95 1.500,00\nTOPLAM 1.500,00\nKREDI KARTI 1.500,00",
+  "expect": {
+    "merchant": "SHELL AKARYAKIT",
+    "amount": 1500,
+    "date": "2026-10-03",
+    "item_count": 1,
+    "needs_review": false,
+    "discount_total": 0,
+    "items": [
+      {
+        "name": "KURSUNSUZ 95",
+        "amount": 1500
+      }
+    ]
+  },
+  "known_divergence": []
+}

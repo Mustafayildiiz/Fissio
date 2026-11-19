@@ -90,6 +90,9 @@ class RecurringItem {
 
   /// Bugünden [nextDue]'ya kalan gün (0 = bugün).
   int daysUntil(DateTime today) => _day(nextDue).difference(_day(today)).inDays;
+
+  /// Bu ay ödenmedi ve ödeme günü geçti (gecikmiş).
+  bool isOverdue(DateTime today) => !paidThisMonth && daysUntil(today) < 0;
 }
 
 class RecurringProjection {
@@ -129,15 +132,17 @@ DateTime _clampedDate(int y, int m, int day) {
   return DateTime.utc(base.year, base.month, day > n ? n : day);
 }
 
-/// Serinin bir sonraki ödeme tarihi: bu ayın ödeme günü (henüz geçmediyse ve bu ay için fiş girilmediyse),
-/// aksi halde gelecek ayın ödeme günü. Ayın gün sayısını aşan gün (31 Şubat) ayın son gününe çekilir.
+/// Serinin bir sonraki ödeme tarihi: bu ay için fiş girilmediyse bu ayın ödeme günü (GEÇMİŞ olsa bile: ödenmemiş
+/// fatura "gecikmiş" olarak listede ve hatırlatmada kalır), aksi halde gelecek ayın ödeme günü. Ayın gün sayısını
+/// aşan gün (31 Şubat) ayın son gününe çekilir. Go `nextDue` ile aynı (`testdata/recurring_due.json`).
 DateTime nextDueDate(int day, DateTime lastExpenseDate, DateTime today) {
   final t = _day(today);
-  var due = _clampedDate(t.year, t.month, day);
   final paidThisMonth = lastExpenseDate.year == t.year && lastExpenseDate.month == t.month;
-  if (paidThisMonth || due.isBefore(t)) due = _clampedDate(t.year, t.month + 1, day);
-  return due;
+  return paidThisMonth ? _clampedDate(t.year, t.month + 1, day) : _clampedDate(t.year, t.month, day);
 }
+
+/// Son fişten bu kadar takvim ayı sonra seri bitmiş sayılır (Go `recurringStaleMonths`).
+const int kRecurringStaleMonths = 3;
 
 double _r2(double v) => (v * 100).round() / 100;
 
@@ -149,6 +154,8 @@ bool _newer(Expense a, Expense b) {
 RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
   final groups = <String, List<Expense>>{};
   for (final e in expenses) {
+    // GELECEK AYA tarihli fiş (önceden girilmiş) bu ayın gerçekleşmesi/geçmişi sayılmaz (aynı ay içindeki ileri tarih sayılır).
+    if (e.date.year * 12 + e.date.month > today.year * 12 + today.month) continue;
     groups.putIfAbsent('${e.profileUid}#${recurringSeriesKey(e.merchant, e.categoryId)}', () => []).add(e);
   }
   final items = <RecurringItem>[];
@@ -160,6 +167,8 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
       if (_newer(e, latest)) latest = e;
     }
     if (!latest.isRecurring) continue;
+    // Son fişten bu yana > 3 takvim ayı geçtiyse seri bitmiş sayılır (sonsuza dek 'gecikmiş' kalmasın).
+    if (curKey - (latest.date.year * 12 + latest.date.month) > kRecurringStaleMonths) continue;
     // Ay bazlı geçmiş: her ayın en son fişi, en yeni ay önce.
     final byMonth = <int, Expense>{};
     for (final e in g) {
@@ -175,7 +184,12 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
     var minA = expected, maxA = expected;
     var used = months.length;
     if (latest.recurringKind == RecurringKind.variable) {
-      final w = months.take(kRecurringWindow).toList();
+      // "Son 3 TAKVİM ayı" (fişli son 3 ay değil): bu ay girildiyse bu ayla, girilmediyse geçen ayla biter.
+      final hi = paid ? curKey : curKey - 1;
+      final w = [
+        for (final e in months)
+          if (e.date.year * 12 + e.date.month <= hi && e.date.year * 12 + e.date.month > hi - kRecurringWindow) e,
+      ];
       if (w.length >= 2) {
         final sum = w.fold<double>(0, (s, e) => s + e.amount);
         expected = _r2(sum / w.length);
@@ -240,10 +254,10 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
   );
 }
 
-/// Önümüzdeki [days] gün içinde ödemesi gelen seriler (en yakın önce).
+/// Önümüzdeki [days] gün içinde ödemesi gelen seriler + gecikmiş (ödenmemiş, günü geçmiş) seriler; en eski önce.
 List<RecurringItem> upcomingPaymentsOf(List<RecurringItem> items, DateTime today, {int days = 30}) => [
   for (final i in items)
-    if (i.daysUntil(today) >= 0 && i.daysUntil(today) <= days) i,
+    if ((i.daysUntil(today) >= 0 && i.daysUntil(today) <= days) || i.isOverdue(today)) i,
 ];
 
 /// Zamanlanacak tek bir yerel hatırlatıcı.
@@ -264,6 +278,20 @@ List<ReminderPlan> planReminders(List<RecurringItem> items, DateTime now) {
   final out = <ReminderPlan>[];
   for (final i in items) {
     if (!i.remind) continue;
+    if (i.isOverdue(now)) {
+      // Gecikmiş ödeme: bir sonraki 09:00'da tek hatırlatma (gün başına bir kez; yeniden planlama aynı kimliği yer değiştirir).
+      var at = DateTime(now.year, now.month, now.day, kReminderHour);
+      if (!at.isAfter(now)) at = at.add(const Duration(days: 1));
+      out.add(
+        ReminderPlan(
+          id: stableId('reminder|${i.profileUid}|${i.seriesKey}|overdue'),
+          when: at,
+          title: 'Ödeme gecikti: ${i.title}',
+          body: '${fmtDate(i.nextDue)} tarihli ${i.isVariable ? 'yaklaşık ' : ''}${fmtMoney(i.expected)} ödemesi bu ay henüz girilmedi.',
+        ),
+      );
+      continue;
+    }
     for (final before in const [3, 0]) {
       final when = DateTime(i.nextDue.year, i.nextDue.month, i.nextDue.day - before, kReminderHour);
       if (!when.isAfter(now)) continue;

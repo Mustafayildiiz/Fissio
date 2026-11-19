@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // Butce ve tekrarlayan gider uc noktalari: hesap/profil izolasyonu (gercek Postgres; bkz. isolation_pg_test.go).
@@ -147,10 +148,15 @@ func TestPGRecurringFieldsRoundTripAndProjectionIsolation(t *testing.T) {
 			"date": date, "category_id": fatura, "recurring_day": day, "recurring_remind": false,
 		}))
 	}
-	jan := rec("Enerjisa", 300, "2026-01-25", 25, ap.ID)
-	rec("Enerjisa", 400, "2026-02-25", 25, ap.ID) // ayni seri: cift sayilmaz
-	rec("Netflix", 100, "2026-02-03", 31, ap.ID)  // 31. gun
-	rec("Ev kirasi", 5000, "2026-02-01", 1, aHome.ID)
+	// Sunucu "bugun"u gercek saatten alir ve 3+ ay sessiz seriyi bitmis sayar: tarihler bugune gore (2 ve 1 ay once).
+	ago := func(months, day int) string {
+		n := time.Now().UTC()
+		return time.Date(n.Year(), n.Month()-time.Month(months), day, 0, 0, 0, 0, time.UTC).Format(dateLayout)
+	}
+	jan := rec("Enerjisa", 300, ago(2, 25), 25, ap.ID)
+	rec("Enerjisa", 400, ago(1, 25), 25, ap.ID) // ayni seri: cift sayilmaz
+	rec("Netflix", 100, ago(1, 3), 31, ap.ID)   // 31. gun
+	rec("Ev kirasi", 5000, ago(1, 1), 1, aHome.ID)
 
 	if jan.RecurringDay != 25 || jan.RecurringRemind {
 		t.Fatalf("recurring fields must round-trip: %+v", jan)
@@ -198,7 +204,7 @@ func TestPGRecurringFieldsRoundTripAndProjectionIsolation(t *testing.T) {
 	}
 
 	// PUT: isaret kaldirilinca seri biter.
-	body := e.exp("Enerjisa", 400, ap.ID, map[string]any{"date": "2026-02-25", "category_id": fatura, "recurring_day": 0})
+	body := e.exp("Enerjisa", 400, ap.ID, map[string]any{"date": ago(1, 25), "category_id": fatura, "recurring_day": 0})
 	for _, x := range e.list(alice, fmt.Sprintf("?profile_id=%d", ap.ID)) {
 		if x.Merchant == "Enerjisa" && x.Amount == 400 {
 			code, raw := e.as(alice, "PUT", fmt.Sprintf("/expenses/%d", x.ID), body)

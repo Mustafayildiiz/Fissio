@@ -177,7 +177,9 @@ class BudgetsSection extends StatelessWidget {
   }
 }
 
-String daysLeftLabel(int d) => d <= 0
+String daysLeftLabel(int d) => d < 0
+    ? '${-d} gün gecikti'
+    : d == 0
     ? 'Bugün'
     : d == 1
     ? 'Yarın'
@@ -194,7 +196,7 @@ class RecurringTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final days = item.daysUntil(today);
-    final soon = days <= 3;
+    final soon = days <= 3; // gecikmiş (negatif) de dikkat çeker
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: item.lastExpenseId)),

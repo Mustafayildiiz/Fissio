@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:fissio_mobile/receipt_parser/normalize.dart';
 import 'package:fissio_mobile/receipt_parser/parser.dart';
 import 'package:fissio_mobile/receipt_parser/summary.dart';
@@ -54,17 +57,16 @@ ZNO0541 EKUNO:0002
 RG11114742''';
 
 void main() {
-  group('Türkçe glif düzeltme (Go TestFixTurkishGlyphs ile aynı kurallar)', () {
+  group('Türkçe glif düzeltme (testdata/glyphs.json: Go ve Python ile ortak vektörler)', () {
     test(r'$ harf komşuluğunda ş/Ş olur; rakamdan önceki $ fiyat işaretidir', () {
-      expect(fixTurkishGlyphs(r'FI$ NO'), 'FİŞ NO'.replaceAll('İ', 'I'));
-      expect(fixTurkishGlyphs(r'KA$AR'), 'KAŞAR');
-      expect(fixTurkishGlyphs(r'PE$IN'), 'PEŞIN');
-      expect(fixTurkishGlyphs(r'a$k'), 'aşk');
-      expect(fixTurkishGlyphs(r'%08 $3,95'), r'%08 $3,95');
-      expect(fixTurkishGlyphs(r'A.$.'), 'A.Ş.');
-      expect(fixTurkishGlyphs(r'US$ 1,00'), r'US$ 1,00');
-      expect(fixTurkishGlyphs('Merhaba'), 'Merhaba');
-      expect(fixTurkishGlyphs(fixTurkishGlyphs(r'KA$AR')), 'KAŞAR', reason: 'idempotent');
+      final data = jsonDecode(File('../testdata/glyphs.json').readAsStringSync()) as Map<String, dynamic>;
+      final cases = (data['cases'] as List).cast<Map<String, dynamic>>();
+      expect(cases.length, greaterThanOrEqualTo(20));
+      for (final c in cases) {
+        final input = c['in'] as String, out = c['out'] as String;
+        expect(fixTurkishGlyphs(input), out, reason: input);
+        expect(fixTurkishGlyphs(out), out, reason: 'idempotent: $out');
+      }
     });
   });
 
@@ -140,10 +142,10 @@ KREDİ KARTI  1.250,75''';
         expect(n.startsWith('3X') || n.startsWith('2X') || n.contains('%'), isFalse, reason: i.name);
       }
       expect(r.items.where((i) => i.name.startsWith('PAT.CIPSI PATITO')).length, 2);
-      // Çevrimdışı ayrıştırıcı ondalığı düşmüş iki tutarı ("*070", "100") kurtarmaz: 17 yerine 15 kalem ve
-      // toplam uyuşmazlığı bayrağı (kullanıcı formda tamamlar).
-      expect(r.items.length, 15);
-      expect(r.needsReview, isTrue);
+      // Ondalığı düşmüş iki tutar ("*070", "100") toplamla doğrulanarak geri kazanılır (recoverBareAmounts,
+      // Go ile aynı): 17 kalem, uyuşmazlık yok. (Port öncesi Dart 15 kalem + needsReview veriyordu.)
+      expect(r.items.length, 17);
+      expect(r.needsReview, isFalse);
     });
 
     test('gerçek CanBolat fişi: TOP etiketi, KDU satırı kalem değil, yapışık tarih', () {
@@ -164,6 +166,43 @@ KREDİ KARTI  1.250,75''';
       expect(p.categoryNeedsReview, isTrue);
       expect(p.discountTotal, 5);
       expect(p.items.every((i) => i.categoryId == 11 && i.categoryReview), isTrue);
+    });
+
+    test('indirim kalem fiyatlarına zaten yansımış: discount 0, toplam 25 (Go discount_already_in_items)', () {
+      final r = parseReceiptText('MARKET\n12.05.2026\nEKMEK 10,00\nSUT 15,00\nINDIRIM -5,00\nTOPLAM 25,00', now: _now);
+      expect(r.amount, 25);
+      expect(r.discount, 0);
+      expect(r.needsReview, isFalse);
+      expect(r.reconciliation?.reason, 'discount_already_in_items');
+      expect(r.toParsedReceipt().discountTotal, 0);
+    });
+
+    test('1 kuruşluk fark yakalanır (float 0,00999 < 0,01 tuzağı yok)', () {
+      final r = parseReceiptText('MARKET\n12.05.2026\nEKMEK 1.000,00\nSUT 250,75\nTOPLAM 1.250,74', now: _now);
+      expect(r.needsReview, isTrue);
+      expect(r.itemsTotal, 1250.75);
+      expect(r.reconciliation?.diff, 0.01);
+    });
+
+    test('kaymış sütunlu BIM Kirli: toplam = nakit − para üstü (resolveTotal)', () {
+      final fx = jsonDecode(File('../testdata/parse/bim_kirli.json').readAsStringSync()) as Map<String, dynamic>;
+      expect(parseReceiptText(fx['text'] as String, now: _now).amount, 223.65);
+    });
+
+    test('işletme: bilinen marka içeren başlık satırı ilk satıra tercih edilir', () {
+      final r = parseReceiptText('ATATURK CAD.\nSHELL AKARYAKIT\nTOPLAM 1.500,00', now: _now);
+      expect(r.merchant, 'SHELL AKARYAKIT');
+    });
+
+    test('bitişik çift okuma farkı açıklıyorsa silinir; kanıt yoksa yalnızca şüpheli raporlanır', () {
+      final dup = parseReceiptText('MARKET\nEKMEK 5,00\nEKMEK 5,00\nSUT 10,00\nTOPLAM 15,00', now: _now);
+      expect(dup.items.length, 2);
+      expect(dup.reconciliation?.status, 'duplicate_removed');
+      final sus = parseReceiptText('MARKET\nEKMEK 5,00\nSUT 10,00\nPEYNIR 7,00\nTOPLAM 15,00', now: _now);
+      expect(sus.items.length, 3);
+      expect(sus.needsReview, isTrue);
+      expect(sus.reconciliation?.suspectIndex, 2);
+      expect(sus.reconciliation?.reason, 'excess_equals_item');
     });
 
     test('ş düzeltmesi satır bölmede uygulanır', () {

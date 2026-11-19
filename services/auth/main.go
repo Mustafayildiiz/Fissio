@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +15,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "genkey" {
+		priv, pub, err := generateEdKeyPair()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("JWT_ED25519_PRIVATE_KEY=%s  # yalniz auth\nJWT_ED25519_PUBLIC_KEY=%s  # expense\n", priv, pub)
+		return
+	}
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatal(err)
@@ -22,6 +32,11 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	// Havuz siniri: tek serviste kontrolsuz baglanti birikmesi Postgres'in max_connections'ini (varsayilan 100) tuketmesin.
+	db.SetMaxOpenConns(envInt("DB_MAX_OPEN_CONNS", 15))
+	db.SetMaxIdleConns(envInt("DB_MAX_IDLE_CONNS", 5))
+	db.SetConnMaxLifetime(30 * time.Minute)
 
 	waitForDB(db)
 	if err := migrate(db); err != nil {
@@ -33,8 +48,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	h := &handler{db: db, cfg: cfg, mailer: newMailer(cfg.smtp), dummyHash: dummy}
+	h := &handler{
+		db: db, cfg: cfg, mailer: newMailer(cfg.smtp), dummyHash: dummy,
+		purger:       newHTTPPurger(cfg.expenseInternalURL, cfg.internalToken),
+		purgeRecheck: 15 * time.Second,
+	}
 	r := buildRouter(h)
+
+	// Servisler arasi ic API (ayri port, host'a yayinlanmaz): oturum dogrulama (expense -> auth).
+	go func() {
+		log.Fatal(http.ListenAndServe(":"+cfg.internalPort, buildInternalRouter(h)))
+	}()
+	// Yarim kalan hesap silmeleri (expense o an erisilemezdi) arka planda tamamlanir.
+	go h.runDeletionSweeper(context.Background())
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -46,8 +72,10 @@ func main() {
 func buildRouter(h *handler) *gin.Engine {
 	r := gin.Default()
 	// Istemci IP'si dogrudan baglantidan alinir: sahte X-Forwarded-For sinirlari asamaz ve sessions.ip'ye yazilmaz.
-	_ = r.SetTrustedProxies(nil)
-	r.Use(cors())
+	// TRUSTED_PROXIES (virgullu IP/CIDR): ters vekil (Caddy) arkasinda X-Forwarded-For YALNIZ bu adreslerden kabul edilir;
+	// bos = hicbiri (dogrudan baglanti IP'si). Aksi halde hiz siniri tek kovaya (vekil IP'si) duser.
+	_ = r.SetTrustedProxies(trustedProxiesFromEnv(os.Getenv("TRUSTED_PROXIES")))
+	r.Use(corsFor(os.Getenv("CORS_ALLOWED_ORIGINS"), os.Getenv("APP_ENV")))
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := h.db.Ping(); err != nil {
@@ -65,7 +93,7 @@ func buildRouter(h *handler) *gin.Engine {
 		}
 		return newIPLimiter(n, time.Minute).middleware()
 	}
-	authed := authMiddleware(h.cfg.accessSecret, h.sessionAlive)
+	authed := authMiddlewareWith(h.cfg.verifier(), h.sessionAlive)
 
 	g := r.Group("/auth")
 	g.POST("/register", lim(20), h.register)
@@ -128,6 +156,8 @@ UPDATE auth.users SET email_verified_at = created_at;`); err != nil {
 	}
 	if _, err := tx.Exec(`
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
+-- Hesap silme istenmis; expense verisi temizlenip satir kaldirilana dek giris engellenir (bkz. account.go).
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleting_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS auth.email_otps (
 	id           BIGSERIAL PRIMARY KEY,
@@ -169,15 +199,3 @@ CREATE INDEX IF NOT EXISTS idx_refresh_session ON auth.refresh_tokens (session_i
 }
 
 // cors: gelistirme icin tum kokenlere izin verir (web istemcisi). Yayinda kisitlanmali.
-func cors() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
-}

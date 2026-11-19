@@ -20,16 +20,27 @@ class ApiException implements Exception {
 
   /// `resend_cooldown` için yeniden deneme süresi (saniye).
   final int? retryAfter;
+
+  /// `PUT /expenses/:id` 409 `conflict`: sunucudaki güncel fiş (başka cihazda değişmiş).
+  final Expense? current;
   ApiException(
     this.message, {
     this.status,
     this.network = false,
     this.code,
     this.retryAfter,
+    this.current,
   });
+
+  /// Düzenleme, dayandığı sürümden (`base_updated_at`) sonra sunucuda değişmiş bir fişe yapıldı; yazılmadı.
+  bool get conflict => status == 409 && code == 'conflict';
   @override
   String toString() => message;
 }
+
+/// Yayın: tek origin (ters vekil/Caddy, bkz. Caddyfile): `--dart-define=API_BASE=https://api.ornek.com`. Verilirse auth ve expense
+/// aynı tabanı kullanır (`/auth/*` auth'a, gerisi expense'e yönlenir) ve API_HOST/8081/8082 yok sayılır.
+const _apiBase = String.fromEnvironment('API_BASE');
 
 /// Gerçek cihazda: `flutter run --dart-define=API_HOST=192.168.x.x`.
 /// Tanımlı değilse Android emülatöründe host makine 10.0.2.2, diğerlerinde localhost.
@@ -121,8 +132,8 @@ class ApiClient {
   }) : _client = client ?? http.Client(),
        _device = device ?? PluginDeviceInfo(),
        _clock = clock ?? DateTime.now,
-       _auth = authBase ?? 'http://$_host:8081',
-       _expense = expenseBase ?? 'http://$_host:8082';
+       _auth = authBase ?? (_apiBase.isNotEmpty ? _apiBase : 'http://$_host:8081'),
+       _expense = expenseBase ?? (_apiBase.isNotEmpty ? _apiBase : 'http://$_host:8082');
 
   final http.Client _client;
   final DeviceInfoProvider _device;
@@ -234,15 +245,25 @@ class ApiClient {
     final e = _errorBody(r);
     var msg = 'Beklenmeyen hata (${r.statusCode})';
     String? code;
+    Expense? current;
     if (e != null) {
       code = e['code'] as String?;
       if (e['error'] is String) msg = _translate(e['error'] as String, code);
+      final cur = e['current'];
+      if (code == 'conflict' && cur is Map<String, dynamic>) {
+        try {
+          current = Expense.fromJson(cur);
+        } catch (_) {
+          // bozuk gövde: çakışma yine bildirilir, güncel kopya olmadan
+        }
+      }
     }
     return ApiException(
       msg,
       status: r.statusCode,
       code: code,
       retryAfter: (e?['retry_after'] as num?)?.toInt(),
+      current: current,
     );
   }
 
@@ -312,6 +333,7 @@ class ApiClient {
       'invalid_refresh': 'Oturum süresi doldu, tekrar giriş yapın.',
       'auth_unavailable': 'Sunucu hazırlanıyor, birkaç saniye sonra tekrar deneyin.',
       'last_profile': 'Son profil silinemez.',
+      'conflict': 'Fiş başka bir cihazda değiştirilmiş.',
     };
     if (code != null && byCode.containsKey(code)) return byCode[code]!;
     const map = {
@@ -469,19 +491,29 @@ class ApiClient {
   Future<void> deleteCategoryRule(int id) => _send('DELETE', _expense, '/category-rules/$id');
 
   /// Hesabın tüm fişleri (profil filtresiz): sunucu sayfa başına en çok 200 döner, hepsi çekilir.
-  Future<List<Expense>> expenses() async {
+  Future<List<Expense>> expenses() => expensesSince(null);
+
+  /// [since] (sunucunun `updated_at` biçiminde, RFC3339) verilirse yalnızca o andan SONRA eklenen/değişen fişler
+  /// (artımlı senkron; silinenler için [expenseIds]); null ise tümü. Sayfa başına 200.
+  Future<List<Expense>> expensesSince(String? since) async {
     final all = <Expense>[];
     for (var offset = 0;; offset += 200) {
       final j = await _send(
         'GET',
         _expense,
         '/expenses',
-        query: {'limit': '200', 'offset': '$offset'},
+        query: {'limit': '200', 'offset': '$offset', 'since': ?since},
       ) as List;
       all.addAll(j.map((e) => Expense.fromJson(e)));
       if (j.length < 200) break;
     }
     return all;
+  }
+
+  /// Hesabın sunucudaki TÜM fiş kimlikleri (ucuz): artımlı senkronda silinen fişleri bulmak için.
+  Future<List<int>> expenseIds() async {
+    final j = await _send('GET', _expense, '/expenses/ids') as Map<String, dynamic>;
+    return ((j['ids'] as List?) ?? const []).map((e) => (e as num).toInt()).toList();
   }
 
   Future<Expense> expense(int id) async =>
@@ -575,6 +607,13 @@ class ApiClient {
   /// Tek çağrı: fiş sayfaları (uzun fişler için birden çok fotoğraf) multipart (binary) olarak JWT'li
   /// expense servisine gider; expense her sayfayı OCR'lar, metinleri birleştirir ve BİR kez ayrıştırır.
   /// Görsel yalnızca işlenmek üzere gönderilir, sunucuda saklanmaz.
+  /// Cihazda okunmuş metni sunucu ayrıştırıcısına (kalemler, toplam mutabakatı, kategori kuralları) gönderir.
+  /// Yalnızca bulut senkronu AÇIK ve çevrimiçiyken çağrılır (görsel gönderilmez, yalnızca metin).
+  Future<ParsedReceipt> parseReceiptText(String text) async {
+    final j = await _send('POST', _expense, '/receipts/parse', body: {'text': text}) as Map<String, dynamic>;
+    return ParsedReceipt.fromJson(j);
+  }
+
   Future<({OcrResult ocr, ParsedReceipt parsed})> scanReceipt(
     List<Uint8List> pages, {
     String engine = 'paddleocr',
@@ -594,8 +633,10 @@ class ApiClient {
       },
       timeout: Duration(seconds: secs),
     ) as Map<String, dynamic>;
+    final ocr = OcrResult.fromJson(j['ocr'] as Map<String, dynamic>);
+    final failed = ((j['failed_pages'] as List?) ?? const []).map((e) => (e as num).toInt()).toList();
     return (
-      ocr: OcrResult.fromJson(j['ocr'] as Map<String, dynamic>),
+      ocr: failed.isEmpty ? ocr : ocr.withFailedPages(failed),
       parsed: ParsedReceipt.fromJson(j['parsed'] as Map<String, dynamic>),
     );
   }

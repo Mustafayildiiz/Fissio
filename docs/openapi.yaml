@@ -3,8 +3,13 @@ info:
   title: Fissio API
   version: 0.1.0
   description: |
-    Fissio mikroservis API sözleşmesi. Üç servis ayrı portlardan yayın yapar:
-    auth (:8081), expense (:8082), ocr (:8083).
+    Fissio mikroservis API sözleşmesi. İstemciye iki servis açıktır: auth (geliştirmede :8081) ve expense
+    (geliştirmede :8082); yayında ikisi de Caddy arkasında tek origin'dedir (`/auth/*` → auth, geri kalanı → expense).
+    ocr servisi kimlik doğrulaması içermez; host'a port açılmaz, yalnızca Docker iç ağından
+    (expense -> `http://ocr:8080`) erişilir. İstemci taramayı expense `POST /receipts/scan` ile yapar.
+    İç API'ler (auth `GET /internal/sessions/:sid`, expense `DELETE /internal/users/:id`) ayrı portta (`INTERNAL_PORT`,
+    host'a yayınlanmaz) `X-Internal-Token` ile korunur ve bu sözleşmenin kapsamı dışındadır.
+    `GET /health` her serviste vardır (`{service, status, time}`).
     Kimlik doğrulama: `Authorization: Bearer <access_token>`. Access token kısa ömürlüdür (15 dakika);
     süresi dolunca `POST /auth/refresh` ile (tek kullanımlık, rotasyonlu) refresh token'dan yenilenir.
     Oturumu iptal edilen (çıkış, uzaktan çıkış, şifre sıfırlama, hesap silme) token'lar süresi dolmadan
@@ -16,8 +21,8 @@ servers:
     description: auth
   - url: http://localhost:8082
     description: expense
-  - url: http://localhost:8083
-    description: ocr
+  - url: http://ocr:8080
+    description: ocr (yalnızca Docker iç ağı; host'a yayınlanmaz)
 components:
   securitySchemes:
     bearer:
@@ -29,6 +34,12 @@ components:
       type: object
       properties:
         error: { type: string }
+        code:
+          type: string
+          description: >-
+            Makine okunur kod: unauthorized, session_revoked (401); auth_unavailable (503, expense auth'a ulaşamıyor,
+            `Retry-After`); internal (500); conflict (409, `PUT /expenses/{id}` eşzamanlılık); scan_busy | scan_rate (429,
+            tarama sınırı, `Retry-After`); ocr_unavailable (502, tüm sayfalar okunamadı). Bazı uçlar ek koda sahiptir.
     Credentials:
       type: object
       required: [email, password]
@@ -197,14 +208,20 @@ components:
         remind: { type: boolean }
         last_expense_id: { type: integer, format: int64 }
         last_date: { type: string, format: date }
-        next_due: { type: string, format: date, description: Bir sonraki ödeme tarihi }
+        next_due:
+          type: string
+          format: date
+          description: >-
+            Bir sonraki ödeme tarihi. Bu ay serinin fişi girilmediyse bu ayın ödeme günüdür — günü geçmiş olsa bile
+            (`overdue=true`); girildiyse gelecek ayın günü.
+        overdue: { type: boolean, description: Bu ay ödenmedi ve ödeme günü geçti (gecikmiş). }
         kind: { type: string, enum: [fixed, variable] }
         estimate: { type: number, description: Kullanıcının tahmini tutarı (değişken fatura; 0 = yok) }
         expected_amount:
           type: number
           description: >-
             Bir sonraki (ya da bu ayki ödenmemiş) kalem için beklenen tutar. Sabit giderde son fiş tutarı; değişken
-            faturada son 3 AYLIK fiş tutarının hareketli ortalaması (geçmiş 2 aydan azsa tahmin, o da yoksa son tutar).
+            faturada son 3 TAKVİM ayının (bu ay girildiyse bu ayla, girilmediyse geçen ayla biten) hareketli ortalaması (pencerede 2 aydan azı varsa tahmin, o da yoksa son tutar). Gelecek aya tarihli fişler yok sayılır; son fişten 3+ takvim ayı geçen seri bitmiş sayılır.
         min_amount: { type: number, description: Tahmini aralığın alt sınırı (sabit giderde expected_amount) }
         max_amount: { type: number, description: Tahmini aralığın üst sınırı (sabit giderde expected_amount) }
         history_count: { type: integer, description: Hareketli ortalamaya giren ay sayısı }
@@ -226,6 +243,12 @@ components:
               type: array
               description: Fişe bağlı fotoğraf kimlikleri (sıralı); yoksa [].
               items: { type: integer, format: int64 }
+            updated_at:
+              type: string
+              format: date-time
+              description: >-
+                Son değişiklik (RFC3339Nano, UTC, µs). Fiş verisi her PUT'ta ilerler; fotoğraf yükleme/silme değiştirmez.
+                `PUT` için `base_updated_at` ve delta listeleme (`since`) bu değere dayanır.
     CategoryRule:
       type: object
       properties:
@@ -348,10 +371,28 @@ components:
                   type: array
                   items: { type: number }
         confidence: { type: number }
-        engine: { type: string, enum: [paddleocr, custom] }
+        engine: { $ref: '#/components/schemas/EngineName' }
         model_version: { type: string }
         elapsed_ms: { type: number }
         is_empty: { type: boolean }
+        page_count: { type: integer, description: '`/receipts/scan`: taranan sayfa sayısı' }
+        page_texts:
+          type: array
+          description: >-
+            `/receipts/scan`: sayfa sırasına göre ham metinler (okunamayan sayfa ""). İstemci yalnız başarısız
+            sayfaları yeniden tarayıp metinleri sırayla birleştirebilsin diye.
+          items: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: >-
+            Motor bilgisi (ilk okunan sayfanın): lang, line_count, block_count, `rec_*` (tanıma modeli/sözlüğü ve sözlükte
+            olmayan Türkçe harfler).
+    EngineName:
+      type: string
+      description: >-
+        OCR motoru. Kanonik: `paddleocr`, `custom`. Takma adlar (büyük/küçük harf duyarsız, Python ve Go aynı kümeyi kabul
+        eder): paddle, ppocr, pp-ocrv4, pp-ocrv4-mobile → paddleocr; custom_ocr, inhouse, fissio_custom → custom.
     ReportSummary:
       type: object
       properties:
@@ -371,6 +412,22 @@ components:
               count: { type: integer }
               percent: { type: number }
 paths:
+  /health:
+    get:
+      tags: [auth, expense, ocr]
+      summary: Sağlık denetimi (her serviste)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { type: string }
+                  status: { type: string, example: ok }
+                  time: { type: string, format: date-time }
+        '503': { description: Bağımlılık (veritabanı / OCR motoru) hazır değil }
   /auth/register:
     post:
       tags: [auth]
@@ -818,12 +875,14 @@ paths:
     post:
       tags: [expense]
       summary: Görsel, OCR ve ayrıştırma
-      description: Görsel yalnızca bellekte işlenir, saklanmaz.
+      description: >-
+        Görsel yalnızca bellekte işlenir, saklanmaz. Sayfalar en çok 2 paralellikle okunur (sayfa başı 30 sn + 1 yeniden
+        deneme, toplam 90 sn); sayfa sırası korunur.
       security: [{ bearer: [] }]
       parameters:
         - name: engine
           in: query
-          schema: { type: string, enum: [paddleocr, custom] }
+          schema: { $ref: '#/components/schemas/EngineName' }
       requestBody:
         required: true
         content:
@@ -837,7 +896,7 @@ paths:
                   description: Fiş sayfaları (uzun fişler için birden çok fotoğraf, sırayla; en fazla 6 sayfa, her biri en fazla 5 MB, toplam en fazla 30 MB). Sayfa metinleri birleştirilip tek fiş olarak ayrıştırılır.
                   maxItems: 6
                   items: { type: string, format: binary }
-                engine: { type: string, enum: [paddleocr, custom] }
+                engine: { $ref: '#/components/schemas/EngineName' }
       responses:
         '200':
           description: OCR sonucu ve ayrıştırılmış fiş (fiş + kalem kategorileri dahil)
@@ -848,9 +907,18 @@ paths:
                 properties:
                   ocr: { $ref: '#/components/schemas/OcrResult' }
                   parsed: { $ref: '#/components/schemas/ParsedReceipt' }
-        '400': { description: Dosya yok, boş veya 15 MB'tan büyük }
+                  failed_pages:
+                    type: array
+                    description: >-
+                      Kısmi sonuç: okunamayan sayfaların 1 tabanlı numaraları (yalnızca bazı sayfalar başarısızsa; `parsed.needs_review`
+                      true olur). Hepsi başarısızsa 502 döner.
+                    items: { type: integer }
+        '400': { description: 'Dosya yok, boş, sayfa başına 5 MB (toplam 30 MB) ya da 6 sayfa sınırı aşıldı, ya da görsel geçersiz' }
         '401': { description: Token geçersiz }
-        '502': { description: OCR servisi yanıt vermedi }
+        '413': { description: İstek gövdesi çok büyük }
+        '429': { description: 'Kullanıcı başına en çok 2 eşzamanlı ve dakikada 30 tarama (`code`: scan_busy | scan_rate, `Retry-After`)' }
+        '502': { description: 'Hiçbir sayfa okunamadı (`code: ocr_unavailable`; iç adresler/ayrıntı gövdede yok)' }
+        '503': { description: 'Oturum doğrulaması yapılamadı (`code: auth_unavailable`, `Retry-After`)' }
   /expenses:
     get:
       tags: [expense]
@@ -862,6 +930,7 @@ paths:
         - { name: to, in: query, schema: { type: string, format: date } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: since, in: query, description: 'Delta: yalnızca `updated_at` bu zamandan SONRA olan fişler (RFC3339). Silinenleri bildirmez; silmeler için `GET /expenses/ids`.', schema: { type: string, format: date-time } }
       responses:
         '200':
           description: OK
@@ -887,6 +956,22 @@ paths:
               schema: { $ref: '#/components/schemas/Expense' }
         '200': { description: Aynı client_uid ile fiş zaten kayıtlı; mevcut kayıt döner (mükerrer oluşmaz) }
         '404': { description: profile_id hesaba ait değil }
+  /expenses/ids:
+    get:
+      tags: [expense]
+      summary: Hesabın tüm fiş kimlikleri (silinenleri tespit için delta eşitleme)
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ids:
+                    type: array
+                    items: { type: integer, format: int64 }
   /expenses/{id}/images:
     parameters:
       - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -949,10 +1034,30 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ExpenseInput' }
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ExpenseInput'
+                - type: object
+                  properties:
+                    base_updated_at:
+                      type: string
+                      format: date-time
+                      description: >-
+                        İsteğe bağlı iyimser eşzamanlılık: istemcinin düzenlemeye başladığı `updated_at`. Sunucudaki kayıt bundan
+                        yeniyse hiçbir şey yazılmaz ve 409 döner. Yoksa son yazan kazanır. Bozuk biçim 400.
       responses:
         '200': { description: Güncellendi }
         '404': { description: Bulunamadı }
+        '409':
+          description: 'Kayıt başka yerde değişti (`code: conflict`); gövdede `current` = sunucudaki güncel fiş'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, example: conflict }
+                  current: { $ref: '#/components/schemas/Expense' }
     delete:
       tags: [expense]
       security: [{ bearer: [] }]
@@ -978,11 +1083,11 @@ paths:
     post:
       tags: [ocr]
       summary: Görselden metin çıkar
-      description: Base64 JSON veya multipart. Görsel diske yazılmaz.
+      description: Base64 JSON (`image_base64` en çok 15 MB görsel). Görsel diske yazılmaz. Multipart için `/ocr/extract/upload`.
       parameters:
         - name: engine
           in: query
-          schema: { type: string, enum: [paddleocr, custom] }
+          schema: { $ref: '#/components/schemas/EngineName' }
         - name: X-OCR-Engine
           in: header
           schema: { type: string }
@@ -1001,3 +1106,56 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OcrResult' }
+  /ocr/engines:
+    get:
+      tags: [ocr]
+      summary: Kayıtlı OCR motorları ve varsayılan
+      responses:
+        '200': { description: OK }
+  /ocr/extract/upload:
+    post:
+      tags: [ocr]
+      summary: Görselden metin çıkar (multipart; expense'in kullandığı uç)
+      description: Tek dosya, en fazla 15 MB ve `OCR_MAX_IMAGE_PIXELS` (25 MP); `Content-Length` ön kontrolüyle 413.
+      parameters:
+        - name: engine
+          in: query
+          schema: { $ref: '#/components/schemas/EngineName' }
+        - name: X-OCR-Engine
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                engine: { $ref: '#/components/schemas/EngineName' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OcrResult' }
+        '400': { description: Görsel boş/geçersiz ya da piksel sınırı aşıldı }
+        '413': { description: İstek veya dosya çok büyük }
+  /ocr/parse:
+    post:
+      tags: [ocr]
+      summary: Görselden metin çıkar ve (OCR servisinin yerleşik basit ayrıştırıcısıyla) alanlara ayır
+      description: Üretimde kullanılmaz; fiş ayrıştırma expense `POST /receipts/scan` / `POST /receipts/parse` üzerindedir.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: OK }
+        '413': { description: İstek veya dosya çok büyük }

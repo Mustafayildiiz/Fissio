@@ -1,2 +1,6 @@
 Dockerfile
-
+.dockerignore
+*.exe
+*_test.go
+.env*
+.git

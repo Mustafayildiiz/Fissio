@@ -1,0 +1,183 @@
+{
+ "cases": [
+  {
+   "name": "calendar_window_not_last_three_receipts",
+   "today": "2026-05-15",
+   "rows": [
+    {
+     "merchant": "CK Elektrik",
+     "category_id": 7,
+     "amount": 100,
+     "date": "2026-01-20",
+     "day": 20,
+     "kind": "variable",
+     "estimate": 0
+    },
+    {
+     "merchant": "CK Elektrik",
+     "category_id": 7,
+     "amount": 500,
+     "date": "2026-03-20",
+     "day": 20,
+     "kind": "variable",
+     "estimate": 0
+    },
+    {
+     "merchant": "CK Elektrik",
+     "category_id": 7,
+     "amount": 700,
+     "date": "2026-04-20",
+     "day": 20,
+     "kind": "variable",
+     "estimate": 0
+    }
+   ],
+   "expect": {
+    "monthly_total": 600,
+    "series": [
+     {
+      "merchant": "CK Elektrik",
+      "expected": 600,
+      "min": 500,
+      "max": 700,
+      "history": 2,
+      "paid": false,
+      "overdue": false,
+      "next_due": "2026-05-20",
+      "amount": 700
+     }
+    ]
+   }
+  },
+  {
+   "name": "next_month_receipt_is_ignored",
+   "today": "2026-05-15",
+   "rows": [
+    {
+     "merchant": "Ev sahibi",
+     "category_id": 8,
+     "amount": 1000,
+     "date": "2026-04-01",
+     "day": 1,
+     "kind": "fixed",
+     "estimate": 0
+    },
+    {
+     "merchant": "Ev sahibi",
+     "category_id": 8,
+     "amount": 1200,
+     "date": "2026-06-01",
+     "day": 1,
+     "kind": "fixed",
+     "estimate": 0
+    }
+   ],
+   "expect": {
+    "monthly_total": 1000,
+    "series": [
+     {
+      "merchant": "Ev sahibi",
+      "expected": 1000,
+      "min": 1000,
+      "max": 1000,
+      "history": 1,
+      "paid": false,
+      "overdue": true,
+      "next_due": "2026-05-01",
+      "amount": 1000
+     }
+    ]
+   }
+  },
+  {
+   "name": "series_ends_after_three_silent_months",
+   "today": "2026-05-15",
+   "rows": [
+    {
+     "merchant": "Eski abonelik",
+     "category_id": 9,
+     "amount": 50,
+     "date": "2026-01-05",
+     "day": 5,
+     "kind": "fixed",
+     "estimate": 0
+    },
+    {
+     "merchant": "Yakin abonelik",
+     "category_id": 9,
+     "amount": 60,
+     "date": "2026-02-05",
+     "day": 5,
+     "kind": "fixed",
+     "estimate": 0
+    }
+   ],
+   "expect": {
+    "monthly_total": 60,
+    "series": [
+     {
+      "merchant": "Yakin abonelik",
+      "expected": 60,
+      "min": 60,
+      "max": 60,
+      "history": 1,
+      "paid": false,
+      "overdue": true,
+      "next_due": "2026-05-05",
+      "amount": 60
+     }
+    ]
+   }
+  },
+  {
+   "name": "paid_this_month_window_ends_current_month",
+   "today": "2026-05-15",
+   "rows": [
+    {
+     "merchant": "Su",
+     "category_id": 7,
+     "amount": 200,
+     "date": "2026-03-10",
+     "day": 10,
+     "kind": "variable",
+     "estimate": 0
+    },
+    {
+     "merchant": "Su",
+     "category_id": 7,
+     "amount": 300,
+     "date": "2026-04-10",
+     "day": 10,
+     "kind": "variable",
+     "estimate": 0
+    },
+    {
+     "merchant": "Su",
+     "category_id": 7,
+     "amount": 400,
+     "date": "2026-05-10",
+     "day": 10,
+     "kind": "variable",
+     "estimate": 0
+    }
+   ],
+   "expect": {
+    "monthly_total": 400,
+    "series": [
+     {
+      "merchant": "Su",
+      "expected": 300,
+      "min": 200,
+      "max": 400,
+      "history": 3,
+      "paid": true,
+      "overdue": false,
+      "next_due": "2026-06-10",
+      "amount": 400
+     }
+    ]
+   }
+  }
+ ],
+ "description": "Tekrarlayan gider serileri: takvim ayi penceresi, gelecek aya tarihli fis yok sayilir, 3 ay sessiz seri biter. Referans: Go buildRecurring; Dart buildRecurring ayni sonucu vermeli."
+}

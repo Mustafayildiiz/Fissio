@@ -1,0 +1,61 @@
+{
+ "cases": [
+  {
+   "name": "left_cropped_overlap",
+   "pages": [
+    "BIM\nSUT 1,00\nETI KARAM GURME 50 G 1,75\nSUT AROMALI 1,00",
+    "RAM GURME 50 G 1,75\nAROMALI 1,00\nKEK 0,70\nTOPLAM 4,45"
+   ],
+   "out": "BIM\nSUT 1,00\nETI KARAM GURME 50 G 1,75\nSUT AROMALI 1,00\nKEK 0,70\nTOPLAM 4,45"
+  },
+  {
+   "name": "two_line_exact_seam_removed",
+   "pages": [
+    "MARKET\nEKMEK 5,00\nSUT 12,50\nPEYNIR 30,00",
+    "SUT 12,50\nPEYNIR 30,00\nCAY 20,00\nTOPLAM 67,50"
+   ],
+   "out": "MARKET\nEKMEK 5,00\nSUT 12,50\nPEYNIR 30,00\nCAY 20,00\nTOPLAM 67,50"
+  },
+  {
+   "name": "single_line_overlap_kept",
+   "pages": [
+    "BIM\nPAT.CIPSI PATITO 3,25",
+    "PAT.CIPSI PATITO 3,25\nTOPLAM 6,50"
+   ],
+   "out": "BIM\nPAT.CIPSI PATITO 3,25\nPAT.CIPSI PATITO 3,25\nTOPLAM 6,50"
+  },
+  {
+   "name": "ocr_noise_in_seam",
+   "pages": [
+    "A\nAR0MALI SUT 1,00\nKEK 0,70\nCAY 2,00",
+    "AROMALI SUT 1,00\nKEK 0,70\nCAY 2,00\nTOPLAM 3,70"
+   ],
+   "out": "A\nAR0MALI SUT 1,00\nKEK 0,70\nCAY 2,00\nTOPLAM 3,70"
+  },
+  {
+   "name": "different_prices_not_merged",
+   "pages": [
+    "X\nSUT 1,00\nKEK 2,00",
+    "SUT 1,50\nKEK 2,50\nTOPLAM 4,00"
+   ],
+   "out": "X\nSUT 1,00\nKEK 2,00\nSUT 1,50\nKEK 2,50\nTOPLAM 4,00"
+  },
+  {
+   "name": "no_overlap_and_empty_pages",
+   "pages": [
+    "A 1,00\nB 2,00",
+    "",
+    "C 3,00\nTOPLAM 6,00"
+   ],
+   "out": "A 1,00\nB 2,00\nC 3,00\nTOPLAM 6,00"
+  },
+  {
+   "name": "single_page",
+   "pages": [
+    "A 1,00\nTOPLAM 1,00"
+   ],
+   "out": "A 1,00\nTOPLAM 1,00"
+  }
+ ],
+ "description": "mergePageTexts (cok sayfali fis dikisi). Referans: Go services/expense/merge.go; Dart receipt_parser/merge.dart ayni ciktiyi uretmeli."
+}

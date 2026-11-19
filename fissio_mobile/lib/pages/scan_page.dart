@@ -129,11 +129,26 @@ class _ScanPageState extends State<ScanPage> {
     if (_busy || _session.isEmpty) return;
     setState(() => _busy = true);
     try {
-      final res = await appState.scanAndParseReceipt(
+      var res = await appState.scanAndParseReceipt(
         _session.pages,
         engine: themeController.ocrEngine,
       );
       if (!mounted) return;
+      // Kısmi sonuç: bazı sayfalar okunamadı. Yalnız onları yeniden tara (en fazla 2 kez) ya da eksik haliyle devam et.
+      for (var attempt = 0; attempt < 2 && res.ocr.failedPages.isNotEmpty; attempt++) {
+        final pagesText = res.ocr.failedPages.join(', ');
+        final retry = await showConfirmDialog(
+          context,
+          title: 'Bazı sayfalar okunamadı',
+          message: '$pagesText. sayfa okunamadı. Yalnızca bu sayfaları yeniden taramak ister misiniz? '
+              'Aksi halde fiş eksik sayfalarla açılır; tutarları kontrol edin.',
+          confirmLabel: 'Yeniden tara',
+          cancelLabel: 'Eksik haliyle devam et',
+        );
+        if (!retry || !mounted) break;
+        res = await appState.rescanFailedPages(res, _session.pages, engine: themeController.ocrEngine);
+        if (!mounted) return;
+      }
       if (res.ocr.isEmpty || res.parsed.needsManual) {
         await _showUnreadableModal();
         return;

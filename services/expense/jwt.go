@@ -1,9 +1,11 @@
 package main
 
 import (
-	"database/sql"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,7 +13,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lib/pq"
 )
 
 // accessClaims auth servisinin urettigi kisa omurlu access token'dir (auth/jwt.go ile ayni bicim).
@@ -22,14 +23,17 @@ type accessClaims struct {
 	jwt.RegisteredClaims
 }
 
-// errAuthUnavailable auth.sessions henuz yok (auth servisi migrate etmedi) veya okunamiyor.
+// errAuthUnavailable auth servisine ulasilamiyor (henuz acilmadi, ag hatasi, 5xx) veya yaniti anlasilamiyor.
 var errAuthUnavailable = errors.New("auth sessions unavailable")
 
-// sessionChecker oturumun iptal edilmedigini ayni Postgres'teki auth.sessions'tan dogrular.
-// Sonuc kisa sure (ttl) onbelleklenir; ttl=0 onbellegi kapatir (testler).
+// sessionChecker oturumun iptal edilmedigini auth servisinin ic (internal) API'sinden dogrular:
+// GET {AUTH_INTERNAL_URL}/internal/sessions/:sid. Auth semasina dogrudan SQL ATILMAZ. Sonuc kisa sure (ttl)
+// onbelleklenir; ttl=0 onbellegi kapatir (testler).
 type sessionChecker struct {
-	db  *sql.DB
-	ttl time.Duration
+	baseURL string
+	token   string
+	client  *http.Client
+	ttl     time.Duration
 
 	mu    sync.Mutex
 	cache map[string]cachedSession
@@ -40,36 +44,63 @@ type cachedSession struct {
 	until time.Time
 }
 
-func newSessionChecker(db *sql.DB, ttl time.Duration) *sessionChecker {
-	return &sessionChecker{db: db, ttl: ttl, cache: map[string]cachedSession{}}
+func newSessionChecker(baseURL, token string, ttl time.Duration) *sessionChecker {
+	return &sessionChecker{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
+		client:  &http.Client{Timeout: 3 * time.Second},
+		ttl:     ttl,
+		cache:   map[string]cachedSession{},
+	}
 }
 
-func (s *sessionChecker) alive(sid string) (bool, error) {
+// sessionInfo auth'un GET /internal/sessions/:sid yaniti.
+type sessionInfo struct {
+	Alive  bool  `json:"alive"`
+	UserID int64 `json:"user_id"`
+}
+
+// alive oturumun (sid) hala acik VE token'daki kullaniciya (userID) ait oldugunu dogrular.
+func (s *sessionChecker) alive(sid string, userID int64) (bool, error) {
+	key := sid + "|" + strconv.FormatInt(userID, 10)
 	if s.ttl > 0 {
 		s.mu.Lock()
-		if v, ok := s.cache[sid]; ok && time.Now().Before(v.until) {
+		if v, ok := s.cache[key]; ok && time.Now().Before(v.until) {
 			s.mu.Unlock()
 			return v.ok, nil
 		}
 		s.mu.Unlock()
 	}
-	var ok bool
-	err := s.db.QueryRow(
-		`SELECT EXISTS (SELECT 1 FROM auth.sessions WHERE id = $1::uuid AND revoked_at IS NULL)`, sid).Scan(&ok)
+	req, err := http.NewRequest(http.MethodGet, s.baseURL+"/internal/sessions/"+url.PathEscape(sid), nil)
 	if err != nil {
-		var pqErr *pq.Error
-		// 42P01 undefined_table / 3F000 invalid_schema_name: auth servisi henuz sema olusturmadi.
-		if errors.As(err, &pqErr) && (pqErr.Code == "42P01" || pqErr.Code == "3F000") {
+		return false, errAuthUnavailable
+	}
+	req.Header.Set(internalTokenHeader, s.token)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return false, errAuthUnavailable
+	}
+	defer resp.Body.Close()
+	var ok bool
+	switch {
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest:
+		ok = false // bilinmeyen / bicimi bozuk oturum
+	case resp.StatusCode == http.StatusOK:
+		var info sessionInfo
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&info); err != nil {
 			return false, errAuthUnavailable
 		}
-		return false, err
+		ok = info.Alive && info.UserID == userID
+	default:
+		// 401 (yanlis INTERNAL_TOKEN), 5xx...: oturum "iptal" degil, dogrulama yapilamiyor.
+		return false, errAuthUnavailable
 	}
 	if s.ttl > 0 {
 		s.mu.Lock()
 		if len(s.cache) > 5000 {
 			s.cache = map[string]cachedSession{}
 		}
-		s.cache[sid] = cachedSession{ok: ok, until: time.Now().Add(s.ttl)}
+		s.cache[key] = cachedSession{ok: ok, until: time.Now().Add(s.ttl)}
 		s.mu.Unlock()
 	}
 	return ok, nil
@@ -77,7 +108,12 @@ func (s *sessionChecker) alive(sid string) (bool, error) {
 
 // authMiddleware Bearer access token dogrular ve "userID" / "sid" degerlerini context'e koyar (FR-1.4).
 // alive nil degilse oturumun iptal edilmedigi de kontrol edilir.
-func authMiddleware(secret []byte, alive func(sid string) (bool, error)) gin.HandlerFunc {
+func authMiddleware(secret []byte, alive func(sid string, userID int64) (bool, error)) gin.HandlerFunc {
+	return authMiddlewareWith(hmacVerifier(secret), alive)
+}
+
+// authMiddlewareWith authMiddleware'in dogrulayici (HS256 ya da EdDSA) alan halidir.
+func authMiddlewareWith(v accessVerifier, alive func(sid string, userID int64) (bool, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
@@ -86,8 +122,8 @@ func authMiddleware(secret []byte, alive func(sid string) (bool, error)) gin.Han
 		}
 		claims := &accessClaims{}
 		tok, err := jwt.ParseWithClaims(strings.TrimPrefix(h, "Bearer "), claims,
-			func(t *jwt.Token) (any, error) { return secret, nil },
-			jwt.WithValidMethods([]string{"HS256"}))
+			v.keyfunc,
+			jwt.WithValidMethods([]string{v.method()}))
 		if err != nil || !tok.Valid || claims.Typ != "access" || claims.SID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token", "code": "unauthorized"})
 			return
@@ -98,14 +134,14 @@ func authMiddleware(secret []byte, alive func(sid string) (bool, error)) gin.Han
 			return
 		}
 		if alive != nil {
-			ok, err := alive(claims.SID)
+			ok, err := alive(claims.SID, id)
 			switch {
 			case errors.Is(err, errAuthUnavailable):
 				c.Header("Retry-After", "5")
 				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "auth unavailable, retry shortly", "code": "auth_unavailable"})
 				return
 			case err != nil:
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": "internal"})
 				return
 			case !ok:
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session revoked", "code": "session_revoked"})

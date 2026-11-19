@@ -1,5 +1,8 @@
 import 'dart:typed_data';
 
+/// Sunucudaki sabit sınıflandırmanın "Diğer" kategorisi (kategori bulunamayınca / cihaz taramasında varsayılan).
+const String kOtherCategory = 'Diğer';
+
 String _isoDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
@@ -308,6 +311,15 @@ class Expense {
   final RecurringKind recurringKind;
   final double recurringEstimate;
 
+  /// Kuyruktaki fişin buluta gönderilemeyen (ağ dışı: sunucu reddi / hata) deneme sayısı ve son hata iletisi.
+  /// Başarısız kayıt kuyruğu kilitlemez; kullanıcı görür, düzenleyebilir ya da silebilir.
+  final int syncFailures;
+  final String? syncError;
+
+  /// Sunucunun `updated_at` değeri, AYNEN (ham metin; mikrosaniye hassasiyeti `base_updated_at` / `since` için
+  /// korunur). Bekleyen düzenlemede ([LocalSnapshot.pendingEdits]) düzenlemenin dayandığı sunucu sürümüdür.
+  final String? updatedAt;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -328,9 +340,15 @@ class Expense {
     this.recurringRemind = true,
     this.recurringKind = RecurringKind.fixed,
     this.recurringEstimate = 0,
+    this.syncFailures = 0,
+    this.syncError,
+    this.updatedAt,
   });
 
   bool get isRecurring => recurringDay > 0;
+
+  /// Çevrimdışı düzenleme sunucudaki daha yeni bir sürümle çakıştı (409): kullanıcı çözene kadar yeniden gönderilmez.
+  bool get isEditConflict => syncError == kEditConflict;
   bool get isLocal => syncState != SyncState.synced;
   int get imageCount => imageIds.length + localImages.length;
 
@@ -354,6 +372,10 @@ class Expense {
     bool? recurringRemind,
     RecurringKind? recurringKind,
     double? recurringEstimate,
+    int? syncFailures,
+    String? syncError,
+    bool clearSyncError = false,
+    String? updatedAt,
   }) => Expense(
     id: id ?? this.id,
     merchant: merchant ?? this.merchant,
@@ -374,6 +396,9 @@ class Expense {
     recurringRemind: recurringRemind ?? this.recurringRemind,
     recurringKind: recurringKind ?? this.recurringKind,
     recurringEstimate: recurringEstimate ?? this.recurringEstimate,
+    syncFailures: clearSyncError ? 0 : (syncFailures ?? this.syncFailures),
+    syncError: clearSyncError ? null : (syncError ?? this.syncError),
+    updatedAt: updatedAt ?? this.updatedAt,
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -382,7 +407,7 @@ class Expense {
     amount: (j['amount'] as num).toDouble(),
     date: DateTime.parse(j['date'] as String),
     categoryId: (j['category_id'] as num?)?.toInt() ?? 0,
-    categoryName: (j['category_name'] as String?) ?? 'Diğer',
+    categoryName: (j['category_name'] as String?) ?? kOtherCategory,
     note: (j['note'] as String?) ?? '',
     items: ((j['items'] as List?) ?? [])
         .map((e) => ExpenseItem.fromJson(e))
@@ -396,6 +421,7 @@ class Expense {
     recurringRemind: (j['recurring_remind'] as bool?) ?? true,
     recurringKind: recurringKindFrom(j['recurring_kind'] as String?),
     recurringEstimate: (j['recurring_estimate'] as num?)?.toDouble() ?? 0,
+    updatedAt: j['updated_at'] as String?,
   );
 
   /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
@@ -418,8 +444,11 @@ class Expense {
     if (recurringDay > 0) 'recurring_remind': recurringRemind,
     if (recurringDay > 0) 'recurring_kind': recurringKind.name,
     if (recurringEstimate > 0) 'recurring_estimate': recurringEstimate,
+    if (syncFailures > 0) 'sync_failures': syncFailures,
+    if (syncError != null) 'sync_error': syncError,
     // Sunucudan önbelleğe alınan (senkronlanmış) fişlerin fotoğraf kimlikleri.
     if (imageIds.isNotEmpty) 'image_ids': imageIds,
+    if (updatedAt != null) 'updated_at': updatedAt,
   };
 
   factory Expense.fromLocalJson(Map<String, dynamic> j) {
@@ -434,7 +463,7 @@ class Expense {
       amount: (j['amount'] as num).toDouble(),
       date: DateTime.parse(j['date'] as String),
       categoryId: (j['category_id'] as num?)?.toInt() ?? 0,
-      categoryName: (j['category_name'] as String?) ?? 'Diğer',
+      categoryName: (j['category_name'] as String?) ?? kOtherCategory,
       note: (j['note'] as String?) ?? '',
       items: items,
       clientUid: j['client_uid'] as String,
@@ -447,10 +476,16 @@ class Expense {
       recurringRemind: (j['recurring_remind'] as bool?) ?? true,
       recurringKind: recurringKindFrom(j['recurring_kind'] as String?),
       recurringEstimate: (j['recurring_estimate'] as num?)?.toDouble() ?? 0,
+      syncFailures: (j['sync_failures'] as num?)?.toInt() ?? 0,
+      syncError: j['sync_error'] as String?,
       imageIds: ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
+      updatedAt: j['updated_at'] as String?,
     );
   }
 }
+
+/// [Expense.syncError] işareti: çevrimdışı düzenleme sunucudaki daha yeni sürümle çakıştı (bkz. [Expense.isEditConflict]).
+const kEditConflict = 'conflict';
 
 /// Kalem toplamından indirim düşülmüş, kaydedilecek fiş tutarı. İndirim yoksa ya da kalemlerden
 /// büyükse (kullanıcı kalemleri silmiş/düzeltmiş) kalem toplamı aynen döner.
@@ -666,12 +701,28 @@ class ParsedReceipt {
     this.categoryCandidates = const [],
   });
 
+  ParsedReceipt copyWith({bool? needsReview}) => ParsedReceipt(
+    merchant: merchant,
+    amount: amount,
+    date: date,
+    categoryId: categoryId,
+    categoryName: categoryName,
+    items: items,
+    needsManual: needsManual,
+    needsReview: needsReview ?? this.needsReview,
+    itemsTotal: itemsTotal,
+    discountTotal: discountTotal,
+    categorySource: categorySource,
+    categoryNeedsReview: categoryNeedsReview,
+    categoryCandidates: categoryCandidates,
+  );
+
   factory ParsedReceipt.fromJson(Map<String, dynamic> j) => ParsedReceipt(
     merchant: (j['merchant'] as String?) ?? '',
     amount: (j['amount'] as num?)?.toDouble(),
     date: j['date'] is String ? DateTime.tryParse(j['date'] as String) : null,
     categoryId: (j['category_id'] as int?) ?? 0,
-    categoryName: (j['category_name'] as String?) ?? 'Diğer',
+    categoryName: (j['category_name'] as String?) ?? kOtherCategory,
     items: ((j['items'] as List?) ?? [])
         .map((e) => ExpenseItem.fromJson(e as Map<String, dynamic>))
         .toList(),

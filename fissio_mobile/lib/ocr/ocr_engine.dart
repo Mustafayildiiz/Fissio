@@ -27,6 +27,14 @@ class OcrResult {
   final String modelVersion;
   final double elapsedMs;
 
+  /// Motor bilgisi (sunucu: `rec_*` model/sözlük, eksik harfler); cihaz içi OCR'da boş.
+  final Map<String, dynamic> metadata;
+
+  /// Çok sayfalı taramada sayfa sırasına göre ham metinler (okunamayan sayfa boş) ve okunamayan sayfaların 1 tabanlı
+  /// numaraları: yalnız başarısız sayfalar yeniden taranıp metinler sırayla birleştirilebilsin diye.
+  final List<String> pageTexts;
+  final List<int> failedPages;
+
   const OcrResult({
     required this.rawText,
     this.blocks = const [],
@@ -34,9 +42,26 @@ class OcrResult {
     this.engine = 'unknown',
     this.modelVersion = 'unknown',
     this.elapsedMs = 0.0,
+    this.metadata = const {},
+    this.pageTexts = const [],
+    this.failedPages = const [],
   });
 
   bool get isEmpty => rawText.trim().isEmpty;
+
+  OcrResult withFailedPages(List<int> failed) => copyWith(failedPages: failed);
+
+  OcrResult copyWith({String? rawText, List<String>? pageTexts, List<int>? failedPages}) => OcrResult(
+    rawText: rawText ?? this.rawText,
+    blocks: blocks,
+    confidence: confidence,
+    engine: engine,
+    modelVersion: modelVersion,
+    elapsedMs: elapsedMs,
+    metadata: metadata,
+    pageTexts: pageTexts ?? this.pageTexts,
+    failedPages: failedPages ?? this.failedPages,
+  );
 
   factory OcrResult.fromJson(Map<String, dynamic> j) => OcrResult(
     rawText: (j['raw_text'] as String?) ?? '',
@@ -47,6 +72,8 @@ class OcrResult {
     engine: (j['engine'] as String?) ?? 'paddleocr',
     modelVersion: (j['model_version'] as String?) ?? 'PP-OCRv4-mobile',
     elapsedMs: ((j['elapsed_ms'] as num?) ?? 0).toDouble(),
+    metadata: (j['metadata'] as Map?)?.cast<String, dynamic>() ?? const {},
+    pageTexts: ((j['page_texts'] as List?) ?? const []).map((e) => '$e').toList(),
   );
 }
 

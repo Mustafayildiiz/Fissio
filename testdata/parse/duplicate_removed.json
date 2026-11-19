@@ -1,0 +1,24 @@
+{
+  "name": "duplicate_removed",
+  "note": "Bitisik ayni kalem cift okuma kanitidir: fark ona esitse silinir.",
+  "text": "MARKET\n12.05.2026\nEKMEK 5,00\nEKMEK 5,00\nSUT 10,00\nTOPLAM 15,00",
+  "expect": {
+    "merchant": "MARKET",
+    "amount": 15,
+    "date": "2026-05-12",
+    "item_count": 2,
+    "needs_review": false,
+    "discount_total": 0,
+    "items": [
+      {
+        "name": "EKMEK",
+        "amount": 5
+      },
+      {
+        "name": "SUT",
+        "amount": 10
+      }
+    ]
+  },
+  "known_divergence": []
+}

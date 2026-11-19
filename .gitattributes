@@ -1,0 +1,14 @@
+# Depoda LF; Windows'ta core.autocrlf calisma agacini donusturur.
+* text=auto eol=lf
+
+# Windows'a ozgu betikler CRLF kalmali
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Ikili dosyalar
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ttf binary
+*.jar binary
+*.exe binary

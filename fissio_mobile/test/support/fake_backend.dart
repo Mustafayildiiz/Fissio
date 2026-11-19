@@ -22,7 +22,34 @@ class FakeBackend {
   void Function(String method, String path)? afterRequest;
 
   final List<({String method, String path})> log = [];
+
+  /// Tüm isteklerin tam adresleri (sorgu parametreleriyle; ör. `GET /expenses?since=`).
+  final List<Uri> requests = [];
+
+  /// `PUT /expenses/:id` gövdeleri (gönderildiği haliyle, `id` eklenmiş): `base_updated_at` denetimi için.
+  final List<Map<String, dynamic>> putBodies = [];
   final Map<String, FakeUser> _users = {};
+
+  /// Sunucu saati: her fiş yazımında (oluşturma, toplu oluşturma, PUT; fotoğraf DEĞİL) 10 dk ilerler. Adım
+  /// istemcinin artımlı-yenileme payından (5 dk) büyük: `since` sorguları seçici kalır.
+  int _ver = 0;
+  String _stamp() => DateTime.utc(2026, 1, 1).add(Duration(minutes: 10 * ++_ver)).toIso8601String();
+
+  /// Başka bir cihazın sunucudaki fişi değiştirmesi (updated_at ilerler).
+  void serverEdit(String email, int id, Map<String, dynamic> changes) {
+    final list = _users[email]!.expenses;
+    final i = list.indexWhere((e) => e['id'] == id);
+    list[i] = {...list[i], ...changes, 'updated_at': _stamp()};
+  }
+
+  /// Başka bir cihazın sunucudaki fişi silmesi.
+  void serverDelete(String email, int id) => _users[email]!.expenses.removeWhere((e) => e['id'] == id);
+
+  /// `GET /expenses` isteklerinden `since` taşıyanlar ve taşımayanlar (tam liste) sayısı; `/expenses/ids` sayısı.
+  int get fullListCalls =>
+      requests.where((u) => u.path == '/expenses' && !u.queryParameters.containsKey('since')).length;
+  int get sinceCalls => requests.where((u) => u.path == '/expenses' && u.queryParameters.containsKey('since')).length;
+  int get idsCalls => requests.where((u) => u.path == '/expenses/ids').length;
   final Map<String, int> _tokenUser = {}; // access -> userId
   final Map<String, String> _refresh = {}; // refresh -> access
   final Set<String> _revokedAccess = {};
@@ -31,9 +58,20 @@ class FakeBackend {
   int refreshCalls = 0;
   int avatarUploads = 0;
   int scanCalls = 0;
+
+  /// `/receipts/parse` ile sunucuya giden metinler (cihaz-OCR + senkron açık yolu).
+  final List<String> parseTexts = [];
+
+  /// Her `/receipts/scan` çağrısındaki sayfa (file parçası) sayısı; `scanScript` doluysa sıradaki yanıt aynen döner.
+  final List<int> scanFileCounts = [];
+  final List<Map<String, dynamic>> scanScript = [];
   String lastCode = '123456';
   final Set<String> failPaths = {}; // "METHOD /path" -> 500
   bool rejectRefresh = false;
+
+  /// true: 2+ fişli `/expenses/bulk` partisi 500 döner (tek fişli partiler normal işlenir): sunucunun toplu isteği
+  /// reddedip bozuk kaydı yalıtamadığı durumu taklit eder.
+  bool failMultiBulk = false;
 
   final categories = [
     {'id': 1, 'name': 'Market / Gıda'},
@@ -101,6 +139,7 @@ class FakeBackend {
     final path = req.url.path;
     final m = req.method;
     log.add((method: m, path: path));
+    requests.add(req.url);
     try {
       if (offline) throw http.ClientException('offline');
       if (failPaths.contains('$m $path')) return _err(500, 'internal', 'internal error');
@@ -198,8 +237,20 @@ class FakeBackend {
       u.profiles.add(p);
       return _json(201, p);
     }
+    if (path == '/receipts/parse' && m == 'POST') {
+      parseTexts.add((j['text'] as String?) ?? '');
+      return _json(200, {
+        'merchant': 'SUNUCU PARSE',
+        'amount': 17.5,
+        'category_id': 1,
+        'category_name': 'Market / Gıda',
+        'needs_manual': false,
+      });
+    }
     if (path == '/receipts/scan' && m == 'POST') {
       scanCalls++;
+      scanFileCounts.add(RegExp('name="file"').allMatches(body).length);
+      if (scanScript.isNotEmpty) return _json(200, scanScript.removeAt(0));
       return _json(200, {
         'ocr': {'raw_text': 'SUNUCU OCR', 'engine': 'paddleocr'},
         'parsed': {
@@ -279,13 +330,24 @@ class FakeBackend {
     if (path == '/expenses' && m == 'GET') {
       final limit = int.tryParse(req.url.queryParameters['limit'] ?? '') ?? 50;
       final off = int.tryParse(req.url.queryParameters['offset'] ?? '') ?? 0;
-      final list = u.expenses.reversed.skip(off).take(limit).toList();
+      final sinceRaw = req.url.queryParameters['since'];
+      final since = sinceRaw == null ? null : DateTime.tryParse(sinceRaw);
+      if (sinceRaw != null && since == null) return _err(400, 'bad_request', 'since must be an RFC3339 timestamp');
+      final list = u.expenses.reversed
+          .where((e) => since == null || DateTime.parse(e['updated_at'] as String).isAfter(since))
+          .skip(off)
+          .take(limit)
+          .toList();
       return _json(200, list);
+    }
+    if (path == '/expenses/ids' && m == 'GET') {
+      return _json(200, {'ids': [for (final e in u.expenses) e['id']]});
     }
     if (path == '/expenses/bulk' && m == 'POST') {
       final results = <Map<String, dynamic>>[];
       var created = 0, skipped = 0, failed = 0;
       final list = (j['expenses'] as List).cast<Map<String, dynamic>>();
+      if (failMultiBulk && list.length > 1) return _err(500, 'internal', 'internal error');
       for (var i = 0; i < list.length; i++) {
         final e = list[i];
         final uid = e['client_uid'] as String?;
@@ -321,7 +383,22 @@ class FakeBackend {
       if (em[2] == null) {
         if (m == 'GET') return _json(200, u.expenses[idx]);
         if (m == 'PUT') {
-          u.expenses[idx] = {...u.expenses[idx], ...j, 'id': id, 'category_name': _catName(j['category_id'])};
+          putBodies.add(Map<String, dynamic>.of(j)..['id'] = id);
+          final base = j.remove('base_updated_at') as String?;
+          if (base != null) {
+            final baseAt = DateTime.tryParse(base);
+            if (baseAt == null) return _err(400, 'bad_request', 'base_updated_at must be an RFC3339 timestamp');
+            if (DateTime.parse(u.expenses[idx]['updated_at'] as String).isAfter(baseAt)) {
+              return _err(409, 'conflict', 'expense was modified elsewhere', {'current': u.expenses[idx]});
+            }
+          }
+          u.expenses[idx] = {
+            ...u.expenses[idx],
+            ...j,
+            'id': id,
+            'category_name': _catName(j['category_id']),
+            'updated_at': _stamp(),
+          };
           return _json(200, u.expenses[idx]);
         }
         if (m == 'DELETE') {
@@ -362,6 +439,7 @@ class FakeBackend {
       'recurring_remind': j['recurring_remind'] ?? true,
       'recurring_kind': j['recurring_kind'] ?? 'fixed',
       'recurring_estimate': j['recurring_estimate'] ?? 0,
+      'updated_at': _stamp(),
     };
     u.expenses.add(e);
     return e;

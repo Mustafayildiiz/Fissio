@@ -10,6 +10,8 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+
+	"fissio/expense/internal/receiptparse"
 )
 
 // Tekrarlayan giderler ("Her ay tekrarlanir"): isaret fisin kendisinde (recurring_day, recurring_remind,
@@ -62,6 +64,8 @@ type recurringOut struct {
 	LastExpenseID int64   `json:"last_expense_id"`
 	LastDate      string  `json:"last_date"`
 	NextDue       string  `json:"next_due"`
+	// Overdue: bu ay odenmedi ve odeme gunu gecti (NextDue gecmis bir tarihtir).
+	Overdue bool `json:"overdue"`
 	Kind          string  `json:"kind"`
 	Estimate      float64 `json:"estimate"`
 	// ExpectedAmount bir sonraki (ya da bu ayki odenmemis) fatura icin beklenen tutar; MinAmount/MaxAmount
@@ -88,7 +92,7 @@ type recurringTotals struct {
 
 // seriesKey: "<kategori>|<kucuk harf, Turkce katlanmis, harf/rakam jetonlari>"; isletme adi bossa yalnizca kategori.
 func seriesKey(merchant string, categoryID int) string {
-	toks := strings.FieldsFunc(foldTR(merchant), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	toks := strings.FieldsFunc(receiptparse.FoldTR(merchant), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 	return strconv.Itoa(categoryID) + "|" + strings.Join(toks, " ")
 }
 
@@ -107,20 +111,40 @@ func clampedDate(y int, m time.Month, day int) time.Time {
 	return time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
 }
 
-// nextDue serinin bir sonraki odeme tarihi: bu ayin odeme gunu (henuz gecmediyse ve bu ay icin bir fis
-// girilmediyse), aksi halde gelecek ayin odeme gunu.
-func nextDue(day int, last, today time.Time) time.Time {
+// nextDue serinin bir sonraki odeme tarihi: bu ay icin fis girilmediyse bu ayin odeme gunu (GECMIS olsa bile:
+// odenmemis fatura "gecikmis" olarak listede ve hatirlatmada kalir), aksi halde gelecek ayin odeme gunu.
+// overdue: bu ay odenmedi ve odeme gunu gecti.
+func nextDue(day int, last, today time.Time) (due time.Time, overdue bool) {
 	y, m := today.Year(), today.Month()
-	due := clampedDate(y, m, day)
+	due = clampedDate(y, m, day)
 	paidThisMonth := last.Year() == y && last.Month() == m
-	if paidThisMonth || due.Before(today) {
-		due = clampedDate(y, m+1, day)
+	if paidThisMonth {
+		return clampedDate(y, m+1, day), false
 	}
-	return due
+	return due, due.Before(today)
 }
 
 func newerRow(a, b recurringRow) bool { // a, b'den daha yeni mi (tarih, sonra id)
 	return a.Date.After(b.Date) || (a.Date.Equal(b.Date) && a.ID > b.ID)
+}
+
+// recurringStaleMonths: son fisten bu kadar takvim ayi sonra seri bitmis sayilir.
+const recurringStaleMonths = 3
+
+// windowMonths degisken fatura ortalamasina giren AYLARI secer: "son 3 TAKVIM ayi" (fisli son 3 ay degil). Bu ayin
+// faturasi girildiyse pencere bu ayla biter, girilmediyse gecen ayla (bu ay henuz bilinmiyor). months en yeni once.
+func windowMonths(months []recurringRow, curKey int, paid bool) []recurringRow {
+	hi := curKey
+	if !paid {
+		hi = curKey - 1
+	}
+	out := []recurringRow{}
+	for _, r := range months {
+		if k := r.Date.Year()*12 + int(r.Date.Month()); k <= hi && k > hi-recurringWindow {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // expectation serinin ay bazli (ayda en son fis) gecmisinden beklenen tutari ve araligi cikarir. months en yeni
@@ -153,6 +177,9 @@ func expectation(latest recurringRow, months []recurringRow) (expected, min, max
 func buildRecurring(rows []recurringRow, today time.Time) ([]recurringOut, recurringTotals) {
 	groups := map[string][]recurringRow{}
 	for _, r := range rows {
+		if r.Date.Year()*12+int(r.Date.Month()) > today.Year()*12+int(today.Month()) {
+			continue // GELECEK AYA tarihli fis (onceden girilmis) bu ayin gerceklesmesi/gecmisi sayilmaz (ayni ay icindeki ileri tarih sayilir)
+		}
 		k := strconv.FormatInt(r.ProfileID, 10) + "#" + seriesKey(r.Merchant, r.CategoryID)
 		groups[k] = append(groups[k], r)
 	}
@@ -167,6 +194,9 @@ func buildRecurring(rows []recurringRow, today time.Time) ([]recurringOut, recur
 		}
 		if latest.Day == 0 {
 			continue
+		}
+		if curMonth := today.Year()*12 + int(today.Month()); curMonth-(latest.Date.Year()*12+int(latest.Date.Month())) > recurringStaleMonths {
+			continue // son fisten bu yana > 3 ay gecti: seri bitmis sayilir (sonsuza dek 'gecikmis' kalmasin)
 		}
 		// Ay bazli gecmis: her ayin en son fisi, en yeni ay once.
 		byMonth := map[int]recurringRow{}
@@ -184,12 +214,13 @@ func buildRecurring(rows []recurringRow, today time.Time) ([]recurringOut, recur
 
 		curKey := today.Year()*12 + int(today.Month())
 		thisMonth, paid := byMonth[curKey]
-		expected, min, max, used := expectation(latest, months)
+		expected, min, max, used := expectation(latest, windowMonths(months, curKey, paid))
+		due, overdue := nextDue(latest.Day, latest.Date, today)
 		o := recurringOut{
 			SeriesKey: seriesKey(latest.Merchant, latest.CategoryID), ProfileID: latest.ProfileID, Merchant: latest.Merchant,
 			CategoryID: latest.CategoryID, CategoryName: latest.CategoryName, Amount: round2(latest.Amount), Day: latest.Day,
 			Remind: latest.Remind, LastExpenseID: latest.ID, LastDate: latest.Date.Format(dateLayout),
-			NextDue: nextDue(latest.Day, latest.Date, today).Format(dateLayout),
+			NextDue: due.Format(dateLayout), Overdue: overdue,
 			Kind:    latest.Kind, Estimate: round2(latest.Estimate), ExpectedAmount: expected, MinAmount: min, MaxAmount: max,
 			HistoryCount: used, PaidThisMonth: paid,
 		}

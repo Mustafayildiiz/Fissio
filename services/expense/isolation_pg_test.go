@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -19,8 +18,9 @@ import (
 )
 
 // Hesap/profil izolasyonu, idempotent toplu kayit ve oturum iptali testleri (gercek Postgres).
-// YIKICIDIR: expense ve auth semalarini siler; yalnizca "test" iceren atilabilir veritabaninda calisir.
-// auth testleriyle PARALEL calistirma (ayni semalari DROP eder).
+// YIKICIDIR: expense semasini siler; yalnizca "test" iceren atilabilir veritabaninda calisir.
+// auth testleriyle PARALEL calistirma (ayni veritabanini kullanir). Oturum dogrulamasi auth'un ic API'sinin
+// taklidiyle (fakeauth_test.go) yapilir: expense testleri auth semasina/tablosuna hic dokunmaz.
 
 var testSecret = []byte("test-access-secret")
 
@@ -29,6 +29,7 @@ type xenv struct {
 	db       *sql.DB
 	h        *handler
 	r        *gin.Engine
+	auth     *fakeAuth
 	sessions map[int64]string // userID -> sid
 	cats     map[string]int
 }
@@ -45,23 +46,16 @@ func newXEnv(t *testing.T) *xenv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// auth migrate()'i ayri modulde; yalnizca oturum kontrolunun ihtiyaci olan tablo ham DDL ile kurulur.
-	for _, q := range []string{
-		`DROP SCHEMA IF EXISTS expense CASCADE`,
-		`DROP SCHEMA IF EXISTS auth CASCADE`,
-		`CREATE SCHEMA auth`,
-		`CREATE TABLE auth.sessions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id BIGINT NOT NULL, revoked_at TIMESTAMPTZ)`,
-	} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
+	if _, err := db.Exec(`DROP SCHEMA IF EXISTS expense CASCADE`); err != nil {
+		t.Fatal(err)
 	}
 	if err := migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	h := &handler{db: db}
-	e := &xenv{t: t, db: db, h: h, sessions: map[int64]string{}, cats: map[string]int{}}
-	e.r = buildRouter(h, testSecret, newSessionChecker(db, 0).alive)
+	fa := newFakeAuth(t)
+	e := &xenv{t: t, db: db, h: h, auth: fa, sessions: map[int64]string{}, cats: map[string]int{}}
+	e.r = buildRouter(h, testSecret, newSessionChecker(fa.url(), testInternalToken, 0).alive)
 	cats, err := h.loadCategories()
 	if err != nil {
 		t.Fatal(err)
@@ -76,9 +70,7 @@ func (e *xenv) token(uid int64) string {
 	e.t.Helper()
 	sid, ok := e.sessions[uid]
 	if !ok {
-		if err := e.db.QueryRow(`INSERT INTO auth.sessions (user_id) VALUES ($1) RETURNING id::text`, uid).Scan(&sid); err != nil {
-			e.t.Fatal(err)
-		}
+		sid = e.auth.newSession(uid)
 		e.sessions[uid] = sid
 	}
 	return signToken(uid, sid, "access", time.Minute)
@@ -520,9 +512,7 @@ func TestPGRevokedAndMalformedSessions(t *testing.T) {
 	code, b := e.req(tok, "GET", "/profiles", nil)
 	e.want(code, 200, b, "valid session")
 
-	if _, err := e.db.Exec(`UPDATE auth.sessions SET revoked_at = now() WHERE id = $1::uuid`, e.sessions[1]); err != nil {
-		t.Fatal(err)
-	}
+	e.auth.revoke(e.sessions[1])
 	code, b = e.req(tok, "GET", "/profiles", nil)
 	e.want(code, 401, b, "revoked session")
 	if !strings.Contains(string(b), "session_revoked") {
@@ -540,28 +530,15 @@ func TestPGRevokedAndMalformedSessions(t *testing.T) {
 		code, b = e.req(tok, "GET", "/profiles", nil)
 		e.want(code, 401, b, what)
 	}
-	// auth semasi henuz yokken 500 degil 503.
-	if _, err := e.db.Exec(`DROP SCHEMA auth CASCADE`); err != nil {
-		t.Fatal(err)
+	// Baska kullanicinin oturumuyla (sid gecerli ama sub farkli) imzalanmis token reddedilir.
+	_ = e.token(2)
+	code, b = e.req(signToken(99, e.sessions[2], "access", time.Minute), "GET", "/profiles", nil)
+	e.want(code, 401, b, "session owned by another user")
+	// auth servisi ulasilamazken 500 degil 503 (Retry-After).
+	e.auth.srv.Close()
+	code, b = e.req(e.token(3), "GET", "/profiles", nil)
+	e.want(code, 503, b, "auth unreachable")
+	if !strings.Contains(string(b), "auth_unavailable") {
+		t.Fatalf("body=%s", b)
 	}
-	code, b = e.req(signToken(1, "00000000-0000-0000-0000-000000000001", "access", time.Minute), "GET", "/profiles", nil)
-	e.want(code, 503, b, "auth schema missing")
-}
-
-func TestPGSessionCheckerCachesBriefly(t *testing.T) {
-	e := newXEnv(t)
-	sid := ""
-	_ = e.db.QueryRow(`INSERT INTO auth.sessions (user_id) VALUES (1) RETURNING id::text`).Scan(&sid)
-	chk := newSessionChecker(e.db, time.Hour)
-	if ok, err := chk.alive(sid); !ok || err != nil {
-		t.Fatalf("alive: %v %v", ok, err)
-	}
-	_, _ = e.db.Exec(`UPDATE auth.sessions SET revoked_at = now()`)
-	if ok, _ := chk.alive(sid); !ok {
-		t.Fatal("result should be served from cache within ttl")
-	}
-	if ok, _ := newSessionChecker(e.db, 0).alive(sid); ok {
-		t.Fatal("uncached check must see the revocation")
-	}
-	_ = http.StatusOK
 }

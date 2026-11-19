@@ -22,6 +22,10 @@ class LocalSnapshot {
   /// sabit gider projeksiyonu buradan gösterilir. [expenses] (kuyruk) ile KARIŞMAZ: yüklenecek şey değildir.
   List<Expense> cloudExpenses;
 
+  /// [cloudExpenses] içindeki en yeni sunucu `updated_at` değeri (ham metin). Doluysa yenileme artımlıdır
+  /// (`GET /expenses?since=` + `GET /expenses/ids`); önbellek silinince bu da silinir.
+  String? cloudSyncedAt;
+
   /// Çevrimdışıyken yapılan, henüz sunucuya yüklenmemiş düzenlemeler (sunucu kimlikli fişin yeni hali) ve silmeler
   /// (sunucu fiş kimlikleri). Görünümde önbelleğin üstüne işlenir; bağlantı gelince PUT / DELETE ile yüklenir.
   List<Expense> pendingEdits;
@@ -43,6 +47,7 @@ class LocalSnapshot {
     List<int>? pendingDeletes,
     List<int>? pendingBudgetDeletes,
     this.lastLocalId = 0,
+    this.cloudSyncedAt,
   }) : profiles = profiles ?? [],
        expenses = expenses ?? [],
        categories = categories ?? [],
@@ -76,6 +81,7 @@ class LocalSnapshot {
     pendingDeletes: ((j['pending_deletes'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
     pendingBudgetDeletes: ((j['pending_budget_deletes'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
     lastLocalId: (j['last_local_id'] as num?)?.toInt() ?? 0,
+    cloudSyncedAt: j['cloud_synced_at'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -89,6 +95,7 @@ class LocalSnapshot {
     'pending_deletes': pendingDeletes,
     'pending_budget_deletes': pendingBudgetDeletes,
     'last_local_id': lastLocalId,
+    if (cloudSyncedAt != null) 'cloud_synced_at': cloudSyncedAt,
   };
 }
 

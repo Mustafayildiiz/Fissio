@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -17,6 +18,25 @@ from ocr.config import OcrConfig
 from ocr.factory import UnknownOcrEngineError, default_registry, get_ocr_engine
 
 logger = logging.getLogger("fissio.ocr")
+
+# Tek görüntü için üst sınır (bayt). Base64 gövdesi ~4/3 büyüktür; multipart zarf payı küçük.
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
+MAX_BASE64_CHARS = (MAX_IMAGE_BYTES * 4) // 3 + 4
+MAX_REQUEST_BYTES = MAX_BASE64_CHARS + 64 * 1024
+
+# Aynı anda en fazla N çıkarım; fazlası (iş parçacığı tutmadan) sırada bekler.
+_inference_slots = asyncio.Semaphore(OcrConfig.from_env().max_concurrent_inferences)
+
+
+async def _run_inference(fn, *args):
+    async with _inference_slots:
+        return await run_in_threadpool(fn, *args)
+
+
+def limit_request_size(content_length: int | None = Header(default=None)) -> None:
+    """Gövde okunmadan önce Content-Length ile reddet (başlık yoksa alan düzeyi sınırlar geçerli)."""
+    if content_length is not None and content_length > MAX_REQUEST_BYTES:
+        raise HTTPException(status_code=413, detail="Request body too large")
 
 
 @asynccontextmanager
@@ -41,16 +61,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-OCR-Engine"],
-)
+# OCR servisi yalnızca iç ağdan (expense -> http://ocr:8080) çağrılır ve kimlik doğrulaması YOKTUR: tarayıcı kaynaklarına
+# CORS açılmaz. Yerel hata ayıklama için OCR_CORS_ORIGINS="http://localhost:3000,..." (virgüllü) verilebilir.
+_cors_origins = [o.strip() for o in os.environ.get("OCR_CORS_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-OCR-Engine"],
+    )
 
 
 class Base64OcrRequest(BaseModel):
-    image_base64: str = Field(..., description="Base64-encoded receipt image (JPEG/PNG/WebP)")
+    image_base64: str = Field(
+        ...,
+        max_length=MAX_BASE64_CHARS,
+        description="Base64-encoded receipt image (JPEG/PNG/WebP), en fazla 15 MB",
+    )
     engine: str | None = Field(
         default=None,
         description="Optional request-level OCR engine override (e.g., 'paddleocr', 'custom')",
@@ -111,7 +139,7 @@ def list_engines() -> dict[str, Any]:
     }
 
 
-@app.post("/ocr/extract")
+@app.post("/ocr/extract", dependencies=[Depends(limit_request_size)])
 async def extract_from_json(
     payload: Base64OcrRequest,
     engine: OcrEngine = Depends(resolve_ocr_engine),
@@ -129,7 +157,7 @@ async def extract_from_json(
 
     img_b64 = payload.image_base64
     try:
-        result = await run_in_threadpool(active_engine.extract_text, img_b64)
+        result = await _run_inference(active_engine.extract_text, img_b64)
         return result.to_dict()
     except InvalidImageInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -142,7 +170,7 @@ async def extract_from_json(
         del img_b64
 
 
-@app.post("/ocr/extract/upload")
+@app.post("/ocr/extract/upload", dependencies=[Depends(limit_request_size)])
 async def extract_from_upload(
     file: UploadFile = File(..., description="Receipt image file"),
     engine_form: str | None = Form(default=None, alias="engine"),
@@ -159,13 +187,14 @@ async def extract_from_upload(
         except UnknownOcrEngineError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    raw_bytes = await file.read()
+    # Sınırın bir baytı fazlasını oku: gerçek boyutu bilmeden tüm dosyayı belleğe almayız.
+    raw_bytes = await file.read(MAX_IMAGE_BYTES + 1)
     try:
         if not raw_bytes:
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
-        if len(raw_bytes) > 15 * 1024 * 1024:
+        if len(raw_bytes) > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Image exceeds 15MB limit")
-        result = await run_in_threadpool(active_engine.extract_text, raw_bytes)
+        result = await _run_inference(active_engine.extract_text, raw_bytes)
         return result.to_dict()
     except InvalidImageInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -193,7 +222,7 @@ def _to_parse_response(result: OcrResult, elapsed_ms: float) -> dict[str, Any]:
     }
 
 
-@app.post("/ocr/parse")
+@app.post("/ocr/parse", dependencies=[Depends(limit_request_size)])
 async def parse_upload(
     file: UploadFile = File(..., description="Receipt image file"),
     engine: OcrEngine = Depends(resolve_ocr_engine),
@@ -202,14 +231,14 @@ async def parse_upload(
     multipart/form-data image -> `{engine, processing_time_ms, lines[{text, confidence, bbox}]}`.
     The image is read into RAM only (never written to disk) and inference runs in a threadpool.
     """
-    raw_bytes = await file.read()
+    raw_bytes = await file.read(MAX_IMAGE_BYTES + 1)
     try:
         if not raw_bytes:
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
-        if len(raw_bytes) > 15 * 1024 * 1024:
+        if len(raw_bytes) > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Image exceeds 15MB limit")
         started = time.perf_counter()
-        result = await run_in_threadpool(engine.extract_text, raw_bytes)
+        result = await _run_inference(engine.extract_text, raw_bytes)
         return _to_parse_response(result, (time.perf_counter() - started) * 1000.0)
     except InvalidImageInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

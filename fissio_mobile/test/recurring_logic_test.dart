@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/recurring.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -72,11 +75,12 @@ void main() {
   });
 
   group('sonraki ödeme tarihi', () {
-    test('bu ay için fiş girildiyse gelecek ay; girilmediyse ve gün geçmediyse bu ay', () {
+    test('bu ay için fiş girildiyse gelecek ay; girilmediyse bu ay (günü geçtiyse GECİKMİŞ olarak bu ay kalır)', () {
       expect(nextDueDate(25, DateTime(2026, 5, 5), today), DateTime.utc(2026, 6, 25));
       expect(nextDueDate(25, DateTime(2026, 4, 25), today), DateTime.utc(2026, 5, 25));
       expect(nextDueDate(10, DateTime(2026, 4, 10), today), DateTime.utc(2026, 5, 10), reason: 'bugün ödeme günü');
-      expect(nextDueDate(3, DateTime(2026, 4, 3), today), DateTime.utc(2026, 6, 3), reason: 'bu ayın 3\'ü geçti');
+      expect(nextDueDate(3, DateTime(2026, 4, 3), today), DateTime.utc(2026, 5, 3), reason: 'bu ayın 3\'ü geçti ama ödenmedi: gecikmiş');
+      expect(nextDueDate(3, DateTime(2026, 5, 3), today), DateTime.utc(2026, 6, 3), reason: 'bu ay ödendi');
     });
 
     test('ayın gün sayısını aşan gün ayın son gününe çekilir; yıl dönümü', () {
@@ -95,9 +99,13 @@ void main() {
 
     test('30 gün içindekiler en yakın önce listelenir', () {
       final up = upcomingPaymentsOf(items, today);
-      expect(up.map((i) => i.merchant), ['Internet', 'Enerjisa', 'Ev sahibi']);
-      expect(up.first.daysUntil(today), 2);
-      expect(upcomingPaymentsOf(items, today, days: 5).map((i) => i.merchant), ['Internet']);
+      // Ev sahibi: 1 Mayıs geçti, bu ay girilmedi -> gecikmiş; listeden düşmez ve en başta durur.
+      expect(up.map((i) => i.merchant), ['Ev sahibi', 'Internet', 'Enerjisa']);
+      expect(up.first.isOverdue(today), isTrue);
+      expect(up.first.daysUntil(today), -9);
+      expect(up[1].daysUntil(today), 2);
+      expect(up[1].isOverdue(today), isFalse);
+      expect(upcomingPaymentsOf(items, today, days: 5).map((i) => i.merchant), ['Ev sahibi', 'Internet']);
     });
 
     test('3 gün kala ve ödeme gününde hatırlatıcı; geçmiş ve hatırlatıcısız seriler atlanır', () {
@@ -118,9 +126,40 @@ void main() {
       expect(again.map((p) => p.id).toList(), plans.map((p) => p.id).toList());
     });
 
+    test('gecikmiş ödeme için bir sonraki 09:00\'da tek hatırlatıcı; bu ay ödenmiş seri gecikmiş sayılmaz', () {
+      final late = buildRecurring([_e(9, 'Gaz', 500, DateTime(2026, 4, 3), day: 3)], today).items;
+      expect(late.single.isOverdue(today), isTrue);
+      final plans = planReminders(late, DateTime(2026, 5, 10, 8));
+      expect(plans.single.title, startsWith('Ödeme gecikti'));
+      expect(plans.single.when, DateTime(2026, 5, 10, 9));
+      // 09:00'dan sonra: ertesi gün 09:00.
+      expect(planReminders(late, DateTime(2026, 5, 10, 10)).single.when, DateTime(2026, 5, 11, 9));
+      final paid = buildRecurring([_e(10, 'Gaz', 500, DateTime(2026, 5, 3), day: 3)], today).items;
+      expect(paid.single.isOverdue(today), isFalse);
+    });
+
     test('ödeme günü saatinden sonra bugünün hatırlatıcısı planlanmaz', () {
       final plans = planReminders(items, DateTime(2026, 5, 12, 10));
       expect(plans.any((p) => p.title.contains('Internet')), isFalse);
     });
+  });
+
+  goldenDueVectors();
+}
+
+/// `testdata/recurring_due.json`: Go `nextDue` ile aynı vektörler (vade + gecikmiş bayrağı).
+void goldenDueVectors() {
+  final data = jsonDecode(File('../testdata/recurring_due.json').readAsStringSync()) as Map<String, dynamic>;
+  group('testdata/recurring_due.json', () {
+    for (final c in (data['cases'] as List).cast<Map<String, dynamic>>()) {
+      test('gün ${c['day']} son ${c['last']} bugün ${c['today']}', () {
+        final last = DateTime.parse(c['last'] as String);
+        final today = DateTime.parse(c['today'] as String);
+        final due = nextDueDate(c['day'] as int, last, today);
+        expect(due.toIso8601String().substring(0, 10), c['next_due']);
+        final overdue = last.year != today.year || last.month != today.month ? due.isBefore(DateTime.utc(today.year, today.month, today.day)) : false;
+        expect(overdue, c['overdue']);
+      });
+    }
   });
 }

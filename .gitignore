@@ -1,6 +1,32 @@
 .env
+.env.*
+!.env.example
 *.log
 .idea/
+*.iml
+
+# Derleme artiklari / ikili dosyalar
+*.exe
+*.test
+*.out
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Test kapsami
+coverage/
+coverage.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Yerel makine ayarlari
+local.properties
 
 # OCR degerlendirme: kullanici fis fotograflari
 services/ocr/eval/receipts/

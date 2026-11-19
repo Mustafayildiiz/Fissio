@@ -4,20 +4,29 @@ import 'plugin_log.dart';
 
 /// Ana ekran widget'ının gösterdiği veri: aktif profilin bu ayki toplam harcaması.
 class WidgetPayload {
-  const WidgetPayload({required this.profileName, required this.monthTotalText, required this.monthLabel});
+  const WidgetPayload({
+    required this.profileName,
+    required this.monthTotalText,
+    required this.monthLabel,
+    this.monthKey = '',
+  });
   final String profileName;
   final String monthTotalText;
   final String monthLabel;
+
+  /// Yıl-ay (ay 1-12), örn. `2026-5`: yerel taraf ay değiştiğinde eski tutarı göstermesin diye yazılır.
+  final String monthKey;
 
   @override
   bool operator ==(Object other) =>
       other is WidgetPayload &&
       other.profileName == profileName &&
       other.monthTotalText == monthTotalText &&
-      other.monthLabel == monthLabel;
+      other.monthLabel == monthLabel &&
+      other.monthKey == monthKey;
 
   @override
-  int get hashCode => Object.hash(profileName, monthTotalText, monthLabel);
+  int get hashCode => Object.hash(profileName, monthTotalText, monthLabel, monthKey);
 }
 
 /// Ana ekran widget'ı için port. `update(null)` oturum yokken (çıkış / hesap silme) widget verisini temizler;
@@ -38,6 +47,7 @@ class WidgetKeys {
   static const profile = 'fissio_profile';
   static const total = 'fissio_month_total';
   static const month = 'fissio_month_label';
+  static const monthKey = 'fissio_month_key';
   static const androidProvider = 'FissioWidgetProvider';
 
   /// `androidName` uygulama kimliğine (applicationId) göre çözülür; sınıfın tam adını açıkça veriyoruz.
@@ -60,6 +70,7 @@ class PluginWidgetSync implements WidgetSync {
       await HomeWidget.saveWidgetData<String>(WidgetKeys.profile, payload?.profileName ?? '');
       await HomeWidget.saveWidgetData<String>(WidgetKeys.total, payload?.monthTotalText ?? '');
       await HomeWidget.saveWidgetData<String>(WidgetKeys.month, payload?.monthLabel ?? '');
+      await HomeWidget.saveWidgetData<String>(WidgetKeys.monthKey, payload?.monthKey ?? '');
       await HomeWidget.updateWidget(
         qualifiedAndroidName: WidgetKeys.androidQualifiedProvider,
         androidName: WidgetKeys.androidProvider,

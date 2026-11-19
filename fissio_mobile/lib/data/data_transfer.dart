@@ -4,6 +4,8 @@ import 'package:crypto/crypto.dart';
 
 import '../app_state.dart';
 import '../models.dart';
+import '../money.dart';
+import '../receipt_parser/normalize.dart' show foldTR;
 import 'uid.dart';
 
 /// Yedekleme dosyası biçimleri (JSON: tam yedek, CSV: tablo incelemesi) — saf Dart, ağ/disk bilmez.
@@ -89,27 +91,8 @@ class ImportSummary {
 String _iso(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-/// 12,50 / 12.50 / 1.234,50 / 1,234.50 / "12,50 ₺" biçimlerini okur.
-double? parseAmount(String raw) {
-  var s = raw.trim().replaceAll(RegExp(r'[\s₺]|TL', caseSensitive: false), '');
-  if (s.isEmpty) return null;
-  final lastComma = s.lastIndexOf(',');
-  final lastDot = s.lastIndexOf('.');
-  if (lastComma >= 0 && lastDot >= 0) {
-    // Son görülen ayraç ondalıktır, diğeri binlik.
-    if (lastComma > lastDot) {
-      s = s.replaceAll('.', '').replaceAll(',', '.');
-    } else {
-      s = s.replaceAll(',', '');
-    }
-  } else if (lastComma >= 0) {
-    s = s.replaceAll(',', '.');
-  } else if (lastDot >= 0 && RegExp(r'^\d{1,3}(\.\d{3})+$').hasMatch(s)) {
-    s = s.replaceAll('.', ''); // 1.234 -> binlik
-  }
-  final v = double.tryParse(s);
-  return v == null || v.isNaN || v.isInfinite ? null : v;
-}
+/// Tutar okuma `money.dart` `parseMoney` ile tektir (12,50 / 1.234,50 / 1,234.50 / "12,50 ₺").
+double? parseAmount(String raw) => parseMoney(raw);
 
 DateTime? parseDate(String raw) {
   final s = raw.trim();
@@ -136,22 +119,25 @@ String _clip(String s, int n) {
   return r.length <= n ? s.trim() : String.fromCharCodes(r.take(n));
 }
 
+/// Dart `toLowerCase()` 'İ'yi 'i'+birleşik nokta yapar; parmak izi/uid kararlı kalsın diye önce 'i'ye indirilir.
+String _lower(String s) => s.trim().replaceAll('İ', 'i').toLowerCase();
+
 String _fmtAmount(double v) => v.toStringAsFixed(2);
 
 /// Aynı fişin kimliği (uid yoksa/uyuşmazsa mükerrer tespiti): profil adı, tarih, işyeri, tutar ve kalemler.
 String fingerprint(String profileName, DateTime date, String merchant, double amount, List<BackupItem> items) {
   final b = StringBuffer()
-    ..write(profileName.trim().toLowerCase())
+    ..write(_lower(profileName))
     ..write('|')
     ..write(_iso(date))
     ..write('|')
-    ..write(merchant.trim().toLowerCase())
+    ..write(_lower(merchant))
     ..write('|')
     ..write(_fmtAmount(amount));
   for (final i in items) {
     b
       ..write('|')
-      ..write(i.name.trim().toLowerCase())
+      ..write(_lower(i.name))
       ..write('=')
       ..write(_fmtAmount(i.amount));
   }
@@ -452,7 +438,7 @@ BackupData _parseCsv(String text) {
   }
   final rows = _csvRows(text, delim);
   if (rows.isEmpty) throw const FormatException('CSV boş.');
-  final header = rows.first.map((h) => h.trim().toLowerCase()).toList();
+  final header = rows.first.map((h) => foldTR(h.trim())).toList();
   int col(String n) => header.indexOf(n);
   final cDate = col('tarih'), cMerchant = col('isyeri'), cTotal = col('toplam');
   if (cDate < 0 || cMerchant < 0 || cTotal < 0) {
@@ -539,13 +525,13 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
       ]),
   };
   int? catId(String name) {
-    final n = name.trim().toLowerCase();
+    final n = foldTR(name.trim());
     if (n.isNotEmpty) {
       for (final c in app.categories) {
-        if (c.name.toLowerCase() == n) return c.id;
+        if (foldTR(c.name) == n) return c.id;
       }
     }
-    return app.categories.where((c) => c.name == 'Diğer').firstOrNull?.id;
+    return app.categories.where((c) => c.name == kOtherCategory).firstOrNull?.id;
   }
 
   int? itemCat(String name) => name.trim().isEmpty ? null : catId(name);
@@ -576,7 +562,7 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
           amount: be.amount,
           date: be.date,
           categoryId: cid,
-          categoryName: app.categories.where((c) => c.id == cid).map((c) => c.name).firstOrNull ?? 'Diğer',
+          categoryName: app.categories.where((c) => c.id == cid).map((c) => c.name).firstOrNull ?? kOtherCategory,
           note: be.note,
           items: [
             for (final i in be.items)

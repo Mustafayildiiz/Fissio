@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:fissio_mobile/budgets.dart';
+import 'package:fissio_mobile/data/image_disk_cache.dart';
 import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/pages/budget_widgets.dart';
 import 'package:fissio_mobile/pages/receipt_detail_page.dart';
@@ -136,7 +137,7 @@ void main() {
       // Fiş içeriği ve fotoğraf şeridi (mevcut görüntüleme akışı) bozulmadan duruyor.
       expect(find.text('BIM'), findsOneWidget);
       expect(find.text('Fiş fotoğrafları (1)'), findsOneWidget);
-      expect(find.byType(Image), findsWidgets);
+      expect(find.byType(CachedNetImage), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 

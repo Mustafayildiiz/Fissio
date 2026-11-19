@@ -1,0 +1,16 @@
+{
+ "description": "Tekrarlayan gider vadesi: nextDue(day, last_expense_date, today) -> {next_due, overdue}. Bu ay fis girilmediyse vade bu ayin odeme gunudur (gecmis olsa bile: overdue=true); girildiyse gelecek ayin gunu. Referans: Go recurring.go nextDue; Dart recurring.dart nextDueDate.",
+ "cases": [
+  {"day": 25, "last": "2026-05-05", "today": "2026-05-10", "next_due": "2026-06-25", "overdue": false},
+  {"day": 25, "last": "2026-04-25", "today": "2026-05-10", "next_due": "2026-05-25", "overdue": false},
+  {"day": 10, "last": "2026-04-10", "today": "2026-05-10", "next_due": "2026-05-10", "overdue": false},
+  {"day": 3, "last": "2026-04-03", "today": "2026-05-10", "next_due": "2026-05-03", "overdue": true},
+  {"day": 3, "last": "2026-05-03", "today": "2026-05-10", "next_due": "2026-06-03", "overdue": false},
+  {"day": 31, "last": "2026-01-31", "today": "2026-02-02", "next_due": "2026-02-28", "overdue": false},
+  {"day": 31, "last": "2027-12-31", "today": "2028-02-02", "next_due": "2028-02-29", "overdue": false},
+  {"day": 30, "last": "2026-12-30", "today": "2026-12-31", "next_due": "2027-01-30", "overdue": false},
+  {"day": 15, "last": "2026-11-15", "today": "2026-12-20", "next_due": "2026-12-15", "overdue": true},
+  {"day": 31, "last": "2026-03-31", "today": "2026-04-30", "next_due": "2026-04-30", "overdue": false},
+  {"day": 31, "last": "2026-03-31", "today": "2026-05-01", "next_due": "2026-05-31", "overdue": false}
+ ]
+}

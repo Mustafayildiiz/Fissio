@@ -1,0 +1,109 @@
+{
+ "description": "fixTurkishGlyphs: PaddleOCR latin sözlüğünde Ş yok, '$' çıkar. Harfe bitişik $ → Ş; rakamdan önceki/yalnız $ fiyat işaretidir. Her vektör idempotent olmalı.",
+ "cases": [
+  {
+   "in": "Fİ$",
+   "out": "FİŞ"
+  },
+  {
+   "in": "Fİ$ NO:0298",
+   "out": "FİŞ NO:0298"
+  },
+  {
+   "in": "PE$İN",
+   "out": "PEŞİN"
+  },
+  {
+   "in": "KA$AR PEYNİR",
+   "out": "KAŞAR PEYNİR"
+  },
+  {
+   "in": "$EKER 1KG",
+   "out": "ŞEKER 1KG"
+  },
+  {
+   "in": "BİM A.$.",
+   "out": "BİM A.Ş."
+  },
+  {
+   "in": "MİGROS TİCARET A.$",
+   "out": "MİGROS TİCARET A.Ş"
+  },
+  {
+   "in": "ABC LTD.$Tİ.",
+   "out": "ABC LTD.ŞTİ."
+  },
+  {
+   "in": "TE$EKKÜRLER",
+   "out": "TEŞEKKÜRLER"
+  },
+  {
+   "in": "pe$in fiyatına",
+   "out": "peşin fiyatına"
+  },
+  {
+   "in": "KA$AR %08 *120,00",
+   "out": "KAŞAR %08 *120,00"
+  },
+  {
+   "in": "$12,50",
+   "out": "$12,50"
+  },
+  {
+   "in": "EKMEK %08 $3,95",
+   "out": "EKMEK %08 $3,95"
+  },
+  {
+   "in": "TOPLAM $45,00",
+   "out": "TOPLAM $45,00"
+  },
+  {
+   "in": "KEK 35 G %08 *$070",
+   "out": "KEK 35 G %08 *$070"
+  },
+  {
+   "in": "SUT %08 $",
+   "out": "SUT %08 $"
+  },
+  {
+   "in": "US$ 1,00",
+   "out": "US$ 1,00"
+  },
+  {
+   "in": "FIYAT US$",
+   "out": "FIYAT US$"
+  },
+  {
+   "in": "KU$ YEMİ",
+   "out": "KUŞ YEMİ"
+  },
+  {
+   "in": "BU$AN 5,00",
+   "out": "BUŞAN 5,00"
+  },
+  {
+   "in": "FI$ NO",
+   "out": "FIŞ NO"
+  },
+  {
+   "in": "PE$IN",
+   "out": "PEŞIN"
+  },
+  {
+   "in": "a$k",
+   "out": "aşk"
+  },
+  {
+   "in": "A.$.",
+   "out": "A.Ş."
+  },
+  {
+   "in": "Merhaba",
+   "out": "Merhaba"
+  },
+  {
+   "in": "",
+   "out": ""
+  }
+ ]
+}

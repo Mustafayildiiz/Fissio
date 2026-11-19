@@ -6,8 +6,10 @@
     <!-- Cihaz yeniden başlayınca planlı ödeme hatırlatıcılarını yeniden kurar. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Düz HTTP (usesCleartextTraffic) yalnızca debug/profile manifestlerinde açıktır; release yalnızca HTTPS. -->
+    <!-- allowBackup kapalı: finansal veriler (data.json) ve güvenli depolama Google Yedekleme/cihaz aktarımına girmez. -->
     <application
-        android:usesCleartextTraffic="true"
+        android:allowBackup="false"
         android:label="Fissio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
@@ -52,6 +54,12 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherGreen" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
@@ -59,6 +67,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherDarkred" android:targetActivity=".MainActivity"
@@ -68,6 +82,12 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherBlue" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
@@ -75,6 +95,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherGraphite" android:targetActivity=".MainActivity"
@@ -84,6 +110,12 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherInk" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
@@ -92,12 +124,22 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
         </activity-alias>
 
         <!-- Ana ekran widget'ı: bu ayki toplam harcama + hızlı tarama kısayolu. -->
         <receiver android:name=".FissioWidgetProvider" android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+                <!-- Gece yarısı / ay dönümü: tutar eski ayda kalmasın -->
+                <action android:name="android.intent.action.DATE_CHANGED"/>
+                <action android:name="android.intent.action.TIME_SET"/>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/fissio_widget_info"/>
         </receiver>

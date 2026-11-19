@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../api.dart';
+import '../data/image_disk_cache.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../models.dart';
@@ -133,22 +134,13 @@ class _NetImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Image.network(
-      appState.api.imageUrl(expenseId, imageId),
+    return CachedNetImage(
+      url: appState.api.imageUrl(expenseId, imageId),
       headers: appState.api.authHeaders,
       width: width,
       height: height,
       fit: fit,
-      loadingBuilder: (context, child, progress) => progress == null
-          ? child
-          : SizedBox(
-              width: width,
-              height: height,
-              child: const Center(
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-      errorBuilder: (context, error, stack) => Container(
+      error: (context) => Container(
         width: width,
         height: height,
         color: context.c.surf2,

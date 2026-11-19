@@ -1,12 +1,18 @@
 // Go `services/expense/parser.go` çekirdeğinin Dart portu (cihaz içi OCR metnini çevrimdışı ayrıştırır).
 //
-// Taşınanlar: satır bölme + glif düzeltme, tutar/tarih/işletme, kalem çıkarma (adet satırları dahil),
-// indirim ve toplam/kalem uyuşmazlığı bayrağı. TAŞINMAYANLAR: kategori motoru (kategori `Diğer` +
-// "kontrol edin"), ondalık ayırıcısı düşmüş tutar kurtarma (recoverBareAmounts) ve ayrıntılı mutabakat
-// (reconcile): çevrimdışıyken kalem toplamı fiş toplamıyla tutmazsa yalnızca `needsReview` işaretlenir.
+// Para sonuçları Go ile birebir aynıdır (ortak vektörler: `testdata/parse/*.json`): satır bölme + glif
+// düzeltme, tutar/tarih, işletme (bilinen marka içeren başlık satırı önce, `brands.dart`), kalem çıkarma
+// (adet satırları dahil), indirim, resolveTotal, recoverBareAmounts ve reconcile (`reconcile.dart`).
+// TAŞINMAYAN: kategori motoru (kategori `Diğer` + "kontrol edin") ve sunucuda kullanıcının kategorilere
+// eklediği ek marka `keywords`'leri.
 import '../models.dart';
+import 'brands.dart';
 import 'normalize.dart';
+import 'reconcile.dart';
 import 'summary.dart';
+
+export 'brands.dart' show merchantBrands;
+export 'reconcile.dart' show LocalReconciliation;
 
 final RegExp amountRe = RegExp(r'(?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2}\b');
 final RegExp dateRe = RegExp(r'(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$)');
@@ -37,14 +43,23 @@ class LocalParseResult {
     required this.discount,
     required this.needsReview,
     required this.itemsTotal,
+    this.reconciliation,
   });
   final String merchant;
   final double? amount;
   final String? date; // yyyy-MM-dd
   final List<LocalItem> items;
+
+  /// Kalem toplamından düşülecek indirim (Go `discount_total`): indirim yoksa ya da kalem fiyatlarına
+  /// zaten yansımışsa 0. Kaydedilen tutar `kalemler − discount`.
   final double discount;
+
+  /// Kalem toplamı (indirim düşülerek) fiş toplamıyla tutmuyor.
   final bool needsReview;
+
+  /// Yalnızca uyuşmazlıkta: hesaplanan kalem toplamı (Go `items_total`).
   final double? itemsTotal;
+  final LocalReconciliation? reconciliation;
 
   bool get needsManual => amount == null;
 
@@ -54,14 +69,14 @@ class LocalParseResult {
     amount: amount,
     date: date == null ? null : DateTime.tryParse(date!),
     categoryId: otherCategoryId ?? 0,
-    categoryName: 'Diğer',
+    categoryName: kOtherCategory,
     items: [
       for (final i in items)
         ExpenseItem(
           i.name,
           i.amount,
           categoryId: otherCategoryId,
-          categoryName: 'Diğer',
+          categoryName: kOtherCategory,
           categoryReview: true,
         ),
     ],
@@ -84,28 +99,26 @@ class LocalItem {
 LocalParseResult parseReceiptText(String text, {DateTime? now}) {
   now ??= DateTime.now();
   final lines = splitLines(text);
-  final amount = extractAmount(lines);
+  var amount = extractAmount(lines);
   final date = extractDate(lines, now);
   final header = lines.length > 8 ? lines.sublist(0, 8) : lines;
   final merchant = extractMerchant(header);
   final discount = extractDiscount(lines);
-  final items = extractItems(lines, amount);
 
-  final sum = round2(items.fold<double>(0, (s, i) => s + i.amount));
-  bool needsReview = false;
-  double? itemsTotal;
-  if (items.isNotEmpty) {
-    itemsTotal = sum;
-    if (amount != null && (round2(sum - discount) - amount).abs() >= 0.01) needsReview = true;
-  }
+  final ex = extractItemsWithBare(lines, amount);
+  final resolved = resolveTotal(lines, ex.items, discount, amount);
+  if (resolved != null) amount = resolved;
+  final items = recoverBareAmounts(ex.items, ex.bare, amount, discount);
+  final o = reconcile(items, amount, discount, ex.skipped);
   return LocalParseResult(
     merchant: merchant,
     amount: amount,
     date: date,
-    items: items,
-    discount: discount,
-    needsReview: needsReview,
-    itemsTotal: itemsTotal,
+    items: o.items,
+    discount: o.discount,
+    needsReview: o.needsReview,
+    itemsTotal: o.itemsTotal,
+    reconciliation: o.info,
   );
 }
 
@@ -194,6 +207,11 @@ String? extractDate(List<String> lines, DateTime now) {
 }
 
 String extractMerchant(List<String> header) {
+  // Bilinen bir marka içeren ilk satır en güvenilir adaydır (Go: atlama/yıldız/harf filtreleri yok).
+  for (final l in header) {
+    final f = foldTR(l);
+    if (merchantBrands.any((kw) => containsWordFuzzy(f, kw))) return cleanMerchant(l);
+  }
   for (final l in header) {
     final f = foldTR(l);
     if (skipMerchantWords.any(f.contains)) continue;
@@ -212,8 +230,6 @@ String cleanMerchant(String l) {
   return r.length > 60 ? String.fromCharCodes(r.sublist(0, 60)) : l;
 }
 
-bool _approxEq(double a, double b) => (a - b).abs() < 0.005;
-
 /// Net satır tutarı taşıyan adet satırını ("2 ADET X 15,00 = 30,00") işler. Net tutar satırın EN SAĞINDAKİ
 /// tutardır; birim fiyat asla ayrı kalem olmaz.
 void _applyQtyLine(List<LocalItem> items, String pending, double qty, double unit, double net) {
@@ -221,9 +237,9 @@ void _applyQtyLine(List<LocalItem> items, String pending, double qty, double uni
     items.add(LocalItem(pending, net));
   } else if (items.isEmpty) {
     return;
-  } else if (_approxEq(items.last.amount, net)) {
+  } else if (approxEq(items.last.amount, net)) {
     return;
-  } else if (qty > 1 && _approxEq(items.last.amount, unit) && _approxEq(round2(qty * unit), net)) {
+  } else if (qty > 1 && approxEq(items.last.amount, unit) && approxEq(round2(qty * unit), net)) {
     items.last.amount = net;
   }
 }
@@ -237,11 +253,21 @@ bool _nextLineIsItemOf(List<String> lines, int i, double net) {
   if (m.isEmpty) return false;
   final last = m.last;
   final v = parseAmount(lines[i].substring(last.start, last.end));
-  return v != null && _approxEq(v, net) && countLetters(cleanItemName(lines[i].substring(0, last.start))) >= 2;
+  return v != null && approxEq(v, net) && countLetters(cleanItemName(lines[i].substring(0, last.start))) >= 2;
 }
 
-List<LocalItem> extractItems(List<String> lines, double? totalAmount) {
+List<LocalItem> extractItems(List<String> lines, double? totalAmount) => extractItemsWithBare(lines, totalAmount).items;
+
+/// Kalemleri çıkarır. Ayrıca ondalık ayırıcısı OCR'da düşmüş ("*070", "100") satırları ADAY olarak
+/// ([bare]; yalnızca toplamla doğrulanınca eklenir, recoverBareAmounts) ve yalnızca kısa bir etiket
+/// kelimesi yüzünden atlanan tutarlı satırları ([skipped]; mutabakat gerekçesi) döndürür.
+({List<LocalItem> items, List<BareCandidate> bare, List<LocalItem> skipped}) extractItemsWithBare(
+  List<String> lines,
+  double? totalAmount,
+) {
   final items = <LocalItem>[];
+  final cands = <BareCandidate>[];
+  final skipped = <LocalItem>[];
   var pendingName = ''; // üstteki satır yalnızca ürün adı (alttaki adet satırının kalemi olabilir)
   for (var li = 0; li < lines.length; li++) {
     var l = lines[li];
@@ -267,12 +293,25 @@ List<LocalItem> extractItems(List<String> lines, double? totalAmount) {
       l = rest; // adet satırı kalem değildir; kalan işlenir
     }
     final lab = nonItemLabel(l);
-    if (lab.strong || lab.weak) continue;
+    if (lab.strong || lab.weak) {
+      if (lab.weak) {
+        final a = amountsIn(l);
+        if (a.isNotEmpty) skipped.add(LocalItem(cleanItemName(l), a.last));
+      }
+      continue;
+    }
     final masked = maskDates(l);
     final matches = amountRe.allMatches(masked).toList();
     if (matches.isEmpty) {
       final b = bareAmountRe.firstMatch(l);
-      if (b != null) continue; // ondalığı düşmüş tutar: çevrimdışıyken kurtarılmaz
+      if (b != null) {
+        final n = int.tryParse(b[1]!);
+        if (n != null && n > 0) {
+          final name = cleanItemName(l.substring(0, b.start));
+          if (countLetters(name) >= 2) cands.add(BareCandidate(items.length, LocalItem(name, n / 100)));
+        }
+        continue;
+      }
       final name = cleanItemName(l);
       if (countLetters(name) >= 3 && !isStarBanner(l)) pendingName = name;
       continue;
@@ -288,7 +327,7 @@ List<LocalItem> extractItems(List<String> lines, double? totalAmount) {
       items.add(LocalItem(namePart, val));
     }
   }
-  return items;
+  return (items: items, bare: cands, skipped: skipped);
 }
 
 /// Kalem adındaki KDV oranı ve sütun kalıntılarını temizler ("...  %08 *" → ad).

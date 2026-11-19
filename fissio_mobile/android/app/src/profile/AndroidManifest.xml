@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Profil derlemesi de yerel backend'e bağlanır; release'te KAPALI. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

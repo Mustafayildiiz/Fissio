@@ -1099,7 +1099,7 @@ class TotalMismatchBanner extends StatelessWidget {
   final double discount;
 
   static bool mismatch(double itemsTotal, double? receiptTotal) =>
-      receiptTotal != null && (itemsTotal - receiptTotal).abs() >= 0.01;
+      receiptTotal != null && ((itemsTotal * 100).round() - (receiptTotal * 100).round()).abs() >= 1; // kuruş: float farkı (0.00999…) kaçmasın
 
   @override
   Widget build(BuildContext context) {

@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth, expense]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: t
+          POSTGRES_DB: fissio_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    env:
+      # İçinde "test" geçen atılabilir DB: PG'li testler şemayı DROP eder. auth ve expense işleri ayrı servis
+      # konteynerinde çalışır (matrix), bu yüzden şema çakışması olmaz; her iş içinde paketler sırayla (-p 1).
+      FISSIO_TEST_DATABASE_URL: postgres://postgres:t@localhost:5432/fissio_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/${{ matrix.service }}/go.mod
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
+      - run: go vet ./...
+      - run: go test -count=1 -p 1 ./...
+
+  ocr:
+    name: OCR (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Testler paddleocr gerektirmez (tembel import) ama numpy/opencv/fastapi ister; kilit dosyasındaki
+      # sürümlerle kurulur ve altın vektörler /testdata ya da FISSIO_TESTDATA ile okunur.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/ocr/constraints.txt
+      - name: Bağımlılıklar (paddle hariç)
+        working-directory: services/ocr
+        run: |
+          grep -v -i -E '^(paddlepaddle|paddleocr)' constraints.txt > /tmp/constraints-ci.txt
+          pip install -c /tmp/constraints-ci.txt numpy pillow opencv-python-headless fastapi "uvicorn[standard]" python-multipart pydantic pytest httpx
+      - name: pytest
+        working-directory: services/ocr
+        env:
+          FISSIO_TESTDATA: ${{ github.workspace }}/testdata
+          FISSIO_OPENAPI: ${{ github.workspace }}/docs/openapi.yaml
+        run: python -m pytest tests -q -p no:cacheprovider
+
+  flutter:
+    name: Flutter (analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fissio_mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      # Testler ../testdata altın vektörlerini okur (çalışma dizini fissio_mobile).
+      - run: flutter test
+
+  compose:
+    name: docker compose yapılandırması
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q
+      - run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q

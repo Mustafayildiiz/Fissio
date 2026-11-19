@@ -1,0 +1,20 @@
+{
+  "name": "can_bolat",
+  "note": "Gercek PaddleOCR ciktisi: TOP etiketi, KDU satiri kalem degil, etiketle yapisik tarih.",
+  "text": "CANBOLATMARKET\nNURDAG1.VD.1990376834 NO.45NURDAG1/G.ANTEP 03426712946\nTESEKKORLER\nSAAT1601 TAR1H14/02/2016\nF15NO8881\nTGIDA %8 *480.00\nKDU *35,56\nTOP *480.00\nNAKIT 00080*\nKASIYER:SATIS\nZNO0541 EKUNO:0002\nRG11114742",
+  "expect": {
+    "merchant": "CANBOLATMARKET",
+    "amount": 480,
+    "date": "2016-02-14",
+    "item_count": 1,
+    "needs_review": false,
+    "discount_total": 0,
+    "items": [
+      {
+        "name": "TGIDA",
+        "amount": 480
+      }
+    ]
+  },
+  "known_divergence": []
+}

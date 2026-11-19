@@ -1,0 +1,84 @@
+{
+  "name": "bim_koltuk",
+  "note": "Gercek PaddleOCR ciktisi: ondaligi dusmus iki tutar (*070, 100) toplamla dogrulanarak geri kazanilir (recoverBareAmounts); PATITO x2 korunur.",
+  "text": "BIM BIRLESIK MAGAZALAR A.S\nHARMANMH.MEZARLIKSK.NO4\nTALAS/KAYSER\nB0Y0K M0KELLEFLER V.D1750051846\nTARIH12.12.2019\nSAAT 17:57\nFIS NO0298\nPAT.CIPSI PATITO %08 3,25\nPAT.CIPSI PATITO %08 3,25\nSOT AROMALI %08 1,00\nETI KARAM GURME 50 G %08 1,75\nETIKARAM GURME 50 G %08 1,75\n200ML.MUZ.S0T %08 1,00\nSUT AROMALI %08 1,00\n200ML.MUZ.ST %08 1,00\nSUT AROMALI %08 100\nSUT AROMALI %08 1,00\nKEK 35 G KEKSTRA %08 *070\nKEK 35 G KEKSTRA %08 0,70\nALISVERIS POSETI %18 0,25\n3X1,00\nPOPKEK MUZLU 6OG %08 3,00\nDANKEK 40 GR %08 1,00\nDANKEK 40 GR %08 x1.00\n2X1,75\nETi KARAM GURME 50 G %08 *3.50\nTOPKDV 1,96\nTOPLAM 26,15\nKREDi KARTI 26,15\nBanka Kredi Karti.\nProvizyon No527212\niyi sünler, yine bekleriz KASIYERI***A*** EKO NO:0001\nZNO0802 MYAB15024061",
+  "expect": {
+    "merchant": "BIM BIRLESIK MAGAZALAR A.S",
+    "amount": 26.15,
+    "date": "2019-12-12",
+    "item_count": 17,
+    "needs_review": false,
+    "discount_total": 0,
+    "items": [
+      {
+        "name": "PAT.CIPSI PATITO",
+        "amount": 3.25
+      },
+      {
+        "name": "PAT.CIPSI PATITO",
+        "amount": 3.25
+      },
+      {
+        "name": "SOT AROMALI",
+        "amount": 1
+      },
+      {
+        "name": "ETI KARAM GURME 50 G",
+        "amount": 1.75
+      },
+      {
+        "name": "ETIKARAM GURME 50 G",
+        "amount": 1.75
+      },
+      {
+        "name": "200ML.MUZ.S0T",
+        "amount": 1
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1
+      },
+      {
+        "name": "200ML.MUZ.ST",
+        "amount": 1
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1
+      },
+      {
+        "name": "KEK 35 G KEKSTRA",
+        "amount": 0.7
+      },
+      {
+        "name": "KEK 35 G KEKSTRA",
+        "amount": 0.7
+      },
+      {
+        "name": "ALISVERIS POSETI",
+        "amount": 0.25
+      },
+      {
+        "name": "POPKEK MUZLU 6OG",
+        "amount": 3
+      },
+      {
+        "name": "DANKEK 40 GR",
+        "amount": 1
+      },
+      {
+        "name": "DANKEK 40 GR",
+        "amount": 1
+      },
+      {
+        "name": "ETi KARAM GURME 50 G",
+        "amount": 3.5
+      }
+    ]
+  },
+  "known_divergence": []
+}

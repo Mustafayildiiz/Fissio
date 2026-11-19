@@ -1,0 +1,30 @@
+# Yayın için ters vekil + otomatik TLS (Let's Encrypt). Kullanım: docker-compose.prod.yml ile birlikte (bkz. README/CLAUDE.md).
+# FISSIO_DOMAIN=api.ornek.com  (DNS A kaydı bu makineye; 80/443 açık). Yerelde "localhost" => Caddy'nin kendi imzalı sertifikası.
+{$FISSIO_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# En büyük meşru istek: 6 sayfa x 5 MB fiş taraması (+ form payı)
+	request_body {
+		max_size 40MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# Tek origin: /auth/* -> auth, geri kalan her şey -> expense. İç API'ler (9090) ve OCR buradan ERİŞİLEMEZ.
+	@auth path /auth/*
+	handle @auth {
+		reverse_proxy auth:8080
+	}
+	handle {
+		# Fiş taraması uzun sürebilir (sunucu tarafı toplam 90 sn)
+		reverse_proxy expense:8080 {
+			transport http {
+				response_header_timeout 150s
+			}
+		}
+	}
+}

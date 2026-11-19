@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../models.dart';
+import '../receipt_parser/normalize.dart' show foldTR;
 import '../stats.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -43,12 +44,12 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
   }
 
   List<Expense> _visible(int? categoryId) {
-    final q = _search.text.trim().toLowerCase();
+    final q = foldTR(_search.text.trim());
     final list = appState.expenses.where((e) {
       if (categoryId != null && e.categoryId != categoryId) return false;
       if (q.isNotEmpty &&
-          !e.merchant.toLowerCase().contains(q) &&
-          !e.categoryName.toLowerCase().contains(q)) {
+          !foldTR(e.merchant).contains(q) &&
+          !foldTR(e.categoryName).contains(q)) {
         return false;
       }
       if (_range != null) {

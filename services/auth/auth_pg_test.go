@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -16,7 +18,7 @@ import (
 )
 
 // PG testleri yalnizca FISSIO_TEST_DATABASE_URL ("test" icermeli) tanimliysa calisir.
-// DIKKAT: auth ve expense semalarini DROP eder; expense testleriyle PARALEL calistirma.
+// DIKKAT: auth semasini DROP eder (expense testleriyle ayni veritabani); expense testleriyle PARALEL calistirma.
 
 type captureMailer struct {
 	mu    sync.Mutex
@@ -50,9 +52,38 @@ type env struct {
 	h    *handler
 	r    *gin.Engine
 	mail *captureMailer
+	purger *fakePurger
 }
 
 const testPass = "Passw0rdX"
+
+const testInternalToken = "test-internal-token"
+
+// fakePurger expense'in internal API'sinin taklidi: cagrilan kullanici id'lerini kaydeder, istenirse hata doner.
+type fakePurger struct {
+	mu   sync.Mutex
+	ids  []int64
+	fail error
+}
+
+func (f *fakePurger) PurgeUser(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ids = append(f.ids, id)
+	return f.fail
+}
+
+func (f *fakePurger) calls() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.ids...)
+}
+
+func (f *fakePurger) setErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = err
+}
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
@@ -66,29 +97,19 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	for _, s := range []string{`DROP SCHEMA IF EXISTS auth CASCADE`, `DROP SCHEMA IF EXISTS expense CASCADE`} {
-		if _, err := db.Exec(s); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// expense modulunun migrate()'i import edilemez; silme akisini sinamak icin minimal DDL.
-	if _, err := db.Exec(`
-CREATE SCHEMA expense;
-CREATE TABLE expense.profiles (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, name TEXT);
-CREATE TABLE expense.expenses (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, merchant TEXT);
-CREATE TABLE expense.receipt_images (id BIGSERIAL PRIMARY KEY, expense_id BIGINT REFERENCES expense.expenses(id) ON DELETE CASCADE, user_id BIGINT NOT NULL);
-CREATE TABLE expense.category_rules (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL);
-CREATE TABLE expense.budgets (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, profile_id BIGINT NOT NULL);`); err != nil {
+	// auth artik expense semasina dokunmaz: hesap silmede expense verisi expense'in internal API'siyle (fakePurger) silinir.
+	if _, err := db.Exec(`DROP SCHEMA IF EXISTS auth CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	cfg := config{accessSecret: []byte("access-secret"), refreshSecret: []byte("refresh-secret"), otpTTL: 10 * time.Minute}
+	cfg := config{accessSecret: []byte("access-secret"), refreshSecret: []byte("refresh-secret"), otpTTL: 10 * time.Minute, internalToken: testInternalToken}
 	cm := &captureMailer{codes: map[string]string{}}
 	dummy, _ := bcrypt.GenerateFromPassword([]byte("dummy"), bcrypt.MinCost)
-	h := &handler{db: db, cfg: cfg, mailer: cm, dummyHash: dummy, rateMax: 100000}
-	return &env{t: t, db: db, h: h, r: buildRouter(h), mail: cm}
+	fp := &fakePurger{}
+	h := &handler{db: db, cfg: cfg, mailer: cm, dummyHash: dummy, rateMax: 100000, purger: fp}
+	return &env{t: t, db: db, h: h, r: buildRouter(h), mail: cm, purger: fp}
 }
 
 func (e *env) do(method, path string, body any, token string) (int, map[string]any) {
@@ -453,32 +474,21 @@ func TestPGDeleteAccountWipesEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = e.db.QueryRow(`SELECT id FROM auth.users WHERE email='keep@example.com'`).Scan(&keepID)
-	for _, id := range []int64{uid, keepID} {
-		var eid int64
-		if _, err := e.db.Exec(`INSERT INTO expense.profiles (user_id,name) VALUES ($1,'Kisisel')`, id); err != nil {
-			t.Fatal(err)
-		}
-		if err := e.db.QueryRow(`INSERT INTO expense.expenses (user_id,merchant) VALUES ($1,'BIM') RETURNING id`, id).Scan(&eid); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := e.db.Exec(`INSERT INTO expense.receipt_images (expense_id,user_id) VALUES ($1,$2)`, eid, id); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := e.db.Exec(`INSERT INTO expense.category_rules (user_id) VALUES ($1)`, id); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := e.db.Exec(`INSERT INTO expense.budgets (user_id, profile_id) VALUES ($1, 1)`, id); err != nil {
-			t.Fatal(err)
-		}
-	}
 
 	st, b := e.do("DELETE", "/auth/account", map[string]any{"password": "Wrong1234"}, acc)
 	e.expect(st, 403, b, "wrong password")
 	st, b = e.do("DELETE", "/auth/account", map[string]any{}, acc)
 	e.expect(st, 400, b, "missing password")
+	if len(e.purger.calls()) != 0 {
+		t.Fatal("expense must not be purged before the password is confirmed")
+	}
 	st, b = e.do("DELETE", "/auth/account", map[string]any{"password": testPass}, acc)
 	e.expect(st, 204, b, "delete")
 
+	// expense verisi expense'in internal API'siyle silinir; yalnizca silinen kullanici icin.
+	if got := e.purger.calls(); len(got) != 1 || got[0] != uid {
+		t.Fatalf("expense purge calls = %v, want [%d]", got, uid)
+	}
 	count := func(q string, id int64) int {
 		var n int
 		if err := e.db.QueryRow(q, id).Scan(&n); err != nil {
@@ -489,18 +499,14 @@ func TestPGDeleteAccountWipesEverything(t *testing.T) {
 	for _, q := range []string{
 		`SELECT count(*) FROM auth.users WHERE id=$1`,
 		`SELECT count(*) FROM auth.sessions WHERE user_id=$1`,
-		`SELECT count(*) FROM expense.profiles WHERE user_id=$1`,
-		`SELECT count(*) FROM expense.expenses WHERE user_id=$1`,
-		`SELECT count(*) FROM expense.receipt_images WHERE user_id=$1`,
-		`SELECT count(*) FROM expense.category_rules WHERE user_id=$1`,
-		`SELECT count(*) FROM expense.budgets WHERE user_id=$1`,
+		`SELECT count(*) FROM auth.refresh_tokens WHERE session_id IN (SELECT id FROM auth.sessions WHERE user_id=$1)`,
 	} {
 		if n := count(q, uid); n != 0 {
 			t.Fatalf("%s left %d rows for deleted user", q, n)
 		}
-		if n := count(q, keepID); n == 0 && !strings.Contains(q, "auth.sessions") {
-			t.Fatalf("%s: other user's data was removed", q)
-		}
+	}
+	if count(`SELECT count(*) FROM auth.users WHERE id=$1`, keepID) != 1 {
+		t.Fatal("other user's account was removed")
 	}
 	var n int
 	_ = e.db.QueryRow(`SELECT count(*) FROM auth.email_otps WHERE email='del@example.com'`).Scan(&n)
@@ -515,14 +521,105 @@ func TestPGDeleteAccountWipesEverything(t *testing.T) {
 	e.expect(st, 200, b, "other account intact")
 }
 
-func TestPGDeleteAccountWithoutExpenseSchema(t *testing.T) {
+// expense erisilemezken hesap silme: kullanici hemen kullanilamaz hale gelir (oturumlar iptal, giris engelli), auth satirlari
+// korunur ve silme sweepDeletions ile (bekleme suresinden sonra) tamamlanir. Verinin sessizce kalmasi yok.
+func TestPGDeleteAccountDeferredWhenExpenseUnavailable(t *testing.T) {
 	e := newEnv(t)
-	acc, _ := e.signup("solo@example.com", "Pixel")
-	if _, err := e.db.Exec(`DROP SCHEMA expense CASCADE`); err != nil {
+	acc, _ := e.signup("pending@example.com", "Pixel")
+	var uid int64
+	_ = e.db.QueryRow(`SELECT id FROM auth.users WHERE email='pending@example.com'`).Scan(&uid)
+
+	e.purger.setErr(errors.New("expense down"))
+	st, b := e.do("DELETE", "/auth/account", map[string]any{"password": testPass}, acc)
+	e.expect(st, 202, b, "deferred deletion")
+
+	var deleting sql.NullTime
+	if err := e.db.QueryRow(`SELECT deleting_at FROM auth.users WHERE id=$1`, uid).Scan(&deleting); err != nil || !deleting.Valid {
+		t.Fatalf("user must be marked as deleting: %v %v", deleting, err)
+	}
+	st, b = e.do("GET", "/auth/me", nil, acc)
+	e.expect(st, 401, b, "sessions revoked while deletion is pending")
+	st, b = e.do("POST", "/auth/login", map[string]any{"email": "pending@example.com", "password": testPass}, "")
+	e.expect(st, 401, b, "login blocked while deletion is pending")
+
+	// Bekleme suresi dolmadan sweep dokunmaz (expense onbellek penceresi).
+	e.h.sweepDeletions(context.Background())
+	var n int
+	_ = e.db.QueryRow(`SELECT count(*) FROM auth.users WHERE id=$1`, uid).Scan(&n)
+	if n != 1 {
+		t.Fatal("sweep must wait for the grace period")
+	}
+	// Sure doldu ama expense hala kapali: satir korunur.
+	_, _ = e.db.Exec(`UPDATE auth.users SET deleting_at = now() - interval '5 minutes' WHERE id=$1`, uid)
+	e.h.sweepDeletions(context.Background())
+	_ = e.db.QueryRow(`SELECT count(*) FROM auth.users WHERE id=$1`, uid).Scan(&n)
+	if n != 1 {
+		t.Fatal("user row must be kept while expense purge keeps failing")
+	}
+	// expense dondu: sweep tamamlar.
+	e.purger.setErr(nil)
+	e.h.sweepDeletions(context.Background())
+	_ = e.db.QueryRow(`SELECT count(*) FROM auth.users WHERE id=$1`, uid).Scan(&n)
+	if n != 0 {
+		t.Fatal("sweep must finish the deletion once expense is reachable")
+	}
+	if got := e.purger.calls(); got[len(got)-1] != uid {
+		t.Fatalf("purge calls = %v", got)
+	}
+}
+
+func TestPGInternalSessionEndpoint(t *testing.T) {
+	e := newEnv(t)
+	acc, _ := e.signup("sess@example.com", "Pixel")
+	var uid int64
+	_ = e.db.QueryRow(`SELECT id FROM auth.users WHERE email='sess@example.com'`).Scan(&uid)
+	var sid string
+	if err := e.db.QueryRow(`SELECT id::text FROM auth.sessions WHERE user_id=$1`, uid).Scan(&sid); err != nil {
 		t.Fatal(err)
 	}
-	st, b := e.do("DELETE", "/auth/account", map[string]any{"password": testPass}, acc)
-	e.expect(st, 204, b, "delete without expense schema")
+	r := buildInternalRouter(e.h)
+	get := func(path, token string) (int, map[string]any) {
+		req := httptest.NewRequest("GET", path, nil)
+		if token != "" {
+			req.Header.Set(internalTokenHeader, token)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		out := map[string]any{}
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	if c, _ := get("/internal/sessions/"+sid, ""); c != 401 {
+		t.Fatalf("no token: %d", c)
+	}
+	if c, _ := get("/internal/sessions/"+sid, "wrong"); c != 401 {
+		t.Fatalf("wrong token: %d", c)
+	}
+	c, out := get("/internal/sessions/"+sid, testInternalToken)
+	if c != 200 || out["alive"] != true || int64(out["user_id"].(float64)) != uid {
+		t.Fatalf("alive session: %d %v", c, out)
+	}
+	if c, _ := get("/internal/sessions/00000000-0000-0000-0000-000000000000", testInternalToken); c != 404 {
+		t.Fatalf("unknown session: %d", c)
+	}
+	if c, _ := get("/internal/sessions/not-a-uuid", testInternalToken); c != 400 {
+		t.Fatalf("malformed session id: %d", c)
+	}
+	// Cikis sonrasi oturum "alive:false".
+	st, b := e.do("POST", "/auth/logout-all", nil, acc)
+	e.expect(st, 204, b, "logout-all")
+	c, out = get("/internal/sessions/"+sid, testInternalToken)
+	if c != 200 || out["alive"] != false {
+		t.Fatalf("revoked session: %d %v", c, out)
+	}
+	// Bos token yapilandirmasi tum istekleri reddeder.
+	empty := buildInternalRouter(&handler{db: e.db, cfg: config{}})
+	req := httptest.NewRequest("GET", "/internal/sessions/"+sid, nil)
+	w := httptest.NewRecorder()
+	empty.ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Fatalf("empty token config must reject: %d", w.Code)
+	}
 }
 
 func TestPGMigrateBackfillsLegacyUsersOnce(t *testing.T) {

@@ -2,12 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
 const maxBulkExpenses = 500
+
+// maxBulkBodyBytes 500 fisin makul ust siniri (fis basina ~20 KB'a kadar: 100 kalem + notlar).
+const maxBulkBodyBytes = 10 << 20
 
 type bulkInput struct {
 	// ProfileID varsayilan profil; her fis kendi profile_id'sini tasiyabilir (coklu profilli iceri aktarma).
@@ -28,7 +34,13 @@ type bulkResult struct {
 // ve digerlerini engellemez. Tum gecerli fisler tek islemde yazilir.
 func (h *handler) bulkExpenses(c *gin.Context) {
 	var in bulkInput
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBulkBodyBytes)
 	if err := c.ShouldBindJSON(&in); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request too large"})
+			return
+		}
 		badRequest(c, "invalid request body")
 		return
 	}
@@ -103,17 +115,36 @@ func (h *handler) bulkExpenses(c *gin.Context) {
 			continue
 		}
 		itemsJSON, _ := json.Marshal(itemsForStorage(e.Items))
+		// Her fis kendi SAVEPOINT'inde yazilir: tek bir bozuk kayit (DB'nin reddettigi veri) tum partiyi
+		// 500'e dusurup cevrimdisi kuyrugu sonsuza kadar kilitlemesin; o fis "error" olarak raporlanir.
+		if _, err := tx.Exec(`SAVEPOINT bulk_item`); err != nil {
+			serverError(c)
+			return
+		}
 		id, wasCreated, err := insertExpense(tx, userID, pid, e.ClientUID, *e, d, string(itemsJSON))
+		if err == nil && wasCreated {
+			err = saveRules(tx, userID, collectRuleUpdates(*e))
+		}
 		if err != nil {
+			var pqErr *pq.Error
+			if !errors.As(err, &pqErr) {
+				serverError(c) // baglanti/surucu hatasi: kalem hatasi degil
+				return
+			}
+			if _, rerr := tx.Exec(`ROLLBACK TO SAVEPOINT bulk_item`); rerr != nil {
+				serverError(c)
+				return
+			}
+			log.Printf("bulk: item %d rejected by database (code %s): %s", i, pqErr.Code, pqErr.Message)
+			fail("could not be saved")
+			continue
+		}
+		if _, err := tx.Exec(`RELEASE SAVEPOINT bulk_item`); err != nil {
 			serverError(c)
 			return
 		}
 		res.ID = id
 		if wasCreated {
-			if err := saveRules(tx, userID, collectRuleUpdates(*e)); err != nil {
-				serverError(c)
-				return
-			}
 			res.Status = "created"
 			created++
 		} else {

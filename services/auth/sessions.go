@@ -67,7 +67,8 @@ type tokenPair struct {
 
 // issueTokens oturum icin access token uretir.
 func (h *handler) accessFor(userID int64, sid string) (string, time.Time, error) {
-	return issueAccessToken(h.cfg.accessSecret, userID, sid, accessTTL)
+	method, key := h.cfg.signingMethodAndKey()
+	return issueAccessTokenWith(method, key, userID, sid, accessTTL)
 }
 
 // rotateRefresh refresh token'i tek kullanimlik olarak doner ve yeni cift uretir.

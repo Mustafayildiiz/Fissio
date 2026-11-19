@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS expense.category_rules (
 		return err
 	}
 
-	// Marka ve urun sozlugu kodda (category_lexicon.go); keywords kolonu ek/ozel marka anahtar
+	// Marka ve urun sozlugu kodda (internal/receiptparse/category_lexicon.go); keywords kolonu ek/ozel marka anahtar
 	// kelimeleri icindir ve bos baslar.
 	seed := []string{
 		"Market / Gıda", "Restoran / Kafe", "Akaryakıt / Ulaşım", "Giyim", "Elektronik",
@@ -121,6 +121,7 @@ func migrateTaxonomy(db *sql.DB) error {
 //   - expenses.recurring_day (1-31, NULL = tekrarlamaz) ve recurring_remind: "Her ay tekrarlanir" isareti
 //     ve odeme hatirlatici tercihi; recurring_kind (fixed|variable) ve recurring_estimate (degisken fatura tahmini).
 //     Seri/projeksiyon hesabi recurring.go'da.
+//   - expenses.updated_at (+ (user_id, updated_at) indeksi): cakisma denetimi ve artimli senkron.
 func migrateBudgetsAndRecurring(db *sql.DB) error {
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS expense.budgets (
@@ -142,7 +143,11 @@ ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_remind BOOLEAN N
 -- Tekrar turu: sabit (kira, abonelik) / degisken (elektrik, su, dogalgaz faturasi) ve degisken icin tahmini tutar.
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_kind TEXT NOT NULL DEFAULT 'fixed' CHECK (recurring_kind IN ('fixed','variable'));
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_estimate NUMERIC(12,2) CHECK (recurring_estimate > 0);
-CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;`)
+CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;
+-- Son degisiklik zamani: iyimser eszamanlilik (PUT base_updated_at -> 409) ve artimli liste (GET /expenses?since=).
+-- INSERT varsayilanla, her UPDATE acikca (bkz. updateExpense) gunceller; fotograf ekleme/silme guncellemez.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS idx_expenses_user_updated ON expense.expenses (user_id, updated_at);`)
 	return err
 }
 

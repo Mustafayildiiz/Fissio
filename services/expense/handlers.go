@@ -4,26 +4,33 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
+
+	"fissio/expense/internal/receiptparse"
+	"fissio/expense/internal/scan"
 )
 
 type handler struct {
 	db         *sql.DB
-	ocrFactory *OcrEngineFactory
+	ocrFactory *scan.OcrEngineFactory
+	// scanLim: kullanici basina tarama siniri (nil = surec geneli varsayilan, bkz. internal/scan).
+	scanLim *scan.Limiter
 }
 
 const dateLayout = "2006-01-02"
 
 func badRequest(c *gin.Context, msg string) { c.JSON(http.StatusBadRequest, gin.H{"error": msg}) }
 func serverError(c *gin.Context) {
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error", "code": "internal"})
 }
 
 func (h *handler) loadCategories() ([]Category, error) {
@@ -78,7 +85,7 @@ func (h *handler) parseReceipt(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	c.JSON(http.StatusOK, ParseWith(in.Text, cats, time.Now(), ParseOptions{Rules: rules}))
+	c.JSON(http.StatusOK, receiptparse.ParseWith(in.Text, cats, time.Now(), receiptparse.ParseOptions{Rules: rules}))
 }
 
 // scanReceipt: Resolves the active OcrEngine via Strategy Factory, extracts text from
@@ -87,6 +94,18 @@ func (h *handler) scanReceipt(c *gin.Context) {
 	// multipart/form-data: tekrarlanabilir "file" (sayfa, <= 6 adet, her biri <= 5MB) ve istege bagli
 	// "engine". Uzun fisler birden cok fotografla gelir; sayfalar sirayla OCR'lanir, metinler
 	// birlestirilir ve TEK kez ayristirilir.
+	lim := h.scanLim
+	if lim == nil {
+		lim = scan.DefaultLimiter
+	}
+	release, allowed, reason := lim.Acquire(c.GetInt64("userID"), time.Now())
+	if !allowed {
+		c.Header("Retry-After", "5")
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many receipt scans, retry shortly", "code": "scan_" + reason})
+		return
+	}
+	defer release()
+
 	files, ok := limitBody(c)
 	if !ok {
 		return
@@ -123,7 +142,7 @@ func (h *handler) scanReceipt(c *gin.Context) {
 
 	factory := h.ocrFactory
 	if factory == nil {
-		factory = NewOcrEngineFactoryFromEnv()
+		factory = scan.NewOcrEngineFactoryFromEnv()
 	}
 	engine, err := factory.Resolve(requestedEngine)
 	if err != nil {
@@ -131,34 +150,22 @@ func (h *handler) scanReceipt(c *gin.Context) {
 		return
 	}
 
-	var texts []string
-	agg := OcrExtractionResult{PageCount: len(pages)}
-	confSum := 0.0
-	for i, img := range pages {
-		res, err := engine.ExtractText(c.Request.Context(), img)
-		// Bellekten goruntu verisini hemen temizle (FR-2.3 / NFR-2)
-		clear(img)
-		if err != nil {
-			if errors.Is(err, ErrInvalidOcrInput) {
-				badRequest(c, "invalid receipt image")
-				return
-			}
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
-		}
-		texts = append(texts, res.RawText)
-		agg.Blocks = append(agg.Blocks, res.Blocks...)
-		agg.ElapsedMs += res.ElapsedMs
-		confSum += res.Confidence
-		if i == 0 {
-			agg.Engine, agg.ModelVersion = res.Engine, res.ModelVersion
+	// Sayfalar sinirli paralellikle okunur (sira korunur); okunamayan sayfa tum taramayi dusurmez.
+	results := scan.Run(c.Request.Context(), engine, pages)
+	agg, failed, allInvalid := scan.Assemble(results)
+	for i, r := range results {
+		if r.Err != nil {
+			log.Printf("scan: page %d failed: %v", i+1, r.Err)
 		}
 	}
-	agg.RawText = mergePageTexts(texts)
-	agg.Confidence = confSum / float64(len(pages))
-	agg.IsEmpty = strings.TrimSpace(agg.RawText) == ""
-	if agg.Blocks == nil {
-		agg.Blocks = []OcrTextBlock{}
+	if allInvalid {
+		badRequest(c, "invalid receipt image")
+		return
+	}
+	if len(failed) == len(results) {
+		// Ic adresler/upstream govdesi istemciye sizdirilmaz (ayrintisi yukaridaki logda).
+		c.JSON(http.StatusBadGateway, gin.H{"error": "ocr service unavailable", "code": "ocr_unavailable"})
+		return
 	}
 
 	cats, err := h.loadCategories()
@@ -172,27 +179,15 @@ func (h *handler) scanReceipt(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	parsed := ParseWith(agg.RawText, cats, time.Now(), ParseOptions{Rules: rules})
-	c.JSON(http.StatusOK, gin.H{
-		"ocr":    agg,
-		"parsed": parsed,
-	})
-}
-
-// expenseItem hem ayristirma ciktisinin hem istegin hem de JSONB'nin kalem tipidir. Kategori alanlari
-// opsiyoneldir (eski satirlar sifir degerle okunur). Yalnizca {name, amount, category_id} saklanir
-// (bkz. itemsForStorage); guven/kaynak/inceleme alanlari ayristirma ciktisina, suggested_category_id
-// yalnizca istege aittir (kullanici duzeltmesinden kural ogrenmek icin).
-type expenseItem struct {
-	Name               string  `json:"name"`
-	Amount             float64 `json:"amount"`
-	CategoryID         int     `json:"category_id,omitempty"`
-	CategoryName       string  `json:"category_name,omitempty"`
-	CategoryConfidence float64 `json:"category_confidence,omitempty"`
-	CategorySource     string  `json:"category_source,omitempty"`
-	CategoryReview     bool    `json:"category_review,omitempty"`
-
-	SuggestedCategoryID int `json:"suggested_category_id,omitempty"`
+	parsed := receiptparse.ParseWith(agg.RawText, cats, time.Now(), receiptparse.ParseOptions{Rules: rules})
+	resp := gin.H{"ocr": agg, "parsed": parsed}
+	if len(failed) > 0 {
+		// Kismi sonuc: okunamayan sayfalar (1 tabanli) bildirilir; eksik sayfa nedeniyle toplam guvenilmez.
+		parsed.NeedsReview = true
+		resp["parsed"] = parsed
+		resp["failed_pages"] = failed
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 type expenseInput struct {
@@ -220,6 +215,9 @@ type expenseInput struct {
 	// RecurringEstimate: degisken fatura icin kullanicinin tahmini aylik tutari (gecmis fatura yokken
 	// projeksiyonda kullanilir); 0/yok = tahmin yok.
 	RecurringEstimate float64 `json:"recurring_estimate"`
+	// BaseUpdatedAt (yalniz PUT): istemcinin duzenlemeye basladigi surumun updated_at degeri (RFC3339). Sunucudaki
+	// kayit bundan YENIYSE (baska cihaz degistirmis) yazilmaz, 409 conflict doner. Bos = denetim yok (eski davranis).
+	BaseUpdatedAt string `json:"base_updated_at"`
 }
 
 // remind hatirlatici tercihini dondurur (verilmediyse varsayilan: acik).
@@ -319,6 +317,21 @@ type expenseOut struct {
 	// RecurringKind fixed | variable; RecurringEstimate degisken faturanin tahmini tutari (0 = yok).
 	RecurringKind     string  `json:"recurring_kind"`
 	RecurringEstimate float64 `json:"recurring_estimate"`
+	// UpdatedAt son degisiklik zamani (RFC3339Nano, UTC, mikrosaniye): PUT base_updated_at ve GET ?since= icin
+	// istemci bu degeri AYNEN geri gonderir.
+	UpdatedAt string `json:"updated_at"`
+}
+
+// formatUpdatedAt updated_at'i istemciye giden bicime cevirir (Postgres mikrosaniye hassasiyetini korur).
+func formatUpdatedAt(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+// parseUpdatedAt istemciden gelen RFC3339 zamanini mikrosaniyeye (Postgres timestamptz hassasiyeti) kirpar.
+func parseUpdatedAt(s string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.Truncate(time.Microsecond), nil
 }
 
 func (in *expenseInput) validate() (time.Time, string) {
@@ -328,6 +341,9 @@ func (in *expenseInput) validate() (time.Time, string) {
 	in.Amount = math.Round(in.Amount*100) / 100
 	if in.Amount <= 0 {
 		return time.Time{}, "amount must be at least 0.01"
+	}
+	if in.Amount >= 1e10 { // 9999999999.999 yuvarlaninca NUMERIC(12,2)'yi tasirirdi
+		return time.Time{}, "amount must be a positive number"
 	}
 	d, err := time.Parse(dateLayout, in.Date)
 	if err != nil {
@@ -349,6 +365,9 @@ func (in *expenseInput) validate() (time.Time, string) {
 		return time.Time{}, "recurring_estimate must be a positive number"
 	}
 	in.RecurringEstimate = math.Round(in.RecurringEstimate*100) / 100
+	// NUL/kontrol karakterleri Postgres'te insert hatasi verir (bulk'ta tum partiyi bozardi): sessizce ayiklanir.
+	in.Merchant = cleanText(in.Merchant)
+	in.Note = cleanText(in.Note)
 	if len([]rune(in.Merchant)) > 100 {
 		return time.Time{}, "merchant too long"
 	}
@@ -360,6 +379,7 @@ func (in *expenseInput) validate() (time.Time, string) {
 	}
 	for i := range in.Items {
 		it := &in.Items[i]
+		it.Name = cleanText(it.Name)
 		if len([]rune(it.Name)) > 100 || math.IsNaN(it.Amount) || math.IsInf(it.Amount, 0) || it.Amount < 0 || it.Amount >= 1e10 ||
 			it.CategoryID < 0 || it.SuggestedCategoryID < 0 {
 			return time.Time{}, "invalid item"
@@ -372,6 +392,36 @@ func (in *expenseInput) validate() (time.Time, string) {
 	return d, ""
 }
 
+// cleanText NUL ve diger C0/C1 kontrol karakterlerini (tab, LF, CR haric) ayiklar; gecersiz UTF-8 dizilerini de atar.
+func cleanText(s string) string {
+	clean := true
+	for _, r := range s {
+		if isBadTextRune(r) {
+			clean = false
+			break
+		}
+	}
+	if clean && utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == utf8.RuneError || isBadTextRune(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func isBadTextRune(r rune) bool {
+	if r == '\t' || r == '\n' || r == '\r' {
+		return false
+	}
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
+}
+
 func isFKViolation(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == "23503"
@@ -379,7 +429,7 @@ func isFKViolation(err error) bool {
 
 const selectExpense = `
 SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
-       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0),
+       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at,
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -390,8 +440,10 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var d time.Time
 	var items []byte
 	var imageIDs pq.Int64Array
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &imageIDs)
+	var updated time.Time
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &imageIDs)
 	e.Date = d.Format(dateLayout)
+	e.UpdatedAt = formatUpdatedAt(updated)
 	e.Items = []expenseItem{}
 	e.ImageIDs = []int64{} // JSON'da null degil []
 	if len(imageIDs) > 0 {
@@ -481,8 +533,21 @@ func insertExpense(q interface {
 	return id, err == nil, err
 }
 
+// loadExpense hesaba ait tek fisi (kalem kategori adlari dolu) okur; yoksa sql.ErrNoRows.
+func (h *handler) loadExpense(userID, id int64) (expenseOut, error) {
+	e, err := scanExpense(h.db.QueryRow(selectExpense+`WHERE e.id = $1 AND e.user_id = $2`, id, userID))
+	if err != nil {
+		return e, err
+	}
+	one := []expenseOut{e}
+	if err := h.fillItemCategories(one); err != nil {
+		return e, err
+	}
+	return one[0], nil
+}
+
 func (h *handler) respondExpense(c *gin.Context, status int, id int64) {
-	e, err := scanExpense(h.db.QueryRow(selectExpense+`WHERE e.id = $1 AND e.user_id = $2`, id, c.GetInt64("userID")))
+	e, err := h.loadExpense(c.GetInt64("userID"), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "expense not found"})
 		return
@@ -491,12 +556,7 @@ func (h *handler) respondExpense(c *gin.Context, status int, id int64) {
 		serverError(c)
 		return
 	}
-	one := []expenseOut{e}
-	if h.fillItemCategories(one) != nil {
-		serverError(c)
-		return
-	}
-	c.JSON(status, one[0])
+	c.JSON(status, e)
 }
 
 // itemCategoriesOK kalem kategori id'lerini dogrular; gecersizse 400 yazar ve false doner.
@@ -544,6 +604,16 @@ func (h *handler) listExpenses(c *gin.Context) {
 			q += ` AND e.spent_at ` + p.op + ` $` + strconv.Itoa(len(args))
 		}
 	}
+	// since: artimli senkron; yalnizca bu andan SONRA eklenen/degisen fisler (silinenler icin GET /expenses/ids).
+	if v := c.Query("since"); v != "" {
+		t, err := parseUpdatedAt(v)
+		if err != nil {
+			badRequest(c, "since must be an RFC3339 timestamp")
+			return
+		}
+		args = append(args, t)
+		q += ` AND e.updated_at > $` + strconv.Itoa(len(args))
+	}
 	limit, offset := 50, 0
 	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 && v <= 200 {
 		limit = v
@@ -576,6 +646,31 @@ func (h *handler) listExpenses(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// listExpenseIDs hesabin TUM fis kimliklerini dondurur (ucuz): istemci artimli senkronda (since) gelmeyen
+// silmeleri, onbellekte olup burada olmayan kimliklerden anlar.
+func (h *handler) listExpenseIDs(c *gin.Context) {
+	rows, err := h.db.Query(`SELECT id FROM expense.expenses WHERE user_id = $1 ORDER BY id`, c.GetInt64("userID"))
+	if err != nil {
+		serverError(c)
+		return
+	}
+	defer rows.Close()
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			serverError(c)
+			return
+		}
+		ids = append(ids, id)
+	}
+	if rows.Err() != nil {
+		serverError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ids": ids})
+}
+
 func (h *handler) updateExpense(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -591,6 +686,16 @@ func (h *handler) updateExpense(c *gin.Context) {
 	if msg != "" {
 		badRequest(c, msg)
 		return
+	}
+	// Iyimser eszamanlilik: base_updated_at verilmisse kayit o surumden bu yana degismemis olmali.
+	var base any
+	if in.BaseUpdatedAt != "" {
+		t, err := parseUpdatedAt(in.BaseUpdatedAt)
+		if err != nil {
+			badRequest(c, "base_updated_at must be an RFC3339 timestamp")
+			return
+		}
+		base = t
 	}
 	if !h.itemCategoriesOK(c, in.Items) {
 		return
@@ -616,12 +721,16 @@ func (h *handler) updateExpense(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
+	// updated_at kesin artar: clock_timestamp() (islem baslangici olan now() degil; satir kilidini bekleyen bir PUT
+	// onu ezen surumden ESKI zaman yazmasin) ve en az onceki deger + 1 us. Surum denetimi ayni UPDATE'in WHERE'inde:
+	// satir kilitli yeniden degerlendirilir, denetim ile yazma arasinda yaris yoktur.
 	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
-		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11, recurring_kind = $12, recurring_estimate = $13
-		 WHERE id=$7 AND user_id=$8`,
+		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11, recurring_kind = $12, recurring_estimate = $13,
+		 updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		 WHERE id=$7 AND user_id=$8 AND ($14::timestamptz IS NULL OR updated_at <= $14::timestamptz)`,
 		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo,
-		in.recurringArg(), in.remind(), in.kind(), in.estimateArg())
+		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base)
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
@@ -631,6 +740,18 @@ func (h *handler) updateExpense(c *gin.Context) {
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
+		if base != nil {
+			// Yazilmadi: ya kayit yok/baska hesabin (404; icerigi asla sizdirilmaz) ya da baska yerde degismis (409).
+			cur, err := h.loadExpense(c.GetInt64("userID"), id)
+			if err == nil {
+				c.JSON(http.StatusConflict, gin.H{"error": "expense was modified elsewhere", "code": "conflict", "current": cur})
+				return
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				serverError(c)
+				return
+			}
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "expense not found"})
 		return
 	}

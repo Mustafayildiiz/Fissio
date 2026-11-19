@@ -67,9 +67,12 @@ func TestRecurringProjectionCountsSeriesOnce(t *testing.T) {
 	if el.NextDue != "2026-06-25" {
 		t.Fatalf("electricity next due = %s", el.NextDue)
 	}
-	// Kira 1'inde, bu ayin 1'i gecti -> Haziran 1.
-	if byMerchant["Ev sahibi"].NextDue != "2026-06-01" {
-		t.Fatalf("rent next due = %s", byMerchant["Ev sahibi"].NextDue)
+	// Kira 1'inde, bu ayin 1'i gecti ama bu ay girilmedi -> GECIKMIS: vade 1 Mayis kalir (listeden dusmez).
+	if rent := byMerchant["Ev sahibi"]; rent.NextDue != "2026-05-01" || !rent.Overdue {
+		t.Fatalf("rent next due = %s overdue=%v", rent.NextDue, rent.Overdue)
+	}
+	if el.Overdue {
+		t.Fatal("odenmis fatura gecikmis sayilmamali")
 	}
 }
 
@@ -87,20 +90,25 @@ func TestRecurringSeriesEndsWhenLatestIsNotMarkedAndProfilesAreSeparate(t *testi
 	}
 }
 
+func nextDueDay(day int, last, today time.Time) time.Time {
+	due, _ := nextDue(day, last, today)
+	return due
+}
+
 func TestNextDueClampsToMonthLength(t *testing.T) {
 	// 31. gun, Subat: ayin son gunu (28 / artik yilda 29).
-	if got := nextDue(31, day(2026, time.January, 31), day(2026, time.February, 2)).Format(dateLayout); got != "2026-02-28" {
+	if got := nextDueDay(31, day(2026, time.January, 31), day(2026, time.February, 2)).Format(dateLayout); got != "2026-02-28" {
 		t.Fatalf("feb 2026: %s", got)
 	}
-	if got := nextDue(31, day(2027, time.December, 31), day(2028, time.February, 2)).Format(dateLayout); got != "2028-02-29" {
+	if got := nextDueDay(31, day(2027, time.December, 31), day(2028, time.February, 2)).Format(dateLayout); got != "2028-02-29" {
 		t.Fatalf("feb 2028: %s", got)
 	}
 	// Ay sonunda: sonraki ay (yil donumu dahil).
-	if got := nextDue(15, day(2026, time.November, 15), day(2026, time.December, 20)).Format(dateLayout); got != "2027-01-15" {
+	if got := nextDueDay(15, day(2026, time.December, 15), day(2026, time.December, 20)).Format(dateLayout); got != "2027-01-15" {
 		t.Fatalf("year rollover: %s", got)
 	}
 	// Bugun odeme gunu ve bu ay icin fis yok -> bugun.
-	if got := nextDue(10, day(2026, time.April, 10), day(2026, time.May, 10)).Format(dateLayout); got != "2026-05-10" {
+	if got := nextDueDay(10, day(2026, time.April, 10), day(2026, time.May, 10)).Format(dateLayout); got != "2026-05-10" {
 		t.Fatalf("due today: %s", got)
 	}
 }

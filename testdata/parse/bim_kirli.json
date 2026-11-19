@@ -1,0 +1,88 @@
+{
+  "name": "bim_kirli",
+  "note": "Gercek PaddleOCR ciktisi: kaymis sutunlar; toplam = nakit - para ustu = 225,00 - 1,35 (resolveTotal).",
+  "text": "/05445020217 BIRLESIK MAGAZALAR A.S BIM\nKEMALPASA MH.MOLLA YAKUP SOK\nNO:3/A MERKEZCANAKKALE\n1750051846\nBUYUKMUKELLEFLER\nTARIH 04/09/2021\nTARIF SAAT 17:43:33\nSAAT FISNO 0468\nFIS MANTI 450GMUTFAGIM %08 3.95\nGOF MANTI 450 G MUTFAGIM %08 3.95\nB1S SCHNITZEL700 G %08 13.90\nAL MISIR CIPSI 300 G %08 6.50\nYU DOND.PATATES10O0G %08 069\nMI D0ND.PATATES1000G 80% 6.90\nY PAT.CIPS1150G/135G %08 4.50\nMAKARNA SPAGETI500G 808 2.50\nMAKARNA SPAGET1500G 808 2.50\nMEYVE NEKT.VISNE ILT 80% 4.50\nMADENSUYU6x200ML %08 5.90\nTIRAS BICAG!6LI %18 4.50\nSUCUK PILIC400 G %08 10.50\nNUGGET300G %08 7.90\n4AdtX0.90\nGOFRET CIKOLATAL136G %08 3.60\nKOFTE PISMIS 250G %08 11.90\nPILIC KOFTE 300 GR %08 7. 90\nBALDOTRINC1KG %08 +12. 25\n3A0.25 ALISVERISPOSET %18 0.75\nTOPKDY 223.65 16,98\nTOPLAM\nNAKIT\nPARAUSTU *225.00\n1.35\nlyi gonler.yine bekleri2\nPOS:003/K.KODU193918 KASIYERCC\nMERSIS0175005184608645",
+  "expect": {
+    "merchant": "BIRLESIK MAGAZALAR A.S BIM",
+    "amount": 223.65,
+    "date": "2021-09-04",
+    "item_count": 18,
+    "needs_review": true,
+    "discount_total": 0,
+    "items": [
+      {
+        "name": "FIS MANTI 450GMUTFAGIM",
+        "amount": 3.95
+      },
+      {
+        "name": "GOF MANTI 450 G MUTFAGIM",
+        "amount": 3.95
+      },
+      {
+        "name": "B1S SCHNITZEL700 G",
+        "amount": 13.9
+      },
+      {
+        "name": "AL MISIR CIPSI 300 G",
+        "amount": 6.5
+      },
+      {
+        "name": "MI D0ND.PATATES1000G",
+        "amount": 6.9
+      },
+      {
+        "name": "Y PAT.CIPS1150G/135G",
+        "amount": 4.5
+      },
+      {
+        "name": "MAKARNA SPAGETI500G",
+        "amount": 2.5
+      },
+      {
+        "name": "MAKARNA SPAGET1500G",
+        "amount": 2.5
+      },
+      {
+        "name": "MEYVE NEKT.VISNE ILT",
+        "amount": 4.5
+      },
+      {
+        "name": "MADENSUYU6x200ML",
+        "amount": 5.9
+      },
+      {
+        "name": "TIRAS BICAG!6LI",
+        "amount": 4.5
+      },
+      {
+        "name": "SUCUK PILIC400 G",
+        "amount": 10.5
+      },
+      {
+        "name": "NUGGET300G",
+        "amount": 7.9
+      },
+      {
+        "name": "GOFRET CIKOLATAL136G",
+        "amount": 3.6
+      },
+      {
+        "name": "KOFTE PISMIS 250G",
+        "amount": 11.9
+      },
+      {
+        "name": "PILIC KOFTE 300 GR",
+        "amount": 7.9
+      },
+      {
+        "name": "BALDOTRINC1KG",
+        "amount": 12.25
+      },
+      {
+        "name": "ALISVERISPOSET",
+        "amount": 0.75
+      }
+    ]
+  },
+  "known_divergence": []
+}

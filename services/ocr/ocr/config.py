@@ -29,6 +29,11 @@ class OcrConfig:
     cpu_threads: int = 4
     det_limit_side_len: int = 1600
     det_limit_type: str = "max"
+    # Çözülmüş görüntü piksel üst sınırı (genişlik*yükseklik). Küçük bir PNG/JPEG'in dev bir
+    # diziye açılıp belleği tüketmesini engeller (decompression bomb). 25 MP ≈ 5000x5000.
+    max_image_pixels: int = 25_000_000
+    # Aynı anda çalışabilecek çıkarım sayısı; fazlası sırada bekler (CPU/bellek aşırı yüklenmesin).
+    max_concurrent_inferences: int = 2
     dedupe: bool = True
     upscale_min_side: int = 0
     rec_batch_num: int = 6
@@ -62,6 +67,8 @@ class OcrConfig:
             cpu_threads=int(os.getenv("OCR_CPU_THREADS", "4")),
             det_limit_side_len=int(os.getenv("OCR_DET_LIMIT_SIDE_LEN", "1600")),
             det_limit_type=os.getenv("OCR_DET_LIMIT_TYPE", "max").strip().lower(),
+            max_image_pixels=int(os.getenv("OCR_MAX_IMAGE_PIXELS", "25000000")),
+            max_concurrent_inferences=max(1, int(os.getenv("OCR_MAX_CONCURRENT", "2"))),
             dedupe=_env_bool("OCR_DEDUPE", True),
             upscale_min_side=int(os.getenv("OCR_UPSCALE_MIN_SIDE", "0")),
             rec_batch_num=int(os.getenv("OCR_REC_BATCH_NUM", "6")),

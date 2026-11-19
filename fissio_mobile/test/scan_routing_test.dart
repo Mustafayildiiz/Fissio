@@ -118,6 +118,103 @@ void main() {
     expect(backend.scanCalls, 1);
   });
 
+  group('cihaz OCR + sunucu ayrıştırma (yalnızca metin)', () {
+    test('onDevice + senkron AÇIK + çevrimiçi: yalnız metin sunucu ayrıştırıcısına gider, sonuç sunucunundur', () async {
+      final h = harness();
+      await h.signIn('ali@x.co');
+      mode = OcrMode.onDevice;
+      final scansBefore = backend.scanCalls;
+      final r = await h.app.scanAndParseReceipt(_pages);
+      expect(r.ocr.engine, 'ondevice'); // görsel cihazda okundu
+      expect(r.parsed.merchant, 'SUNUCU PARSE');
+      expect(backend.parseTexts, hasLength(1));
+      expect(backend.parseTexts.single, contains('KAŞAR 12,50'));
+      expect(backend.scanCalls, scansBefore, reason: 'fotoğraf sunucuya gitmez');
+      expect(recognizer.calls, 1);
+    });
+
+    test('senkron KAPALI: hiçbir ağ isteği yok, yerel ayrıştırıcı', () async {
+      final h = harness();
+      await h.signIn('ali@x.co');
+      await h.app.setSyncEnabled(false);
+      mode = OcrMode.onDevice;
+      final logBefore = backend.log.length;
+      final r = await h.app.scanAndParseReceipt(_pages);
+      expect(r.parsed.merchant, 'MARKET');
+      expect(backend.parseTexts, isEmpty);
+      expect(backend.log.length, logBefore, reason: 'metin cihazdan çıkmamalı');
+    });
+
+    test('çevrimdışı: istek atılmaz, yerel sonuç', () async {
+      final h = harness();
+      await h.signIn('ali@x.co');
+      mode = OcrMode.onDevice;
+      h.connectivity.online = false;
+      final logBefore = backend.log.length;
+      final r = await h.app.scanAndParseReceipt(_pages);
+      expect(r.parsed.merchant, 'MARKET');
+      expect(backend.log.length, logBefore);
+    });
+
+    test('sunucu ayrıştırması başarısızsa yerel sonuca düşer (tarama kaybolmaz)', () async {
+      final h = harness();
+      await h.signIn('ali@x.co');
+      mode = OcrMode.onDevice;
+      backend.failPaths.add('POST /receipts/parse');
+      final r = await h.app.scanAndParseReceipt(_pages);
+      expect(r.parsed.merchant, 'MARKET');
+      expect(r.parsed.items, isNotEmpty);
+    });
+
+    test('auto + bağlantı yok: sunucu ağ hatasına düşen cihaz OCR sonucu da yerel kalır', () async {
+      final h = harness();
+      await h.signIn('ali@x.co');
+      h.connectivity.online = false;
+      final logBefore = backend.log.length;
+      final r = await h.app.scanAndParseReceipt(_pages);
+      expect(r.parsed.merchant, 'MARKET');
+      expect(backend.log.length, logBefore);
+    });
+  });
+
+  test('kısmi tarama: yalnız okunamayan sayfalar yeniden taranır, metinler sırayla birleşir ve yeniden ayrıştırılır', () async {
+    final h = harness();
+    await h.signIn('ali@x.co');
+    mode = OcrMode.server;
+    final pages = [Uint8List.fromList([1]), Uint8List.fromList([2]), Uint8List.fromList([3])];
+    const parsedOk = {'merchant': 'MARKET', 'amount': 20.0, 'category_id': 1, 'category_name': 'Market / Gıda', 'needs_manual': false};
+    backend.scanScript.addAll(<Map<String, dynamic>>[
+      {
+        'ocr': {'raw_text': 'MARKET\nTOPLAM 20,00', 'engine': 'paddleocr', 'page_texts': ['MARKET', '', 'TOPLAM 20,00']},
+        'parsed': {...parsedOk, 'needs_review': true},
+        'failed_pages': [2],
+      },
+      {
+        'ocr': {'raw_text': 'EKMEK 20,00', 'engine': 'paddleocr', 'page_texts': ['EKMEK 20,00']},
+        'parsed': parsedOk,
+      },
+    ]);
+    final first = await h.app.scanAndParseReceipt(pages);
+    expect(first.ocr.failedPages, [2]);
+    expect(backend.scanFileCounts.last, 3);
+
+    final second = await h.app.rescanFailedPages(first, pages);
+    expect(backend.scanFileCounts.last, 1, reason: 'yalnız okunamayan sayfa gönderilir');
+    expect(second.ocr.failedPages, isEmpty);
+    expect(second.ocr.rawText, 'MARKET\nEKMEK 20,00\nTOPLAM 20,00');
+    expect(second.ocr.pageTexts, ['MARKET', 'EKMEK 20,00', 'TOPLAM 20,00']);
+    expect(backend.parseTexts.last, 'MARKET\nEKMEK 20,00\nTOPLAM 20,00');
+    // Hâlâ okunamayan sayfa varsa liste korunur ve inceleme bayrağı kalır.
+    backend.scanScript.add({
+      'ocr': {'raw_text': '', 'engine': 'paddleocr', 'page_texts': ['']},
+      'parsed': parsedOk,
+      'failed_pages': [1],
+    });
+    final third = await h.app.rescanFailedPages(first, pages);
+    expect(third.ocr.failedPages, [2]);
+    expect(third.parsed.needsReview, isTrue);
+  });
+
   test('tanıyıcı hatası (PlatformException vb.) ApiException olur; sunucuya düşülmez', () async {
     final h = harness();
     await h.signIn('ali@x.co');

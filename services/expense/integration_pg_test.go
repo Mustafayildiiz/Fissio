@@ -8,9 +8,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
+
+	"fissio/expense/internal/receiptparse"
 )
 
 // Entegrasyon testi (gercek Postgres). YIKICIDIR: expense semasini siler; yalnizca "test" iceren atilabilir bir
@@ -108,8 +111,9 @@ func TestPGMigrateAndRules(t *testing.T) {
 		t.Fatal("rules must be per-user")
 	}
 	// Kural sonraki taramada uygulanir.
-	r := ParseWith("YILDIZ GIDA\n12.05.2026\nEKMEK 5,00\nTOPLAM 5,00", cats, now, ParseOptions{Rules: rs})
-	if r.CategoryName != "Eğlence / Hobi" || r.CategorySource != srcRule || r.Items[0].CategoryName != "Ev / Yaşam" {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	r := receiptparse.ParseWith("YILDIZ GIDA\n12.05.2026\nEKMEK 5,00\nTOPLAM 5,00", cats, now, receiptparse.ParseOptions{Rules: rs})
+	if r.CategoryName != "Eğlence / Hobi" || r.CategorySource != "rule" || r.Items[0].CategoryName != "Ev / Yaşam" {
 		t.Fatalf("parse with rules: %+v", r)
 	}
 	// Kullanici basina ust sinir
@@ -166,18 +170,18 @@ func TestPGHTTPFlow(t *testing.T) {
 		catID[c.Name] = c.ID
 	}
 	text := "YILDIZ GIDA SAN. TIC. LTD.\n12.05.2026\nSUT 1L *34,50\nEKMEK *10,00\nTOPLAM *44,50"
-	parse := func() ParseResult {
+	parse := func() receiptparse.ParseResult {
 		pb, _ := json.Marshal(map[string]string{"text": text})
 		code, b := do("POST", "/receipts/parse", string(pb))
 		if code != 200 {
 			t.Fatalf("parse %d %s", code, b)
 		}
-		var p ParseResult
+		var p receiptparse.ParseResult
 		_ = json.Unmarshal(b, &p)
 		return p
 	}
 	p := parse()
-	if p.CategoryName != "Market / Gıda" || p.CategorySource != srcItems || len(p.Items) != 2 || p.Items[0].CategoryName != "Market / Gıda" {
+	if p.CategoryName != "Market / Gıda" || p.CategorySource != "items" || len(p.Items) != 2 || p.Items[0].CategoryName != "Market / Gıda" {
 		t.Fatalf("first parse: %+v", p)
 	}
 
@@ -207,11 +211,11 @@ func TestPGHTTPFlow(t *testing.T) {
 
 	// Tekrar tara: kullanici kurallari uygulanir.
 	p2 := parse()
-	if p2.CategoryName != "Eğlence / Hobi" || p2.CategorySource != srcRule {
+	if p2.CategoryName != "Eğlence / Hobi" || p2.CategorySource != "rule" {
 		t.Fatalf("receipt rule not applied: %s %s", p2.CategoryName, p2.CategorySource)
 	}
 	for _, it := range p2.Items {
-		if it.Name == "EKMEK" && (it.CategoryName != "Ev / Yaşam" || it.CategorySource != srcRule) {
+		if it.Name == "EKMEK" && (it.CategoryName != "Ev / Yaşam" || it.CategorySource != "rule") {
 			t.Fatalf("item rule not applied: %+v", it)
 		}
 		if it.Name == "SUT 1L" && it.CategoryName != "Market / Gıda" {

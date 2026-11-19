@@ -20,6 +20,11 @@ type accessClaims struct {
 }
 
 func issueAccessToken(secret []byte, userID int64, sid string, ttl time.Duration) (string, time.Time, error) {
+	return issueAccessTokenWith(jwt.SigningMethodHS256, secret, userID, sid, ttl)
+}
+
+// issueAccessTokenWith istenen yontemle (HS256 + gizli anahtar, ya da EdDSA + ozel anahtar) imzalar.
+func issueAccessTokenWith(method jwt.SigningMethod, key any, userID int64, sid string, ttl time.Duration) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(ttl)
 	claims := accessClaims{
@@ -32,7 +37,7 @@ func issueAccessToken(secret []byte, userID int64, sid string, ttl time.Duration
 			ExpiresAt: jwt.NewNumericDate(exp),
 		},
 	}
-	s, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
+	s, err := jwt.NewWithClaims(method, claims).SignedString(key)
 	return s, exp, err
 }
 
@@ -45,6 +50,11 @@ func randomID() string {
 // authMiddleware Bearer access token dogrular; "userID" ve "sid" degerlerini context'e koyar.
 // alive nil degilse oturumun iptal edilmedigi DB'den kontrol edilir.
 func authMiddleware(secret []byte, alive func(sid string) (bool, error)) gin.HandlerFunc {
+	return authMiddlewareWith(hmacVerifier(secret), alive)
+}
+
+// authMiddlewareWith authMiddleware'in dogrulayici (HS256 ya da EdDSA) alan halidir.
+func authMiddlewareWith(v accessVerifier, alive func(sid string) (bool, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
@@ -53,8 +63,8 @@ func authMiddleware(secret []byte, alive func(sid string) (bool, error)) gin.Han
 		}
 		claims := &accessClaims{}
 		tok, err := jwt.ParseWithClaims(strings.TrimPrefix(h, "Bearer "), claims,
-			func(t *jwt.Token) (any, error) { return secret, nil },
-			jwt.WithValidMethods([]string{"HS256"}))
+			v.keyfunc,
+			jwt.WithValidMethods([]string{v.method()}))
 		if err != nil || !tok.Valid || claims.Typ != "access" || claims.SID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token", "code": "unauthorized"})
 			return

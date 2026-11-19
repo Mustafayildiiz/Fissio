@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Geliştirme: yerel backend (http://10.0.2.2:8081/8082, LAN IP) düz HTTP'dir. Release'te KAPALI. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

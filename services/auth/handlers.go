@@ -20,6 +20,9 @@ type handler struct {
 	mailer    Mailer
 	dummyHash []byte
 	rateMax   int // 0 = rota basina varsayilan IP/dakika sinirlari; testlerde yukseltilir
+	purger    userPurger
+	// purgeRecheck > 0 ise hesap silindikten bu sure sonra expense temizligi bir kez daha calistirilir (bkz. account.go).
+	purgeRecheck time.Duration
 }
 
 type credentials struct {
@@ -294,9 +297,9 @@ func (h *handler) login(c *gin.Context) {
 
 	var id int64
 	var hash, name string
-	var verified sql.NullTime
-	err := h.db.QueryRow(`SELECT id, password_hash, name, email_verified_at FROM auth.users WHERE email = $1`, email).
-		Scan(&id, &hash, &name, &verified)
+	var verified, deleting sql.NullTime
+	err := h.db.QueryRow(`SELECT id, password_hash, name, email_verified_at, deleting_at FROM auth.users WHERE email = $1`, email).
+		Scan(&id, &hash, &name, &verified, &deleting)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Zamanlama farkindan kullanici varligi sizmasin diye sahte karsilastirma.
 		_ = bcrypt.CompareHashAndPassword(h.dummyHash, []byte(in.Password))
@@ -307,7 +310,8 @@ func (h *handler) login(c *gin.Context) {
 		internalErr(c, err)
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil || deleting.Valid {
+		// Silinmekte olan hesap (deleting_at dolu) giris yapamaz; varligini da belli etmeyiz.
 		fail(c, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 		return
 	}

@@ -3,21 +3,41 @@ package com.example.fissio_mobile
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.view.View
+import java.util.Calendar
 import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
+import es.antonborri.home_widget.HomeWidgetPlugin
 import es.antonborri.home_widget.HomeWidgetProvider
 
 /**
  * Ana ekran widget'ı: aktif profilin "Bu ayki toplam harcaması" ve hızlı tarama kısayolu.
  * Veri Dart tarafından `home_widget` ile yazılır (anahtarlar lib/services/widget_sync.dart -> WidgetKeys):
- * fissio_signed_in, fissio_profile, fissio_month_total, fissio_month_label.
+ * fissio_signed_in, fissio_profile, fissio_month_total, fissio_month_label, fissio_month_key.
  * Oturum yoksa (çıkış / hesap silme) önceki kullanıcının tutarı gösterilmez.
  */
 class FissioWidgetProvider : HomeWidgetProvider() {
+    /**
+     * Gün/saat/saat dilimi değişince (gece yarısı, ay dönümü) widget'ı yeniden çizer: ay anahtarı (`fissio_month_key`)
+     * artık geçerli aydan farklıysa eski ayın tutarı yerine "yeni ay" ipucu gösterilir (tutarı yalnızca uygulama hesaplar).
+     */
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        when (intent.action) {
+            Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> {
+                val manager = AppWidgetManager.getInstance(context)
+                val ids = manager.getAppWidgetIds(ComponentName(context, FissioWidgetProvider::class.java))
+                if (ids.isNotEmpty()) {
+                    onUpdate(context, manager, ids, HomeWidgetPlugin.getData(context))
+                }
+            }
+        }
+    }
+
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,
@@ -42,12 +62,20 @@ class FissioWidgetProvider : HomeWidgetProvider() {
         val total = widgetData.getString("fissio_month_total", null).orEmpty()
         val profile = widgetData.getString("fissio_profile", null).orEmpty()
         val month = widgetData.getString("fissio_month_label", null).orEmpty()
+        // Uygulama son kez başka bir ayda yazdıysa (ay dönümünden sonra uygulama açılmadı) eski tutar gösterilmez.
+        val monthKey = widgetData.getString("fissio_month_key", null).orEmpty()
+        val stale = monthKey.isNotEmpty() && monthKey != currentMonthKey()
 
         return RemoteViews(context.packageName, R.layout.fissio_widget).apply {
             when {
                 !hasData -> {
                     setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))
                     setTextViewText(R.id.widget_subtitle, context.getString(R.string.widget_empty_hint))
+                    setViewVisibility(R.id.widget_subtitle, View.VISIBLE)
+                }
+                signedIn && stale -> {
+                    setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))
+                    setTextViewText(R.id.widget_subtitle, context.getString(R.string.widget_new_month_hint))
                     setViewVisibility(R.id.widget_subtitle, View.VISIBLE)
                 }
                 signedIn -> {
@@ -72,6 +100,12 @@ class FissioWidgetProvider : HomeWidgetProvider() {
             setOnClickPendingIntent(R.id.widget_root, launchIntent(context, null, 0))
             setOnClickPendingIntent(R.id.widget_scan, launchIntent(context, Uri.parse("fissio://scan"), 1))
         }
+    }
+
+    /** Dart `WidgetPayload.monthKey` ile aynı biçim: yıl-ay (ay 1-12), örn. 2026-5. */
+    private fun currentMonthKey(): String {
+        val c = Calendar.getInstance()
+        return "${c.get(Calendar.YEAR)}-${c.get(Calendar.MONTH) + 1}"
     }
 
     private fun fallbackViews(context: Context): RemoteViews =

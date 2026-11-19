@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'money.dart';
 import 'theme.dart' show fmtMoney;
 
 /// Kategori bazlı aylık bütçe hesabı (saf fonksiyonlar; arayüz ve bildirimler buradan beslenir).
@@ -148,14 +149,4 @@ int stableId(String s) {
 }
 
 /// "8.000", "8000,50", "8000.50" gibi girdilerden tutar okur; geçersizse null.
-double? parseMoneyInput(String input) {
-  var s = input.replaceAll(RegExp(r'[\s₺]|TL', caseSensitive: false), '');
-  if (s.isEmpty) return null;
-  if (s.contains(',')) {
-    s = s.replaceAll('.', '').replaceAll(',', '.');
-  } else if (RegExp(r'^\d{1,3}(\.\d{3})+$').hasMatch(s)) {
-    s = s.replaceAll('.', '');
-  }
-  final v = double.tryParse(s);
-  return v == null || v.isNaN || v.isInfinite ? null : v;
-}
+double? parseMoneyInput(String input) => parseMoney(input);

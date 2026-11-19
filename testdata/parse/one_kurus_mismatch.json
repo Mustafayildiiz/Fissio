@@ -1,0 +1,24 @@
+{
+  "name": "one_kurus_mismatch",
+  "note": "1 kurus fark kurus bazinda yakalanir (float 0,00999 < 0,01 tuzagi).",
+  "text": "MARKET\n12.05.2026\nEKMEK 1.000,00\nSUT 250,75\nTOPLAM 1.250,74",
+  "expect": {
+    "merchant": "MARKET",
+    "amount": 1250.74,
+    "date": "2026-05-12",
+    "item_count": 2,
+    "needs_review": true,
+    "discount_total": 0,
+    "items": [
+      {
+        "name": "EKMEK",
+        "amount": 1000
+      },
+      {
+        "name": "SUT",
+        "amount": 250.75
+      }
+    ]
+  },
+  "known_divergence": []
+}
