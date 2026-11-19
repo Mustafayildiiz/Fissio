@@ -4,7 +4,7 @@ Akıllı fiş işleme ve mikro harcama yönetimi. Fişin fotoğrafını çekin; 
 
 ## Özellikler
 
-- **Fiş tarama (OCR):** Kamera veya galeriden, uzun fişler için en fazla 6 sayfa. Sunucu OCR (PaddleOCR) ya da cihaz içi OCR (ML Kit). Bir sayfa okunamazsa yalnızca o sayfa yeniden taranabilir.
+- **Fiş tarama (OCR):** Uygulama içi kamera (hizalama çerçevesi, flaş/fener, dokunarak odak; izin reddinde ayarlara yönlendirme) veya galeriden, uzun fişler için en fazla 6 sayfa. Sunucu OCR (PaddleOCR) ya da cihaz içi OCR (ML Kit). Bir sayfa okunamazsa yalnızca o sayfa yeniden taranabilir.
 - **Otomatik ayrıştırma:** Mağaza, tarih, toplam, ürün kalemleri; toplam uyuşmazlığında inceleme uyarısı. Aynı ayrıştırma mantığı sunucuda (Go) ve cihazda (Dart) ortak altın vektörlerle (`testdata/`) sınanır.
 - **Otomatik kategorilendirme:** 11 kategorili sözlük + düzeltmelerinizden öğrenen kişisel kurallar.
 - **Bütçeler, sabit giderler, ana ekran widget'ı:** Kategori/toplam bütçe uyarıları, sabit ve değişken faturalar (gecikmiş ödeme hatırlatması dahil).
