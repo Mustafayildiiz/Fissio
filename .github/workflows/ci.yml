@@ -80,6 +80,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Sabit sürüm: yeni stable'lar material.dart'ı deprecated yapıp
+          # `flutter analyze`'ı (info dahil) kırıyor. Yerel sürümle aynı tut.
+          flutter-version: 3.47.6
           cache: true
       - run: flutter pub get
       - run: flutter analyze
