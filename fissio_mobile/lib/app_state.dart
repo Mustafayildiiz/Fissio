@@ -14,11 +14,13 @@ import 'data/uid.dart';
 import 'models.dart';
 import 'ocr/ocr_engine.dart';
 import 'ocr/on_device_ocr_engine.dart';
+import 'receipt_parser/digital_receipt.dart';
 import 'receipt_parser/merge.dart' show mergePageTexts;
 import 'receipt_parser/parser.dart' show parseReceiptText;
 import 'receipt_parser/normalize.dart' show foldTR;
 import 'recurring.dart';
 import 'services/notifier.dart';
+import 'services/pdf_reader.dart';
 import 'services/widget_sync.dart';
 import 'theme.dart' show fmtMoney, kMonthNames;
 import 'theme_controller.dart';
@@ -70,6 +72,9 @@ class AppState extends ChangeNotifier {
     this.api.onUnauthorized = _handleUnauthorized;
     this.api.onTokensChanged = _persistTokens;
     this.api.onSuccess = _onApiSuccess;
+    // Widget renk teması / marka rengi değişince native widget'lar anında yeniden çizilir (oturumdan bağımsız).
+    themeController.addListener(_pushWidgetTheme);
+    scheduleMicrotask(_pushWidgetTheme);
     _sync = SyncService(
       api: this.api,
       local: _local,
@@ -922,6 +927,10 @@ class AppState extends ChangeNotifier {
 
     // Yeni fiş.
     d.clientUid ??= newClientUid();
+    // Aynı dijital fatura ikinci kez eklenmesin (sunucu da 409 verir; cihaz içi kayıtlar için burada denetlenir).
+    if (d.documentNo != null && allExpenses.any((e) => e.documentNo == d.documentNo && e.clientUid != d.clientUid)) {
+      throw ApiException('Bu dijital fatura zaten eklenmiş.', status: 409, code: 'duplicate_document');
+    }
     if (!_syncEnabled) {
       await _queueLocal(d, profile, SyncState.localOnly);
       return const SaveResult(localOnly: true);
@@ -1099,6 +1108,18 @@ class AppState extends ChangeNotifier {
   bool _disposed = false;
   WidgetPayload? _lastWidget;
   bool _widgetPushed = false;
+  String? _lastWidgetTheme;
+
+  /// Tema adı + (yalnızca marka temasında) marka rengi; değişmedikçe yeniden yazılmaz.
+  void _pushWidgetTheme() {
+    if (_disposed) return;
+    final t = themeController.widgetTheme;
+    final accent = themeController.logoColor.toARGB32();
+    final sig = t == WidgetTheme.brand ? '${t.name}:$accent' : t.name;
+    if (sig == _lastWidgetTheme) return;
+    _lastWidgetTheme = sig;
+    unawaited(_widget.updateTheme(t.name, accent));
+  }
   String? _lastReminderSig;
   Future<void> _derivedChain = Future.value();
 
@@ -1219,6 +1240,7 @@ class AppState extends ChangeNotifier {
       recurringKind: d.recurringKind,
       recurringEstimate: d.recurringEstimate,
       ocrEngine: d.ocrEngine,
+      documentNo: d.documentNo,
     );
   }
 
@@ -1466,9 +1488,99 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // --- Dijital fiş / e-fatura (PDF) ---
+
+  /// Hesapta (cihaz kuyruğu + bulut önbelleği, tüm profiller) bu dijital fatura kimliğiyle kayıtlı fiş; yoksa null.
+  Expense? expenseWithDocument(String documentNo) {
+    for (final e in allExpenses) {
+      if (e.documentNo == documentNo) return e;
+    }
+    return null;
+  }
+
+  /// PDF dosyasını (cihazdan seçilen ya da "Paylaş → Fissio" ile gelen) okuyup fiş taslağına çevirir.
+  ///
+  /// Metin katmanlı PDF (e-fatura, e-arşiv, uygulama fişi): metin cihazda çıkarılır, OCR kullanılmaz (`ocrEngine` =
+  /// `pdf`). Taranmış (görsel) PDF: sayfalar görsele çevrilip mevcut OCR hattına düşer (mod/senkron kuralları aynen).
+  /// Senkron AÇIK ve çevrimiçiyken yalnızca METİN sunucu ayrıştırıcısına gider (kategori kuralları); aksi halde hiçbir
+  /// istek atılmaz. Belge kimliği (ETTN / VKN_FaturaNo) bulunursa ve hesapta zaten ekliyse [ApiException] (409,
+  /// `duplicate_document`) fırlatılır.
+  Future<ReceiptDraft> readDigitalReceipt(String path) async {
+    final List<String> pageTexts;
+    try {
+      pageTexts = await pdfReader.readText(path);
+    } on PdfReadException catch (e) {
+      throw ApiException(e.message);
+    }
+    if (!hasUsableTextLayer(pageTexts)) return _readScannedPdf(path);
+
+    final text = joinPageTexts(pageTexts);
+    final documentNo = extractDocumentNo(text);
+    _rejectDuplicate(documentNo);
+    final local = parseReceiptText(text, now: _clock()).toParsedReceipt(otherCategoryId: _otherCategoryId());
+    final parsed = (await _refineTextWithServer(text, local)) ?? local;
+    if (parsed.needsManual) {
+      throw ApiException('PDF içinden tutar okunamadı. Bilgileri elle girebilirsiniz.');
+    }
+    return _withVatLine(ReceiptDraft.fromParsed(parsed), parsed)
+      ..ocrEngine = kStoredPdf
+      ..documentNo = documentNo;
+  }
+
+  /// E-fatura / e-arşiv kalem tutarları KDV'sizdir ("Mal Hizmet Tutarı" + KDV = "Ödenecek Tutar"); ayrıştırıcı bunu
+  /// uyuşmazlık saymaz (`items_exclude_vat`). Ama kaydedilen tutar kalem toplamıdır: fark ayrı bir "KDV" kalemi olarak
+  /// eklenmezse fatura KDV kadar eksik kaydedilirdi. İndirimli ya da uyuşmazlık bayraklı belgelere dokunulmaz.
+  ReceiptDraft _withVatLine(ReceiptDraft d, ParsedReceipt p) {
+    final total = p.amount;
+    if (total == null || p.needsReview || p.discountTotal > 0 || p.items.isEmpty) return d;
+    final gap = ((total - d.itemsTotal) * 100).round() / 100;
+    if (gap > 0.005) {
+      d.items.add(ExpenseItem('KDV', gap, categoryId: d.categoryId, categoryName: p.categoryName, categoryReview: p.categoryNeedsReview));
+    }
+    return d;
+  }
+
+  Future<ReceiptDraft> _readScannedPdf(String path) async {
+    final List<Uint8List> pages;
+    try {
+      pages = await pdfReader.renderPages(path);
+    } on PdfReadException catch (e) {
+      throw ApiException(e.message);
+    }
+    final res = await scanAndParseReceipt(pages, engine: themeController.ocrEngine);
+    if (res.ocr.isEmpty || res.parsed.needsManual) {
+      throw ApiException('PDF okunamadı. Bilgileri elle girebilirsiniz.');
+    }
+    final documentNo = extractDocumentNo(res.ocr.rawText);
+    _rejectDuplicate(documentNo);
+    return _withVatLine(ReceiptDraft.fromParsed(res.parsed), res.parsed)
+      ..pendingImages = pages
+      ..ocrEngine = storedOcrEngineId(res.ocr.engine)
+      ..documentNo = documentNo;
+  }
+
+  void _rejectDuplicate(String? documentNo) {
+    if (documentNo != null && expenseWithDocument(documentNo) != null) {
+      throw ApiException('Bu dijital fatura zaten eklenmiş.', status: 409, code: 'duplicate_document');
+    }
+  }
+
+  /// Cihazda okunan metin için sunucu ayrıştırıcısı ([_refineOnDeviceWithServer] ile aynı kurallar): YALNIZCA senkron
+  /// açık ve çevrimiçiyken ve yalnızca metin gider; aksi halde ya da hatada null (yerel sonuç kalır).
+  Future<ParsedReceipt?> _refineTextWithServer(String text, ParsedReceipt local) async {
+    if (!_syncEnabled || text.trim().isEmpty || utf8.encode(text).length > 20000) return null;
+    try {
+      if (!await _connectivity.isOnline()) return null;
+      return await api.parseReceiptText(text);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    themeController.removeListener(_pushWidgetTheme);
     _stopBackground();
     super.dispose();
   }

@@ -324,6 +324,10 @@ class Expense {
   /// Yalnızca bilgi amaçlıdır (fiş detayında gösterilir), düzenlemede korunur.
   final String? ocrEngine;
 
+  /// Dijital fatura kimliği (ETTN UUID'si ya da `VKN_FaturaNo`); yalnızca PDF/e-fatura içe aktarmada dolar, mükerrer
+  /// eklemeyi önler (sunucuda hesap içinde tekil). Fiş/manuel kayıtta null.
+  final String? documentNo;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -348,6 +352,7 @@ class Expense {
     this.syncError,
     this.updatedAt,
     this.ocrEngine,
+    this.documentNo,
   });
 
   bool get isRecurring => recurringDay > 0;
@@ -382,6 +387,7 @@ class Expense {
     bool clearSyncError = false,
     String? updatedAt,
     String? ocrEngine,
+    String? documentNo,
   }) => Expense(
     id: id ?? this.id,
     merchant: merchant ?? this.merchant,
@@ -406,6 +412,7 @@ class Expense {
     syncError: clearSyncError ? null : (syncError ?? this.syncError),
     updatedAt: updatedAt ?? this.updatedAt,
     ocrEngine: ocrEngine ?? this.ocrEngine,
+    documentNo: documentNo ?? this.documentNo,
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -430,6 +437,7 @@ class Expense {
     recurringEstimate: (j['recurring_estimate'] as num?)?.toDouble() ?? 0,
     updatedAt: j['updated_at'] as String?,
     ocrEngine: j['ocr_engine'] as String?,
+    documentNo: j['document_no'] as String?,
   );
 
   /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
@@ -458,6 +466,7 @@ class Expense {
     if (imageIds.isNotEmpty) 'image_ids': imageIds,
     if (updatedAt != null) 'updated_at': updatedAt,
     if (ocrEngine != null) 'ocr_engine': ocrEngine,
+    if (documentNo != null) 'document_no': documentNo,
   };
 
   factory Expense.fromLocalJson(Map<String, dynamic> j) {
@@ -490,6 +499,7 @@ class Expense {
       imageIds: ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
       updatedAt: j['updated_at'] as String?,
       ocrEngine: j['ocr_engine'] as String?,
+      documentNo: j['document_no'] as String?,
     );
   }
 }
@@ -548,6 +558,9 @@ class ReceiptDraft {
   /// Taramada fişi okuyan motor (bkz. [Expense.ocrEngine]); manuel girişte null. Kayıtta sunucuya/cihaza yazılır.
   String? ocrEngine;
 
+  /// Dijital fatura kimliği (bkz. [Expense.documentNo]); yalnızca PDF/e-fatura içe aktarmada.
+  String? documentNo;
+
   ReceiptDraft({
     this.id,
     this.clientUid,
@@ -568,6 +581,7 @@ class ReceiptDraft {
     this.recurringKind = RecurringKind.fixed,
     this.recurringEstimate = 0,
     this.ocrEngine,
+    this.documentNo,
   }) : date = date ?? DateTime.now(),
        items = items ?? [],
        pendingImages = pendingImages ?? [];
@@ -603,6 +617,8 @@ class ReceiptDraft {
     'recurring_estimate': recurringDay > 0 && recurringKind == RecurringKind.variable ? recurringEstimate : 0,
     // Yalnızca tarama ile gelen fişte; null/atlanırsa sunucu mevcut değeri korur (PUT motoru silmez).
     if (ocrEngine != null) 'ocr_engine': ocrEngine,
+    // Dijital faturada ETTN / VKN_FaturaNo; yoksa gönderilmez (PUT mevcut değeri korur).
+    if (documentNo != null) 'document_no': documentNo,
   };
 
   factory ReceiptDraft.from(Expense e) {
@@ -637,6 +653,7 @@ class ReceiptDraft {
       recurringKind: e.recurringKind,
       recurringEstimate: e.recurringEstimate,
       ocrEngine: e.ocrEngine,
+      documentNo: e.documentNo,
     );
   }
 

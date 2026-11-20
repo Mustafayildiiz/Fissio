@@ -12,3 +12,8 @@
 -keep class com.dexterous.flutterlocalnotifications.** { *; }
 -keepattributes Signature
 -keepattributes *Annotation*
+
+# Dijital fiş PDF okuyucu (PdfBox-Android): JPEG2000 çözücüsü isteğe bağlıdır (pakette yok), kaynak sınıfları korunur.
+-dontwarn com.gemalto.jp2.**
+-dontwarn com.tom_roush.pdfbox.**
+-keep class com.tom_roush.pdfbox.** { *; }

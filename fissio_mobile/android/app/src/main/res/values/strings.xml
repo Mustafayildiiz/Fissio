@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Fissio</string>
-    <string name="widget_description">Bu ayki toplam harcaman ve hızlı fiş tarama</string>
+    <string name="widget_description">Bu ayki toplam harcaman, hızlı fiş tarama ve dijital fiş ekleme</string>
     <string name="widget_title">BU AYKİ HARCAMA</string>
     <string name="widget_scan">Fiş tara</string>
+    <string name="widget_digital">Dijital fiş</string>
+    <string name="widget_scan_label">Fiş Tara</string>
+    <string name="widget_digital_label">Dijital Fiş</string>
+    <string name="widget_combined_label">Fiş + Dijital Fiş</string>
+    <string name="widget_scan_description">Kamerayla hızlı fiş tarama kısayolu</string>
+    <string name="widget_digital_description">Dijital fiş / PDF ekleme kısayolu</string>
+    <string name="widget_combined_description">Fiş tara ve dijital fiş ekle kısayolları yan yana</string>
     <string name="widget_signed_out">Giriş yapın</string>
     <string name="widget_empty_total">0,00 ₺</string>
     <string name="widget_new_month_hint">Yeni ay: güncellemek için Fissio\'yu aç</string>

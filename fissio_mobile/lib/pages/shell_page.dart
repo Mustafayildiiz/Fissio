@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../services/deep_links.dart';
+import 'digital_import.dart';
 import '../widgets.dart';
 import 'home_page.dart';
 import 'receipts_page.dart';
@@ -26,21 +27,40 @@ class _ShellPageState extends State<ShellPage> {
     appState.refresh();
     // Ana ekran widget'ından gelen "hızlı tara" (fissio://scan): soğuk açılışta bekleyen istek ilk karede,
     // sıcak açılışta (arka plandan) geldiği anda tüketilir.
-    deepLinks.addListener(_maybeOpenScan);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenScan());
+    deepLinks.addListener(_maybeOpenDeepLink);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenDeepLink());
   }
 
   @override
   void dispose() {
-    deepLinks.removeListener(_maybeOpenScan);
+    deepLinks.removeListener(_maybeOpenDeepLink);
     _filter.dispose();
     super.dispose();
   }
 
-  void _maybeOpenScan() {
+  /// Bekleyen hızlı eylem: `fissio://scan` → kamera; `fissio://import-digital` ya da paylaşılan PDF → dijital fiş akışı.
+  void _maybeOpenDeepLink() {
     if (!mounted || !appState.loggedIn || appState.activeProfile == null) return;
-    if (!deepLinks.consumeScan()) return;
-    _addReceipt();
+    if (deepLinks.consumeScan()) {
+      _addReceipt();
+      return;
+    }
+    final imp = deepLinks.consumeImport();
+    if (imp != null) _importDigital(imp.path);
+  }
+
+  bool _importOpen = false;
+
+  /// Dijital fiş / PDF akışı (kamera sayfasına uğramadan): paylaşılan dosya varsa doğrudan okunur, yoksa seçici açılır.
+  Future<void> _importDigital(String? path) async {
+    // Widget'a art arda dokunulursa ikinci akış üst üste açılmasın.
+    if (_importOpen || _scanOpen) return;
+    _importOpen = true;
+    try {
+      await runDigitalImport(context, path: path);
+    } finally {
+      _importOpen = false;
+    }
   }
 
   void _openCategory(int? categoryId) {

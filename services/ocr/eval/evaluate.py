@@ -218,9 +218,11 @@ def main() -> None:
             text = res.raw_text
             found = extract_items(text)
             hit, extra_n = match_items(found, gt["items"], gt["items_match"])
-            tot_ok, date_ok = total_found(text, gt["total"]), date_found(text, gt["date"])
+            # Kırpık fotoğraflarda toplam/tarih/işletme görünmeyebilir (None): o ölçü sayılmaz (OK varsayılır).
+            tot_ok = gt["total"] is None or total_found(text, gt["total"])
+            date_ok = gt["date"] is None or date_found(text, gt["date"])
             crit_ok, crit_n = critical_score(text, gt.get("critical", []))
-            ms_score = merchant_score(text, gt["merchant"])
+            ms_score = merchant_score(text, gt["merchant"]) if gt["merchant"] else 1.0
             sum_found = round(sum(a for _, a in found), 2)
             scale = min(1.0, cfg.det_limit_side_len / max(w, h)) if cfg.det_limit_type == "max" else 1.0
             line = (

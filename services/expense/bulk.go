@@ -136,7 +136,11 @@ func (h *handler) bulkExpenses(c *gin.Context) {
 				return
 			}
 			log.Printf("bulk: item %d rejected by database (code %s): %s", i, pqErr.Code, pqErr.Message)
-			fail("could not be saved")
+			if isDuplicateDocument(err) {
+				fail("duplicate_document") // ayni dijital fatura zaten ekli: istemci kuyruktan atar (tekrar denemez)
+			} else {
+				fail("could not be saved")
+			}
 			continue
 		}
 		if _, err := tx.Exec(`RELEASE SAVEPOINT bulk_item`); err != nil {

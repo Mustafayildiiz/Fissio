@@ -205,7 +205,8 @@ class ReceiptDetailPage extends StatelessWidget {
                       const SizedBox(height: 16),
                       _DeleteRow(onTap: () => _delete(context, e)),
                       // Fişi hangi motor okudu (manuel/eski kayıtlarda yok): sönük, küçük bilgi satırı.
-                      if (ocrEngineDisplayName(e.ocrEngine) case final engine?) ...[
+                      // Tercihler > "Fiş detayında OCR motorunu göster" kapalıysa satır hiç çizilmez.
+                      if ((themeController.showOcrEngine ? ocrEngineDisplayName(e.ocrEngine) : null) case final engine?) ...[
                         const SizedBox(height: 16),
                         Center(
                           child: Text(

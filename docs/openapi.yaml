@@ -39,7 +39,8 @@ components:
           description: >-
             Makine okunur kod: unauthorized, session_revoked (401); auth_unavailable (503, expense auth'a ulaşamıyor,
             `Retry-After`); internal (500); conflict (409, `PUT /expenses/{id}` eşzamanlılık); scan_busy | scan_rate (429,
-            tarama sınırı, `Retry-After`); ocr_unavailable (502, tüm sayfalar okunamadı). Bazı uçlar ek koda sahiptir.
+            tarama sınırı, `Retry-After`); ocr_unavailable (502, tüm sayfalar okunamadı); duplicate_document (409,
+            `POST|PUT /expenses`: aynı dijital fatura `document_no` zaten ekli). Bazı uçlar ek koda sahiptir.
     Credentials:
       type: object
       required: [email, password]
@@ -180,6 +181,18 @@ components:
             Fişi okuyan OCR motoru (`paddleocr`, `custom`, cihaz içi Google ML Kit için `mlkit`); yalnızca bilgi
             amaçlıdır. Küçük harfe çevrilir; biçime uymayan değer 400 döner. Yok/null/boş = manuel girilen ya da eski
             kayıt: oluşturmada NULL yazılır, PUT'ta mevcut değer KORUNUR (alanı atlayan düzenleme silmez).
+            Dijital fatura (PDF) ayrıştırıcısı için `pdf`.
+        document_no:
+          type: string
+          nullable: true
+          example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+          pattern: '^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]{10,11}_[A-Z0-9-]{3,32})$'
+          description: >-
+            Dijital fatura kimliği: YALNIZCA 36 karakterli standart ETTN UUID'si (küçük harf) ya da `VKN_FaturaNo`
+            birleşimi (10/11 haneli VKN/TCKN + `_` + fatura no, büyük harf). Kısa fiş/sipariş/Z numaraları kabul
+            edilmez (400 `invalid document_no`). Hesap içinde tekildir: aynı belge ikinci kez eklenirse 409
+            `duplicate_document` (toplu yüklemede o kalem `error: duplicate_document`). Yok/null/boş = belge numarası
+            yok: oluşturmada NULL, PUT'ta mevcut değer KORUNUR.
         items:
           type: array
           items: { $ref: '#/components/schemas/Item' }
@@ -970,6 +983,7 @@ paths:
               schema: { $ref: '#/components/schemas/Expense' }
         '200': { description: Aynı client_uid ile fiş zaten kayıtlı; mevcut kayıt döner (mükerrer oluşmaz) }
         '404': { description: profile_id hesaba ait değil }
+        '409': { description: 'Aynı dijital fatura (`document_no`) bu hesapta zaten ekli (`code: duplicate_document`)' }
   /expenses/ids:
     get:
       tags: [expense]
@@ -1063,7 +1077,9 @@ paths:
         '200': { description: Güncellendi }
         '404': { description: Bulunamadı }
         '409':
-          description: 'Kayıt başka yerde değişti (`code: conflict`); gövdede `current` = sunucudaki güncel fiş'
+          description: >-
+            Kayıt başka yerde değişti (`code: conflict`; gövdede `current` = sunucudaki güncel fiş) ya da `document_no`
+            hesaptaki başka bir fişte zaten var (`code: duplicate_document`)
           content:
             application/json:
               schema:

@@ -30,3 +30,6 @@ local.properties
 
 # OCR degerlendirme: kullanici fis fotograflari
 services/ocr/eval/receipts/
+
+# OCR eval: ham kutu dokumleri (eval/dump_blocks.py uretir)
+services/ocr/eval/blocks_*.json

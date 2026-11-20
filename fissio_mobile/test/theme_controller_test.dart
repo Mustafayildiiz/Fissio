@@ -41,6 +41,41 @@ void main() {
     expect(b.receiptStyle, ReceiptStyle.list);
   });
 
+  test('OCR motorunu göster: varsayılan açık; kapatma kalıcıdır; bozuk değer açık sayılır', () async {
+    final store = _MemStore();
+    final a = ThemeController(store: store);
+    await a.load();
+    expect(a.showOcrEngine, isTrue);
+    await a.setShowOcrEngine(false);
+    expect(store.map[ThemeController.showOcrEngineKey], 'false');
+
+    final b = ThemeController(store: store);
+    await b.load();
+    expect(b.showOcrEngine, isFalse);
+
+    store.map[ThemeController.showOcrEngineKey] = 'garip';
+    final c = ThemeController(store: store);
+    await c.load();
+    expect(c.showOcrEngine, isTrue, reason: 'yalnızca açıkça "false" kapalıdır');
+  });
+
+  test('widget renk teması: varsayılan Sistem; seçim kalıcı; bilinmeyen değer Sistem', () async {
+    final store = _MemStore();
+    final a = ThemeController(store: store);
+    await a.load();
+    expect(a.widgetTheme, WidgetTheme.system);
+    for (final t in WidgetTheme.values) {
+      await a.setWidgetTheme(t);
+      final b = ThemeController(store: store);
+      await b.load();
+      expect(b.widgetTheme, t);
+    }
+    store.map[ThemeController.widgetThemeKey] = 'neon';
+    final c = ThemeController(store: store);
+    await c.load();
+    expect(c.widgetTheme, WidgetTheme.system);
+  });
+
   test('depolama hata verirse varsayılanlarla devam eder', () async {
     final c = ThemeController(store: _BrokenStore());
     await c.load();

@@ -1,5 +1,6 @@
 // Go `services/expense/summary.go` portu: özet/bilgi satırlarını (TOPLAM, ARA TOPLAM, KDV, İNDİRİM,
 // NAKİT, KART, PARA ÜSTÜ…) tanır; bunlar asla kalem olmaz. Mobilde yalnızca toplam indirim hesaplanır.
+import 'cancel.dart' show reversalLines;
 import 'normalize.dart';
 import 'parser.dart' show amountsIn, maskDates;
 
@@ -75,9 +76,11 @@ int itemRegionEnd(List<String> lines) {
 double extractDiscount(List<String> lines) {
   final end = itemRegionEnd(lines);
   final individual = <double>[], recap = <double>[];
+  final rev = reversalLines(lines);
   for (var i = 0; i < lines.length; i++) {
     final a = amountsIn(lines[i]);
-    if (a.isEmpty || !isDiscountLine(lines[i]) || i >= end) continue;
+    // İptal geri alma satırı indirim değildir (kalem olarak düşülür).
+    if (a.isEmpty || rev.contains(i) || !isDiscountLine(lines[i]) || i >= end) continue;
     if (hasKeyword(lines[i], 'toplam', fuzzyMinLen)) {
       recap.add(a.last);
     } else {

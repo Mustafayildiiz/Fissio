@@ -1,0 +1,140 @@
+{
+  "expect": {
+    "amount": 223.65,
+    "date": "2021-09-04",
+    "discount_total": 0,
+    "item_count": 31,
+    "items": [
+      {
+        "name": "FIS MANTI450 G MUTFAGIM",
+        "amount": 3.95
+      },
+      {
+        "name": "GOF MANTI 450 G MUTFAGIM",
+        "amount": 3.95
+      },
+      {
+        "name": "BIS SCHNITZEL 700 G",
+        "amount": 13.9
+      },
+      {
+        "name": "AL M1SIR CIPSI 300 G",
+        "amount": 6.5
+      },
+      {
+        "name": "MJ D0ND.PATATES1000G",
+        "amount": 6.9
+      },
+      {
+        "name": "A PAT.CIPSI150G/135G",
+        "amount": 4.5
+      },
+      {
+        "name": "UP GOFRETF1ND.KAK.142G",
+        "amount": 3.75
+      },
+      {
+        "name": "MAKARNA SPAGETI 5O0G",
+        "amount": 2.5
+      },
+      {
+        "name": "MAKARNA SPAGETI 50OG",
+        "amount": 2.5
+      },
+      {
+        "name": "MEYVE NEKT.VISNE 1LT",
+        "amount": 4.5
+      },
+      {
+        "name": "MADENSUYU6x200ML",
+        "amount": 5.9
+      },
+      {
+        "name": "MAKARNA F1YONK 500G",
+        "amount": 2.5
+      },
+      {
+        "name": "TIRAS BICAGI 6LI",
+        "amount": 4.5
+      },
+      {
+        "name": "MAKARNA FIYONK 500G",
+        "amount": 2.5
+      },
+      {
+        "name": "SUCUK PILIC 400G",
+        "amount": 10.5
+      },
+      {
+        "name": "YERFISTGI TUZLU 200G",
+        "amount": 6.5
+      },
+      {
+        "name": "NUGGET 300G",
+        "amount": 7.9
+      },
+      {
+        "name": "MANTI 450 G MUTFAGIM",
+        "amount": 3.35
+      },
+      {
+        "name": "GOFRET CIKOLATALI36G",
+        "amount": 3.6
+      },
+      {
+        "name": "KOFTE PISM1S 250 G",
+        "amount": 11.9
+      },
+      {
+        "name": "PILIC KoFTE 300 GR %08.",
+        "amount": 7.9
+      },
+      {
+        "name": "KAHVALTILIK S0S 300G",
+        "amount": 6.9
+      },
+      {
+        "name": "MANTI 450 G MUTFAGIM",
+        "amount": 3.95
+      },
+      {
+        "name": "PFYNIR SUZME 1KG",
+        "amount": 24.9
+      },
+      {
+        "name": "F1N.KREMASI500G SAYL",
+        "amount": 10.9
+      },
+      {
+        "name": "YUMURTA15L163-72G",
+        "amount": 15.5
+      },
+      {
+        "name": "TAVA YOGUT 1.5 KG",
+        "amount": 14.5
+      },
+      {
+        "name": "MEYVELCECEK1LT",
+        "amount": 8.5
+      },
+      {
+        "name": "BALDORINC1KG",
+        "amount": 12.25
+      },
+      {
+        "name": "3AaX",
+        "amount": 0.25
+      },
+      {
+        "name": "ALISVERIS POSETI",
+        "amount": 0.75
+      }
+    ],
+    "merchant": "BIM",
+    "needs_review": true
+  },
+  "known_divergence": [],
+  "name": "bim_kirli_tam",
+  "note": "Gercek PaddleOCR ciktisi: bim_kirli'nin dik/tam fotografi; kivrik kagitta satir ciftlerinden egim kestirimi sayesinde ad-tutar eslesir (31 kalem).",
+  "text": "komagene\nBIM\n020200/05445020217 KEMALPASA MH.MOLLA YAKUP SOK BIRLESIK MAGAZALAR A.S\nNO:3/A MERKEZ CANAKKALE\n1750051846\nBUYUKMUKELLEFLER\nTARIH 04/09/2021\nTARIF SAAT 17:43:33\nSAAT FISNO 0468\nFIS MANTI450 G MUTFAGIM %08 +3.95\nGOF MANTI 450 G MUTFAGIM %08 3,95\nBIS SCHNITZEL 700 G %08 +13.90\nAL M1SIR CIPSI 300 G %08 6,50\nYU DOND.PATATES 10OOG %08 069\nMJ D0ND.PATATES1000G 80% 6,90\nA PAT.CIPSI150G/135G %08 4,50\nUP GOFRETF1ND.KAK.142G %08 3,75\nMAKARNA SPAGETI 5O0G 08 2,50\nMAKARNA SPAGETI 50OG %08 +2.50\nMEYVE NEKT.VISNE 1LT %08 4.50\nMADENSUYU6x200ML %08 5,90\nMAKARNA F1YONK 500G %08 2.50\nTIRAS BICAGI 6LI %18 +4.50\nMAKARNA FIYONK 500G %08 2.50\nSUCUK PILIC 400G %08 10.50\nYERFISTGI TUZLU 200G %08 *6.50\nNUGGET 300G %08 *7.90\nMANTI 450 G MUTFAGIM %08 3,35\n4Adt X 0.90\nGOFRET CIKOLATALI36G %08 3,60\nKOFTE PISM1S 250 G %08 +11,90\nPILIC KoFTE 300 GR %08. 7,90\nKAHVALTILIK S0S 300G %08 +6.90\nMANTI 450 G MUTFAGIM %08 3.95\nPFYNIR SUZME 1KG %08 *24.90\nF1N.KREMASI500G SAYL %08 10.90\nYUMURTA15L163-72G 80% 15.50\nTAVA YOGUT 1.5 KG %08 14.50\nMEYVELCECEK1LT 80% 8.50\nBALDORINC1KG %08 12.25\n3AaX0,25\nALISVERIS POSETI %18 0,75\nTOPKDV *16,98\nTOPLAM *223.65\nNAKIT *225.00\nPARA USTU *1.35\niyigunler.yinebekleri\nPOS:003/K.KODU:193918\nMERSIS0175005184608645\nEKUNO:0001 ZNO:0395\nNF2B2013714"
+}

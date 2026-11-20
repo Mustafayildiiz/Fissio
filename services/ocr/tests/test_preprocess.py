@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
 
 from ocr.base import OcrTextBlock
 from ocr.paddle_engine import PaddleOcrEngine
-from ocr.postprocess import dedupe_blocks, fix_turkish_glyphs, local_slope_fn
+from ocr.postprocess import dedupe_blocks, fix_turkish_glyphs, group_receipt_rows, local_slope_fn, refine_slope_fn
 
 if HAS_CV:
     from ocr.preprocess import apply_clahe, preprocess_receipt, upscale_if_small
@@ -193,6 +193,47 @@ class TiltedRowsTests(unittest.TestCase):
     def test_no_tilt_is_unchanged(self) -> None:
         text, _ = PaddleOcrEngine._reconstruct_receipt_lines(self._tilted_blocks(slope=0.0))
         self.assertEqual(text.splitlines()[0], "URUN0 1,00")
+
+
+class RefineSlopeTests(unittest.TestCase):
+    """Kıvrık kağıt: kutu üst kenarı eğimi 0.02 gösterir ama gerçek satır eğimi aşağı doğru 0.06'ya çıkar."""
+
+    @staticmethod
+    def _curved_blocks() -> list[OcrTextBlock]:
+        blocks = []
+        n = 12
+        for k in range(n):
+            s = 0.02 + 0.04 * k / (n - 1)
+            base = 100 + 40 * k
+            yn, ya = base + s * 250, base + s * 818
+            blocks.append(OcrTextBlock(f"{k + 1},00", 0.9, [(800, ya - 10), (836, ya - 10), (836, ya + 10), (800, ya + 10)]))
+            blocks.append(OcrTextBlock(f"URUN{k}", 0.9, [(100, yn - 16), (400, yn - 10), (400, yn + 16), (100, yn + 10)]))
+        return blocks
+
+    def test_pair_estimate_beats_single_box_slope(self) -> None:
+        blocks = self._curved_blocks()
+        base = local_slope_fn(blocks)
+        refined = refine_slope_fn(blocks, base)
+        # Tek kutu eğimi hafife alır; çift ölçümü alt satırlarda gerçek eğime (~0.06) yaklaşır.
+        self.assertAlmostEqual(base(560), 0.02, places=3)
+        self.assertGreater(refined(560), 0.045)
+
+    def test_refined_rows_pair_every_label_with_its_amount(self) -> None:
+        blocks = self._curved_blocks()
+        rows = group_receipt_rows(blocks, refine_slope_fn(blocks, local_slope_fn(blocks)))
+        self.assertEqual(len(rows), 12)
+        for k, row in enumerate(rows):
+            self.assertEqual(sorted(e[0].text for e in row), sorted([f"URUN{k}", f"{k + 1},00"]))
+
+    def test_too_few_wide_rows_keeps_the_base_estimate(self) -> None:
+        blocks = [OcrTextBlock("A", 0.9, _box(0, 0, 100, 20)), OcrTextBlock("B", 0.9, _box(0, 40, 100, 60))]
+        base = local_slope_fn(blocks)
+        self.assertIs(refine_slope_fn(blocks, base), base)
+
+    def test_blocks_without_boxes_are_kept_as_a_row(self) -> None:
+        blocks = [OcrTextBlock("kutusuz", 0.9, None), OcrTextBlock("X", 0.9, _box(0, 40, 100, 60))]
+        rows = group_receipt_rows(blocks, lambda y: 0.0)
+        self.assertEqual(sum(len(r) for r in rows), 2)
 
 
 class SharedRowVectorsTests(unittest.TestCase):

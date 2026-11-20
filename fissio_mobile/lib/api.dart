@@ -34,6 +34,9 @@ class ApiException implements Exception {
 
   /// Düzenleme, dayandığı sürümden (`base_updated_at`) sonra sunucuda değişmiş bir fişe yapıldı; yazılmadı.
   bool get conflict => status == 409 && code == 'conflict';
+
+  /// Aynı dijital fatura (ETTN / VKN_FaturaNo) hesapta zaten ekli (`POST|PUT /expenses` 409).
+  bool get duplicateDocument => status == 409 && code == 'duplicate_document';
   @override
   String toString() => message;
 }
@@ -334,6 +337,7 @@ class ApiClient {
       'auth_unavailable': 'Sunucu hazırlanıyor, birkaç saniye sonra tekrar deneyin.',
       'last_profile': 'Son profil silinemez.',
       'conflict': 'Fiş başka bir cihazda değiştirilmiş.',
+      'duplicate_document': 'Bu dijital fatura zaten eklenmiş.',
     };
     if (code != null && byCode.containsKey(code)) return byCode[code]!;
     const map = {

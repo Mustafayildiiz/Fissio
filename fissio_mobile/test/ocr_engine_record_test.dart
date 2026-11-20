@@ -5,6 +5,7 @@ import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/ocr/ocr_engine.dart';
 import 'package:fissio_mobile/pages/receipt_detail_page.dart';
 import 'package:fissio_mobile/theme.dart';
+import 'package:fissio_mobile/theme_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -167,6 +168,43 @@ void main() {
         expect(tester.getTopLeft(note).dy, greaterThan(tester.getTopLeft(find.text('Fişi sil')).dy));
       });
     }
+
+    testWidgets('Tercihler > "Fiş detayında OCR motorunu göster" kapalıyken satır gizlenir, açılınca geri gelir', (tester) async {
+      late Harness h;
+      late Expense e;
+      await tester.runAsync(() async {
+        h = Harness();
+        await h.signIn('ali@x.co');
+        await h.app.saveDraft(_draft('e-toggle', engine: 'paddleocr'));
+        e = h.app.expenses.single;
+      });
+      final prev = themeController.showOcrEngine;
+      addTearDown(() => themeController.showOcrEngine = prev);
+      expect(themeController.showOcrEngine, isTrue, reason: 'varsayılan açık');
+      await pump(tester, h, e);
+      expect(find.byKey(const Key('ocr-engine-note')), findsOneWidget);
+
+      await tester.runAsync(() => themeController.setShowOcrEngine(false));
+      await tester.pump();
+      expect(find.byKey(const Key('ocr-engine-note')), findsNothing, reason: 'ayar kapalı: satır çizilmez');
+
+      await tester.runAsync(() => themeController.setShowOcrEngine(true));
+      await tester.pump();
+      expect(find.byKey(const Key('ocr-engine-note')), findsOneWidget);
+    });
+
+    testWidgets('PDF ile eklenen fişte motor "PDF / E-Fatura Ayrıştırıcı" görünür', (tester) async {
+      late Harness h;
+      late Expense e;
+      await tester.runAsync(() async {
+        h = Harness();
+        await h.signIn('ali@x.co');
+        await h.app.saveDraft(_draft('e-pdf', engine: 'pdf'));
+        e = h.app.expenses.single;
+      });
+      await pump(tester, h, e);
+      expect(tester.widget<Text>(find.byKey(const Key('ocr-engine-note'))).data, 'İşleyen Motor: PDF / E-Fatura Ayrıştırıcı');
+    });
 
     testWidgets('eski/manuel fişte motor satırı yok', (tester) async {
       late Harness h;

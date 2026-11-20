@@ -213,7 +213,13 @@ class SyncService {
             final r = res.result;
             if (!r.ok || r.id == null) {
               partial = true; // geçersiz/reddedilen kayıt: kuyrukta kalır (kullanıcı düzenleyebilir ya da silebilir)
-              _bump(snap.expenses, e.clientUid, r.error ?? 'Sunucu kaydı kabul etmedi.');
+              _bump(
+                snap.expenses,
+                e.clientUid,
+                r.error == 'duplicate_document'
+                    ? 'Bu dijital fatura hesabında zaten ekli; bu kaydı silebilirsin.'
+                    : (r.error ?? 'Sunucu kaydı kabul etmedi.'),
+              );
               await _persist(uid);
               onChanged?.call();
               continue;
@@ -491,5 +497,7 @@ class SyncService {
       'recurring_estimate': e.recurringEstimate,
     // Fişi okuyan OCR motoru (yalnızca bilgi); null ise gönderilmez, sunucudaki değer korunur.
     if (e.ocrEngine != null) 'ocr_engine': e.ocrEngine,
+    // Dijital fatura kimliği (ETTN / VKN_FaturaNo): sunucu mükerrer eklemeyi 409 ile engeller.
+    if (e.documentNo != null) 'document_no': e.documentNo,
   };
 }

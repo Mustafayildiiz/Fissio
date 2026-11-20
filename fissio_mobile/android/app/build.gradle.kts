@@ -77,6 +77,8 @@ kotlin {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Dijital fiş / e-fatura PDF'inin metin katmanı (cihaz içi; bkz. PdfChannel.kt). Apache-2.0.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }
 
 flutter {

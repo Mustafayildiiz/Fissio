@@ -219,6 +219,10 @@ type expenseInput struct {
 	// OcrEngine: fisi okuyan OCR motoru (paddleocr | custom | mlkit; yalniz bilgi amacli). Yok/null/bos = bilinmiyor:
 	// POST'ta NULL yazilir, PUT'ta mevcut deger KORUNUR (alan atlayan bir duzenleme motoru silmez).
 	OcrEngine *string `json:"ocr_engine"`
+	// DocumentNo: dijital fatura kimligi — YALNIZCA 36 karakterli ETTN UUID'si ya da VKN_FaturaNo birlesimi
+	// (kisa fis/siparis/Z numaralari kabul EDILMEZ: baska belgelerle cakisirdi). Ayni hesapta tekildir: ikinci kez
+	// eklenirse 409 duplicate_document. Yok/null/bos = belge numarasi yok (POST'ta NULL, PUT'ta mevcut KORUNUR).
+	DocumentNo *string `json:"document_no"`
 	// BaseUpdatedAt (yalniz PUT): istemcinin duzenlemeye basladigi surumun updated_at degeri (RFC3339). Sunucudaki
 	// kayit bundan YENIYSE (baska cihaz degistirmis) yazilmaz, 409 conflict doner. Bos = denetim yok (eski davranis).
 	BaseUpdatedAt string `json:"base_updated_at"`
@@ -226,6 +230,28 @@ type expenseInput struct {
 
 // ocrEngineRe: OCR motoru kimligi (kucuk harf/rakam/_/-); yeni bir motor sunucu degisikligi gerektirmez.
 var ocrEngineRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
+
+// documentNoRe: ETTN (standart UUID, kucuk harf) ya da VKN/TCKN_FaturaNo. Normalize edilmis hali dogrulanir.
+var documentNoRe = regexp.MustCompile(`^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]{10,11}_[A-Z0-9-]{3,32})$`)
+
+// normalizeDocumentNo ETTN'yi kucuk, VKN_FaturaNo'yu buyuk harfe cevirir; gecerli degilse ok=false.
+func normalizeDocumentNo(s string) (string, bool) {
+	v := strings.TrimSpace(s)
+	if i := strings.IndexByte(v, '_'); i >= 0 {
+		v = v[:i+1] + strings.ToUpper(v[i+1:])
+	} else {
+		v = strings.ToLower(v)
+	}
+	return v, documentNoRe.MatchString(v)
+}
+
+// documentArg SQL'e giden belge numarasi: nil = yok (INSERT'te NULL, UPDATE'te COALESCE ile mevcut deger korunur).
+func (in *expenseInput) documentArg() any {
+	if in.DocumentNo == nil {
+		return nil
+	}
+	return *in.DocumentNo
+}
 
 // ocrArg SQL'e giden motor degeri: nil = yok (INSERT'te NULL, UPDATE'te COALESCE ile mevcut deger korunur).
 func (in *expenseInput) ocrArg() any {
@@ -334,6 +360,8 @@ type expenseOut struct {
 	RecurringEstimate float64 `json:"recurring_estimate"`
 	// OcrEngine fisi okuyan OCR motoru; null = manuel girilen / eski kayit.
 	OcrEngine *string `json:"ocr_engine"`
+	// DocumentNo dijital fatura kimligi (ETTN ya da VKN_FaturaNo); null = yok.
+	DocumentNo *string `json:"document_no"`
 	// UpdatedAt son degisiklik zamani (RFC3339Nano, UTC, mikrosaniye): PUT base_updated_at ve GET ?since= icin
 	// istemci bu degeri AYNEN geri gonderir.
 	UpdatedAt string `json:"updated_at"`
@@ -393,6 +421,16 @@ func (in *expenseInput) validate() (time.Time, string) {
 			in.OcrEngine = &v
 		}
 	}
+	if in.DocumentNo != nil {
+		v := strings.TrimSpace(*in.DocumentNo)
+		if v == "" {
+			in.DocumentNo = nil
+		} else if n, ok := normalizeDocumentNo(v); ok {
+			in.DocumentNo = &n
+		} else {
+			return time.Time{}, "invalid document_no"
+		}
+	}
 	// NUL/kontrol karakterleri Postgres'te insert hatasi verir (bulk'ta tum partiyi bozardi): sessizce ayiklanir.
 	in.Merchant = cleanText(in.Merchant)
 	in.Note = cleanText(in.Note)
@@ -450,6 +488,16 @@ func isBadTextRune(r rune) bool {
 	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
 }
 
+// isDuplicateDocument: (user_id, document_no) tekil indeksi ihlali (ayni dijital fatura ikinci kez eklenmek isteniyor).
+func isDuplicateDocument(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "uq_expenses_document_no"
+}
+
+func duplicateDocument(c *gin.Context) {
+	c.JSON(http.StatusConflict, gin.H{"error": "this document was already added", "code": "duplicate_document"})
+}
+
 func isFKViolation(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == "23503"
@@ -457,7 +505,7 @@ func isFKViolation(err error) bool {
 
 const selectExpense = `
 SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
-       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at, e.ocr_engine,
+       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at, e.ocr_engine, e.document_no,
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -469,10 +517,13 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var items []byte
 	var imageIDs pq.Int64Array
 	var updated time.Time
-	var ocr sql.NullString
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &ocr, &imageIDs)
+	var ocr, doc sql.NullString
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &ocr, &doc, &imageIDs)
 	if ocr.Valid {
 		e.OcrEngine = &ocr.String
+	}
+	if doc.Valid {
+		e.DocumentNo = &doc.String
 	}
 	e.Date = d.Format(dateLayout)
 	e.UpdatedAt = formatUpdatedAt(updated)
@@ -527,6 +578,10 @@ func (h *handler) createExpense(c *gin.Context) {
 		badRequest(c, "unknown category_id")
 		return
 	}
+	if isDuplicateDocument(err) {
+		duplicateDocument(c)
+		return
+	}
 	if err != nil {
 		serverError(c)
 		return
@@ -554,10 +609,10 @@ func insertExpense(q interface {
 }, userID, profileID int64, uid string, in expenseInput, d time.Time, itemsJSON string) (int64, bool, error) {
 	var id int64
 	err := q.QueryRow(
-		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate, ocr_engine)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate, ocr_engine, document_no)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		 ON CONFLICT (user_id, client_uid) DO NOTHING RETURNING id`,
-		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), in.ocrArg()).Scan(&id)
+		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), in.ocrArg(), in.documentArg()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = q.QueryRow(`SELECT id FROM expense.expenses WHERE user_id = $1 AND client_uid = $2`, userID, uid).Scan(&id)
 		return id, false, err
@@ -759,13 +814,17 @@ func (h *handler) updateExpense(c *gin.Context) {
 	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
 		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11, recurring_kind = $12, recurring_estimate = $13,
-		 ocr_engine = COALESCE($15::text, ocr_engine),
+		 ocr_engine = COALESCE($15::text, ocr_engine), document_no = COALESCE($16::text, document_no),
 		 updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 		 WHERE id=$7 AND user_id=$8 AND ($14::timestamptz IS NULL OR updated_at <= $14::timestamptz)`,
 		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo,
-		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base, in.ocrArg())
+		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base, in.ocrArg(), in.documentArg())
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
+		return
+	}
+	if isDuplicateDocument(err) {
+		duplicateDocument(c)
 		return
 	}
 	if err != nil {

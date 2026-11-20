@@ -4,11 +4,16 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
+    private var shareChannel: MethodChannel? = null
+
     /**
      * Uygulama arka plandayken (ya da süreci sistem tarafından öldürülmüşken) widget'a dokunulunca görev zaten
      * vardır ve `singleTop` yüzünden yeni intent [onNewIntent]'e gelir. `Activity.getIntent()` güncellenmezse
@@ -18,10 +23,83 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // Uygulama açıkken başka bir uygulamadan "Paylaş → Fissio" ile PDF geldi: Dart tarafına yerel yolu ilet.
+        extractSharedPdf(intent)?.let { path ->
+            shareChannel?.invokeMethod("onFile", path)
+            clearSharedIntent()
+        }
+    }
+
+    /**
+     * "Paylaş → Fissio" (ACTION_SEND) ve "Birlikte aç" (ACTION_VIEW) ile gelen PDF'i uygulama önbelleğine kopyalar ve
+     * yerel yolunu döner (yoksa null). Dosya hiçbir yere gönderilmez; okuma cihaz içidir. 20 MB üstü ve PDF olmayan
+     * içerik reddedilir. Eski kopyalar (>1 gün) silinir.
+     */
+    private fun extractSharedPdf(intent: Intent?): String? {
+        if (intent == null) return null
+        val uri: Uri? = when (intent.action) {
+            Intent.ACTION_SEND ->
+                if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            Intent.ACTION_VIEW -> intent.data
+            else -> null
+        }
+        if (uri == null || uri.scheme == "fissio") return null
+        return try {
+            val type = intent.type ?: contentResolver.getType(uri)
+            if (type != "application/pdf") return null
+            val dir = File(cacheDir, "shared").apply { mkdirs() }
+            val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+            dir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
+            val out = File(dir, "pdf_${System.currentTimeMillis()}.pdf")
+            var total = 0L
+            contentResolver.openInputStream(uri)?.use { input ->
+                out.outputStream().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        total += n
+                        if (total > MAX_SHARED_BYTES) {
+                            out.delete()
+                            return null
+                        }
+                        output.write(buf, 0, n)
+                    }
+                }
+            } ?: return null
+            out.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Tüketilen paylaşım intent'i yeniden işlenmesin (ekran dönmesi / yeniden oluşturma). */
+    private fun clearSharedIntent() {
+        setIntent(Intent(intent).apply {
+            action = Intent.ACTION_MAIN
+            data = null
+            type = null
+            removeExtra(Intent.EXTRA_STREAM)
+        })
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        PdfChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL).also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // Soğuk açılış: uygulama paylaşılan PDF ile başlatıldıysa yolu ver (bir kez).
+                    "getInitialFile" -> {
+                        val path = extractSharedPdf(intent)
+                        if (path != null) clearSharedIntent()
+                        result.success(path)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "supported" -> result.success(!isDebuggable())
@@ -83,6 +161,8 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val CHANNEL = "fissio/launcher_icon"
+        const val SHARE_CHANNEL = "fissio/share_intent"
+        const val MAX_SHARED_BYTES = 20L * 1024 * 1024
 
         /** Dart tarafındaki `kBrandPalette` anahtarları → başlatıcı girişi (bileşen) adları. */
         val ALIASES = mapOf(

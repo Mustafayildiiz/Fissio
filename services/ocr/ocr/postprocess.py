@@ -183,12 +183,22 @@ def dedupe_blocks(
     return kept
 
 
-def local_slope_fn(blocks: list[OcrTextBlock], *, max_slope: float = 0.3, neighbors: int = 7):
+def local_slope_fn(
+    blocks: list[OcrTextBlock],
+    *,
+    max_slope: float = 0.3,
+    neighbors: int = 7,
+    min_aspect: float = 2.0,
+):
     """
     Dikey konuma göre değişen satır eğimi s(y) döndürür. Kağıt kıvrık/perspektifli olduğunda
     eğim sayfa boyunca değişir; her konum için en yakın `neighbors` uzun kutunun (genişlik >=
-    2 x yükseklik) üst kenar eğiminin ortancası kullanılır. Yeterli kutu yoksa 0 döner.
+    `min_aspect` x yükseklik) üst kenar eğiminin ortancası kullanılır. Yeterli kutu yoksa 0 döner.
     Böylece sol etiket ile sağ tutar (aynı satırda ama farklı Y'de görünen) doğru eşleşir.
+
+    Tek kutunun üst kenar eğimi yalnızca kısa bir tabana dayanır ve kıvrık/perspektifli kağıtta
+    sayfa boyunca gerçek satır eğimini hafife alabilir; bu yüzden sonuç `refine_slope_fn` ile
+    satır ÇİFTLERİNDEN (sol ad - sağ tutar) yeniden kestirilir.
     """
     samples: list[tuple[float, float]] = []  # (y_center, slope)
     for b in blocks:
@@ -197,7 +207,7 @@ def local_slope_fn(blocks: list[OcrTextBlock], *, max_slope: float = 0.3, neighb
         (x0, y0), (x1, y1) = b.bbox[0], b.bbox[1]
         ys = [p[1] for p in b.bbox]
         height = max(1.0, max(ys) - min(ys))
-        if abs(x1 - x0) < 2 * height:
+        if abs(x1 - x0) < min_aspect * height:
             continue
         samples.append(((min(ys) + max(ys)) / 2.0, (y1 - y0) / (x1 - x0)))
     if len(samples) < 3:
@@ -210,3 +220,87 @@ def local_slope_fn(blocks: list[OcrTextBlock], *, max_slope: float = 0.3, neighb
         return max(-max_slope, min(max_slope, v))
 
     return slope_at
+
+
+# Satır grubu girdisi: (blok, eğim düzeltmeli y, x_min, yükseklik, x_merkez, ham y_merkez).
+RowEntry = tuple[OcrTextBlock, float, float, float, float, float]
+
+
+def group_receipt_rows(blocks: list[OcrTextBlock], slope_at) -> list[list[RowEntry]]:
+    """
+    Bloklari fis satirlarina gruplar: y_adj = y - s(y) * x ile eğim düzeltilir, (y_adj, x_min) sırasına
+    dizilir ve satır ortalama y'sine yeterince yakın bloklar aynı satıra eklenir.
+    """
+    annotated: list[RowEntry] = []
+    for b in blocks:
+        if not b.bbox:
+            annotated.append((b, 0.0, 0.0, 20.0, 0.0, 0.0))  # bbox'sız blok: üstte, ortalama yükseklikte
+            continue
+        xs = [pt[0] for pt in b.bbox]
+        ys = [pt[1] for pt in b.bbox]
+        y_raw = (min(ys) + max(ys)) / 2.0
+        x_center = (min(xs) + max(xs)) / 2.0
+        annotated.append(
+            (b, y_raw - slope_at(y_raw) * x_center, min(xs), max(1.0, max(ys) - min(ys)), x_center, y_raw)
+        )
+    annotated.sort(key=lambda e: (e[1], e[2]))
+
+    rows: list[list[RowEntry]] = []
+    for entry in annotated:
+        if not rows:
+            rows.append([entry])
+            continue
+        current = rows[-1]
+        avg_y = sum(e[1] for e in current) / len(current)
+        avg_h = sum(e[3] for e in current) / len(current)
+        if abs(entry[1] - avg_y) <= max(8.0, avg_h * 0.55):
+            current.append(entry)
+        else:
+            rows.append([entry])
+    return rows
+
+
+def refine_slope_fn(
+    blocks: list[OcrTextBlock],
+    base_fn,
+    *,
+    iterations: int = 2,
+    neighbors: int = 7,
+    max_slope: float = 0.3,
+    min_span: float = 8.0,
+):
+    """
+    Satır eğimini satır ÇİFTLERİNDEN yeniden kestirir. Kıvrık/perspektifli fişte tek kutunun üst kenar
+    eğimi (kısa taban) gerçek satır eğimini hafife alır; sağ sütun (tutar) bir satır kayar. Burada
+    mevcut kestirimle satırlar kurulur, geniş (>= `min_span` x yükseklik) satırların en sol ve en sağ
+    blok merkezlerinden gerçek eğim ölçülür ve konuma göre en yakın `neighbors` ölçümün ortancası alınır.
+    Birkaç yinelemeyle başlangıç hatası kapanır. Yeterli (>= 3) geniş satır yoksa `base_fn` aynen döner.
+    """
+    fn = base_fn
+    for _ in range(iterations):
+        samples: list[tuple[float, float]] = []
+        for row in group_receipt_rows(blocks, fn):
+            if len(row) < 2:
+                continue
+            ordered = sorted(row, key=lambda e: e[4])
+            left, right = ordered[0], ordered[-1]
+            height = statistics.median(e[3] for e in row)
+            dx = right[4] - left[4]
+            if dx < min_span * height:
+                continue
+            slope = (right[5] - left[5]) / dx
+            if abs(slope) <= max_slope:
+                samples.append(((left[5] + right[5]) / 2.0, slope))
+        if len(samples) < 3:
+            break
+        samples.sort()
+
+        def make(points: list[tuple[float, float]]):
+            def slope_at(y: float) -> float:
+                near = sorted(points, key=lambda t: abs(t[0] - y))[:neighbors]
+                return statistics.median(sl for _, sl in near)
+
+            return slope_at
+
+        fn = make(samples)
+    return fn

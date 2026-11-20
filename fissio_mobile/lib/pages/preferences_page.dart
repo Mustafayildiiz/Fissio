@@ -70,6 +70,32 @@ class PreferencesPage extends StatelessWidget {
                     const SizedBox(height: 8),
                     const _LogoSection(),
                     const SizedBox(height: 24),
+                    const SectionLabel('Widget renk teması'),
+                    const SizedBox(height: 8),
+                    SegmentedControl<WidgetTheme>(
+                      key: const ValueKey('widget-theme'),
+                      value: themeController.widgetTheme,
+                      onChanged: themeController.setWidgetTheme,
+                      items: const [
+                        SegmentItem(WidgetTheme.system, 'Sistem'),
+                        SegmentItem(WidgetTheme.light, 'Açık'),
+                        SegmentItem(WidgetTheme.dark, 'Koyu'),
+                        SegmentItem(WidgetTheme.brand, 'Marka'),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        switch (themeController.widgetTheme) {
+                          WidgetTheme.system => 'Ana ekran widget\'ları telefonun açık/koyu temasını izler.',
+                          WidgetTheme.light => 'Ana ekran widget\'ları her zaman açık renkte olur.',
+                          WidgetTheme.dark => 'Ana ekran widget\'ları her zaman koyu renkte olur.',
+                          WidgetTheme.brand => 'Ana ekran widget\'ları logo rengini arka plan olarak kullanır.',
+                        },
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     const SectionLabel('Fiş detayı'),
                     const SizedBox(height: 8),
                     SegmentedControl<ReceiptStyle>(
@@ -134,6 +160,38 @@ class PreferencesPage extends StatelessWidget {
                         'Sunucu OCR kullanıldığında fişi okuyacak motor. Tarama ekranında otomatik uygulanır.',
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
+                    ),
+                    const SizedBox(height: 14),
+                    GroupedCard(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Fiş detayında OCR motorunu göster',
+                                    style: FissioText.body(c, weight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Fişin altında “İşleyen Motor: …” notunu gösterir.',
+                                    style: FissioText.body(c, size: 13, color: c.mute),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              key: const Key('show-ocr-engine-switch'),
+                              value: themeController.showOcrEngine,
+                              activeTrackColor: c.accent,
+                              onChanged: themeController.setShowOcrEngine,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),

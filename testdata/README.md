@@ -7,7 +7,7 @@ düzenleyin, üç test paketi de okur.
 | Dosya | Mantık | Okuyanlar |
 |---|---|---|
 | `glyphs.json` | `fixTurkishGlyphs` (`$`→Ş) | Go `accuracy_test.go`, Python `tests/test_preprocess.py`, Dart `test/receipt_parser_test.dart` |
-| `rows.json` | satır birleştirme (blok → satır, eğim düzeltmeli) | Python `tests/test_preprocess.py`, Dart `test/on_device_rows_test.dart` |
+| `rows.json` | satır birleştirme (blok → satır; eğim kutu kenarlarından, sonra satır çiftlerinden kestirilir — `curved_paper_slope_grows_down_the_page` kıvrık kâğıt vektörü eski algoritmada başarısızdır) | Python `tests/test_preprocess.py`, Dart `test/on_device_rows_test.dart` |
 | `merge.json` | `mergePageTexts` (sayfa dikişi) | Go `merge_golden_test.go`, Dart `test/merge_pages_test.dart` |
 | `recurring_due.json` | tekrarlayan gider vadesi + gecikmiş | Go `recurring_due_golden_test.go`, Dart `test/recurring_logic_test.dart` |
 | `recurring_series.json` | tekrarlayan seri penceresi/bitişi/gecikmiş | Go `recurring_series_golden_test.go`, Dart `test/recurring_series_golden_test.dart` |
@@ -23,3 +23,11 @@ düzenleyin, üç test paketi de okur.
 Bilinen ve kabul edilmiş sapmalar `"known_divergence": ["dart"]` gibi etiketlenir; ilgili dilin testi o vektörü
 atlar ve nedenini `"note"` alanında taşır. `parse/*.json` vektörlerinde atlama alan bazındadır: `"skip": ["items", …]`
 listesindeki alanlar yalnızca o dilde doğrulanmaz (geri kalanı yine doğrulanır).
+
+## Yeni gerçek fiş vektörleri (OCR kalite turu)
+`parse/` altındaki `bim_kirli_tam`, `manav_iptal`, `market_tam`, `market_alt_kirpik`, `trendyol_go` gerçek PaddleOCR
+çıktılarıdır (görseller `services/ocr/eval/receipts/`, beklenen değerler `services/ocr/eval/ground_truth.json`);
+`e_arsiv_fatura` metin katmanlı bir e-Arşiv PDF'inden çıkan metindir. Beklenenler Go `Parse` çıktısıdır ve elle
+doğrulanmıştır: eksik kalan kalemler (fiyatı okunamayan satırlar) `needs_review` ile açıkça işaretlidir, uydurulmaz.
+ML Kit çıktısı masaüstünde üretilemediğinden cihaz tarafı bu vektörlerle (Dart `golden_parse_test.dart`) sınanır;
+gerçek cihaz doğruluğu elle denenmelidir.

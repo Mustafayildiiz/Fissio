@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sabit açık / koyu widget temaları (tema "Sistem" ise values / values-night içindeki widget_* renkleri kullanılır). -->
+    <color name="widget_light_ink">#201E1D</color>
+    <color name="widget_light_mute">#605D5D</color>
+    <color name="widget_dark_ink">#F3F2F2</color>
+    <color name="widget_dark_mute">#9B9797</color>
+    <!-- Marka teması: arka plan marka rengi, yazılar beyaz; düğme beyaz zemin üstünde marka renkli yazı. -->
+    <color name="widget_brand_ink">#FFFFFF</color>
+    <color name="widget_brand_mute">#CCFFFFFF</color>
+</resources>

@@ -59,6 +59,9 @@ class FakeBackend {
   int avatarUploads = 0;
   int scanCalls = 0;
 
+  /// Doluysa `/receipts/parse` yanıtı olarak aynen döner (ör. sunucunun e-fatura ayrıştırması).
+  Map<String, dynamic>? parseOverride;
+
   /// `/receipts/parse` ile sunucuya giden metinler (cihaz-OCR + senkron açık yolu).
   final List<String> parseTexts = [];
 
@@ -239,6 +242,7 @@ class FakeBackend {
     }
     if (path == '/receipts/parse' && m == 'POST') {
       parseTexts.add((j['text'] as String?) ?? '');
+      if (parseOverride != null) return _json(200, parseOverride);
       return _json(200, {
         'merchant': 'SUNUCU PARSE',
         'amount': 17.5,
@@ -362,6 +366,11 @@ class FakeBackend {
           results.add({'index': i, 'client_uid': uid, 'status': 'skipped', 'id': ex['id']});
           continue;
         }
+        if (e['document_no'] != null && u.expenses.any((x) => x['document_no'] == e['document_no'])) {
+          failed++;
+          results.add({'index': i, 'client_uid': uid, 'status': 'error', 'error': 'duplicate_document'});
+          continue;
+        }
         final saved = _newExpense(u, e, (e['profile_id'] ?? j['profile_id']) as int);
         created++;
         results.add({'index': i, 'client_uid': uid, 'status': 'created', 'id': saved['id']});
@@ -373,6 +382,10 @@ class FakeBackend {
       final uid = j['client_uid'] as String?;
       final ex = uid == null ? null : u.expenses.where((x) => x['client_uid'] == uid).firstOrNull;
       if (ex != null) return _json(200, ex);
+      // Sunucu gibi: aynı dijital fatura (document_no) hesapta ikinci kez eklenemez.
+      if (j['document_no'] != null && u.expenses.any((x) => x['document_no'] == j['document_no'])) {
+        return _err(409, 'duplicate_document', 'this document was already added');
+      }
       return _json(201, _newExpense(u, j, j['profile_id'] as int));
     }
     final em = RegExp(r'^/expenses/(\d+)(/images(?:/(\d+))?)?$').firstMatch(path);
@@ -440,6 +453,7 @@ class FakeBackend {
       'recurring_kind': j['recurring_kind'] ?? 'fixed',
       'recurring_estimate': j['recurring_estimate'] ?? 0,
       'ocr_engine': j['ocr_engine'],
+      'document_no': j['document_no'],
       'updated_at': _stamp(),
     };
     u.expenses.add(e);

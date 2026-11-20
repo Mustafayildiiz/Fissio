@@ -1,23 +1,23 @@
 package com.example.fissio_mobile
 
-import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
-import android.content.Context
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.view.View
 import java.util.Calendar
 import android.widget.RemoteViews
-import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import es.antonborri.home_widget.HomeWidgetPlugin
 import es.antonborri.home_widget.HomeWidgetProvider
 
 /**
- * Ana ekran widget'ı: aktif profilin "Bu ayki toplam harcaması" ve hızlı tarama kısayolu.
+ * Ana ekran widget'ı (1/4): aktif profilin "Bu ayki toplam harcaması" + "Fiş tara" ve "Dijital fiş" kısayolları.
+ * Renk teması (Sistem/Açık/Koyu/Marka) WidgetTheming'ten; diğer 3 widget (FissioScan/Digital/CombinedWidgetProvider)
+ * yalnızca kısayol içerir.
  * Veri Dart tarafından `home_widget` ile yazılır (anahtarlar lib/services/widget_sync.dart -> WidgetKeys):
- * fissio_signed_in, fissio_profile, fissio_month_total, fissio_month_label, fissio_month_key.
+ * fissio_signed_in, fissio_profile, fissio_month_total, fissio_month_label, fissio_month_key,
+ * fissio_widget_theme, fissio_widget_accent.
  * Oturum yoksa (çıkış / hesap silme) önceki kullanıcının tutarı gösterilmez.
  */
 class FissioWidgetProvider : HomeWidgetProvider() {
@@ -65,8 +65,15 @@ class FissioWidgetProvider : HomeWidgetProvider() {
         // Uygulama son kez başka bir ayda yazdıysa (ay dönümünden sonra uygulama açılmadı) eski tutar gösterilmez.
         val monthKey = widgetData.getString("fissio_month_key", null).orEmpty()
         val stale = monthKey.isNotEmpty() && monthKey != currentMonthKey()
+        val style = WidgetTheming.read(widgetData)
 
         return RemoteViews(context.packageName, R.layout.fissio_widget).apply {
+            WidgetTheming.applyBackground(this, R.id.widget_root, style)
+            WidgetTheming.applyText(context, this, R.id.widget_title, style, mute = true)
+            WidgetTheming.applyText(context, this, R.id.widget_total, style, mute = false)
+            WidgetTheming.applyText(context, this, R.id.widget_subtitle, style, mute = true)
+            WidgetTheming.applyButton(this, R.id.widget_scan, R.id.widget_scan_icon, R.id.widget_scan_label, style)
+            WidgetTheming.applyButton(this, R.id.widget_digital, R.id.widget_digital_icon, R.id.widget_digital_label, style)
             when {
                 !hasData -> {
                     setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))
@@ -95,10 +102,12 @@ class FissioWidgetProvider : HomeWidgetProvider() {
                     setViewVisibility(R.id.widget_subtitle, View.GONE)
                 }
             }
-            // Widget'a dokunmak uygulamayı açar; "Fiş tara" doğrudan tarama ekranını (fissio://scan). Oturum
-            // yoksa uygulama giriş ekranını açar, giriş sonrası tarama ekranı bekleyen istek olarak açılır.
-            setOnClickPendingIntent(R.id.widget_root, launchIntent(context, null, 0))
-            setOnClickPendingIntent(R.id.widget_scan, launchIntent(context, Uri.parse("fissio://scan"), 1))
+            // Widget'a dokunmak uygulamayı açar; "Fiş tara" doğrudan tarama ekranını (fissio://scan), "Dijital fiş"
+            // doğrudan PDF seçiciyi (fissio://import-digital) açar. Oturum yoksa uygulama giriş ekranını açar, giriş
+            // sonrası ilgili eylem bekleyen istek olarak çalışır.
+            setOnClickPendingIntent(R.id.widget_root, WidgetTheming.launchIntent(context, null, 0))
+            setOnClickPendingIntent(R.id.widget_scan, WidgetTheming.launchIntent(context, WidgetTheming.SCAN_URI, 1))
+            setOnClickPendingIntent(R.id.widget_digital, WidgetTheming.launchIntent(context, WidgetTheming.IMPORT_URI, 2))
         }
     }
 
@@ -113,26 +122,4 @@ class FissioWidgetProvider : HomeWidgetProvider() {
             setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))
             setViewVisibility(R.id.widget_subtitle, View.GONE)
         }
-
-    /**
-     * Uygulamayı açan PendingIntent. Başlatıcı ikonu renge göre değiştirildiği için (MainActivity ya da bir
-     * activity-alias etkin olabilir) bileşen adı sabitlenmez; etkin başlatıcı girişi `getLaunchIntentForPackage` ile
-     * bulunur. home_widget'ın Dart tarafı (`initiallyLaunchedFromHomeWidget` / `widgetClicked`) bu eylem + adresi okur.
-     */
-    private fun launchIntent(context: Context, uri: Uri?, requestCode: Int): PendingIntent {
-        val intent = (context.packageManager.getLaunchIntentForPackage(context.packageName)
-            ?: Intent(context, MainActivity::class.java)).apply {
-            action = HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION
-            data = uri
-            // Uygulama zaten açıksa (arka planda) yeni görev/ikinci örnek yerine mevcut MainActivity'ye onNewIntent ile
-            // gelsin; böylece sıcak açılışta Flutter yeniden başlamaz ve fissio://scan doğrudan taramaya gider.
-            flags = flags or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        return PendingIntent.getActivity(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
 }

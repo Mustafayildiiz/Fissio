@@ -1,0 +1,28 @@
+{
+  "expect": {
+    "amount": 250,
+    "date": "2026-10-18",
+    "discount_total": 0,
+    "item_count": 3,
+    "items": [
+      {
+        "name": "Miksos Mega Dauble Döner(XL)",
+        "amount": 240
+      },
+      {
+        "name": "Burcu Mayonez",
+        "amount": 5
+      },
+      {
+        "name": "Burcu Ketcap",
+        "amount": 5
+      }
+    ],
+    "merchant": "uber Eats",
+    "needs_review": false
+  },
+  "known_divergence": [],
+  "name": "trendyol_go",
+  "note": "Gercek PaddleOCR ciktisi (uygulama/dijital fis fotografi): 'Urün Adet Tutar' basligi, tutara yapisik TL simgesi ('5.00t'), tarihe yapisik saat, adres/not satirlari isletme degil; Uber Eats + Trendyol Go marka (Restoran). Kisisel veriler (ad, adres, siparis notu) maskelenmistir; satir bicimi korunmustur.",
+  "text": "uber Eats\ntrendyolgo\nSiparisKodu:O1D\n18/10/202617:06\nAd S.\nornek mahallesi,ornek bulvari no 1/1\nornek yurdu, Ilce,Ornek Mah,\nBina No1,Kat1.Daire1.AciklamaOrnek\nyurdu\nSiparisNotu:ornek not metni\nServis istiyorum\nUrün Adet Tutar\nMiksos Mega Dauble Döner(XL) 240,00\nCift ekmek ekstra malzeme\nBurcu Mayonez 1 5.00t\n(Burcu stick mayonez)\nBurcu Ketcap 5.00\n(Burcu Stick Ketcap\n250.00\nToplam:\n23568096"
+}

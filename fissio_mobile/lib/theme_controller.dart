@@ -37,6 +37,10 @@ class SecurePrefsStore implements DeletablePrefsStore {
 /// Fiş detayının görünümü.
 enum ReceiptStyle { paper, list }
 
+/// Ana ekran widget'larının renk teması: sistem (açık/koyu'yu telefon belirler), sabit açık, sabit koyu ya da
+/// marka rengi (logo/vurgu rengi arka plan olur). Yerel taraf `fissio_widget_theme` değerini adıyla okur.
+enum WidgetTheme { system, light, dark, brand }
+
 /// Kullanıcının görünüm tercihleri: vurgu rengi, tema modu, fiş detay görünümü, uygulama logosu.
 class ThemeController extends ChangeNotifier {
   ThemeController({PrefsStore? store, LauncherIcon? launcherIcon})
@@ -53,9 +57,17 @@ class ThemeController extends ChangeNotifier {
   static const ocrEngineKey = 'pref_ocr_engine';
   static const logoKey = 'pref_logo';
   static const launcherKey = 'pref_launcher_icon';
+  static const showOcrEngineKey = 'pref_show_ocr_engine';
+  static const widgetThemeKey = 'pref_widget_theme';
 
   /// Sunucu OCR motoru (`OcrEngineFactory` anahtarı); tarama ekranı bunu kullanır.
   String ocrEngine = 'paddleocr';
+
+  /// Fiş detayının altında "İşleyen Motor: …" satırı gösterilsin mi (varsayılan açık).
+  bool showOcrEngine = true;
+
+  /// Ana ekran widget'larının renk teması (tüm widget'lar aynı temayı kullanır).
+  WidgetTheme widgetTheme = WidgetTheme.system;
   Color accent = kDefaultAccent;
   ThemeMode themeMode = ThemeMode.system;
   ReceiptStyle receiptStyle = ReceiptStyle.paper;
@@ -98,6 +110,10 @@ class ThemeController extends ChangeNotifier {
       ocrMode = OcrMode.values.firstWhere((e) => e.name == o, orElse: () => OcrMode.auto);
       final e = await _store.read(ocrEngineKey);
       if (e != null && e.isNotEmpty) ocrEngine = e;
+      // Yalnızca açıkça 'false' yazılmışsa kapalı; yoksa/bozuksa varsayılan (açık).
+      showOcrEngine = (await _store.read(showOcrEngineKey)) != 'false';
+      final wt = await _store.read(widgetThemeKey);
+      widgetTheme = WidgetTheme.values.firstWhere((x) => x.name == wt, orElse: () => WidgetTheme.system);
     } catch (_) {
       // Depolama yoksa (test/ilk açılış) varsayılanlar geçerli.
     }
@@ -177,6 +193,18 @@ class ThemeController extends ChangeNotifier {
     ocrEngine = e;
     notifyListeners();
     await _save(ocrEngineKey, e);
+  }
+
+  Future<void> setShowOcrEngine(bool v) async {
+    showOcrEngine = v;
+    notifyListeners();
+    await _save(showOcrEngineKey, v.toString());
+  }
+
+  Future<void> setWidgetTheme(WidgetTheme t) async {
+    widgetTheme = t;
+    notifyListeners();
+    await _save(widgetThemeKey, t.name);
   }
 
   Future<void> _save(String key, String value) async {

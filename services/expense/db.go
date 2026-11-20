@@ -145,6 +145,10 @@ ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_kind TEXT NOT NU
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_estimate NUMERIC(12,2) CHECK (recurring_estimate > 0);
 -- ocr_engine: fisi okuyan OCR motoru (paddleocr | custom | mlkit); NULL = manuel girilen / eski kayit. Yalniz bilgi amacli.
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS ocr_engine TEXT;
+-- document_no: dijital fatura kimligi (ETTN UUID ya da VKN_FaturaNo). Ayni hesapta ayni belge ikinci kez eklenemez
+-- (kismi tekil indeks); NULL (fis/manuel/numarasiz belge) mukerrer denetimine girmez.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS document_no TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_expenses_document_no ON expense.expenses (user_id, document_no) WHERE document_no IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;
 -- Son degisiklik zamani: iyimser eszamanlilik (PUT base_updated_at -> 409) ve artimli liste (GET /expenses?since=).
 -- INSERT varsayilanla, her UPDATE acikca (bkz. updateExpense) gunceller; fotograf ekleme/silme guncellemez.

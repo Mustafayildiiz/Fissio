@@ -1,0 +1,100 @@
+{
+  "expect": {
+    "amount": 307.85,
+    "date": null,
+    "discount_total": 2.75,
+    "item_count": 21,
+    "items": [
+      {
+        "name": "MISIR YAGI 5L CIGDEM x08",
+        "amount": 35.95
+      },
+      {
+        "name": "SPAGETTI SO0 GR YENT x08 .",
+        "amount": 2.75
+      },
+      {
+        "name": "CORBA DOMATES 69G",
+        "amount": 1.25
+      },
+      {
+        "name": "CORBAEZOGELIN 65G",
+        "amount": 1.25
+      },
+      {
+        "name": "CORBA EZOGELIN 65G x08",
+        "amount": 1.25
+      },
+      {
+        "name": "CORBA SEH.TAVUK 51G x08",
+        "amount": 1.25
+      },
+      {
+        "name": "CORBA SEH.TAVUK 510 x08",
+        "amount": 1.25
+      },
+      {
+        "name": "CORBA DOMATES 69G",
+        "amount": 1.25
+      },
+      {
+        "name": "EALCICEK850G x08",
+        "amount": 1.25
+      },
+      {
+        "name": "1LKGUN RECEL 700GR x08",
+        "amount": 19.95
+      },
+      {
+        "name": "PILAVLKPIRINC2.5KG",
+        "amount": 8.95
+      },
+      {
+        "name": "DIL.TOST.PEY.1200G",
+        "amount": 10.45
+      },
+      {
+        "name": "EULGUR PILAVLIKIKG",
+        "amount": 39.5
+      },
+      {
+        "name": "TAVUK POSET BUTON",
+        "amount": 15.07
+      },
+      {
+        "name": "TAVUK POSET BUTON 24X0.45",
+        "amount": 16.93
+      },
+      {
+        "name": "SOT 1LT Y.YAG x08",
+        "amount": 10.8
+      },
+      {
+        "name": "SUT ILT Y.YAG",
+        "amount": 3.45
+      },
+      {
+        "name": "ALISVERIS POSET",
+        "amount": 3.45
+      },
+      {
+        "name": "ALISVERISPOSETI",
+        "amount": 0.25
+      },
+      {
+        "name": "ALISVERIS POSETI",
+        "amount": 0.25
+      },
+      {
+        "name": "ALISVERISPOSET x18 +0,25",
+        "amount": 0.25
+      }
+    ],
+    "merchant": "",
+    "needs_review": true
+  },
+  "known_divergence": [],
+  "name": "market_alt_kirpik",
+  "note": "Gercek PaddleOCR ciktisi: market_tam'in alt kirpigi (baslik/tarih yok).",
+  "text": "MISIR YAGI 5L CIGDEM x08 35.95\nSPAGETTI SO0 GR YENT x08 .2, 75\nSPAGETTI 500 GR YEN x08 -2,75\nCORBA DOMATES 69G %08 1.25\nCORBAEZOGELIN 65G %08 1.25\nCORBA EZOGELIN 65G x08 1.25\nCORBA EZOGELIN 65G x08\nCORBA SEH.TAVUK 51G x08 1,25\nCORBA SEH.TAVUK 510 x08 1,25\nCORBA DOMATES 69G 80% 1.25\nEALCICEK850G x08 1.25\n1LKGUN RECEL 700GR x08 19,95\nPILAVLKPIRINC2.5KG 80% 8,95\nDIL.TOST.PEY.1200G %08 10,45\nEULGUR PILAVLIKIKG %08 39,50\n1,684k9X8.95 +3.95\nTAVUK POSET BUTON %08\n1892kgX8.95 15,07\nTAVUK POSET BUTON 24X0.45 80% 16,93\nNESTLESALEP 15GR 208\nSOT 1LT Y.YAG x08 10.80\nSUT ILT Y.YAG 80% 3.45\nALISVERIS POSET %18 3.45\nALISVERISPOSETI %18 0.25\nALISVERIS POSETI %18 0.25\nALISVERISPOSET x18 +0,25 +0.25\nTOPKDV TOPLAM 22.79\n307,85"
+}

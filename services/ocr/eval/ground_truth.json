@@ -6,18 +6,113 @@
     "note": "Kirli/kırışık/eğik. Kalem adı-fiyat eşleşmesi güvenilir okunamadığı için yalnızca fiyat çoklu kümesi (multiset) kullanılır; fiyatlar toplamı 223,65'e eşit.",
     "items_match": "amount",
     "items": [
-      {"amount": 3.95}, {"amount": 3.95}, {"amount": 13.90}, {"amount": 6.50}, {"amount": 6.90},
-      {"amount": 6.90}, {"amount": 4.50}, {"amount": 3.75}, {"amount": 2.50}, {"amount": 2.50},
-      {"amount": 4.50}, {"amount": 5.90}, {"amount": 2.50}, {"amount": 4.50}, {"amount": 2.50},
-      {"amount": 10.50}, {"amount": 6.50}, {"amount": 7.90}, {"amount": 3.95}, {"amount": 3.60},
-      {"amount": 11.90}, {"amount": 7.90}, {"amount": 6.90}, {"amount": 3.95}, {"amount": 24.90},
-      {"amount": 10.90}, {"amount": 15.50}, {"amount": 14.50}, {"amount": 6.50}, {"amount": 12.25},
-      {"amount": 0.75}
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 13.9
+      },
+      {
+        "amount": 6.5
+      },
+      {
+        "amount": 6.9
+      },
+      {
+        "amount": 6.9
+      },
+      {
+        "amount": 4.5
+      },
+      {
+        "amount": 3.75
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 4.5
+      },
+      {
+        "amount": 5.9
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 4.5
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 10.5
+      },
+      {
+        "amount": 6.5
+      },
+      {
+        "amount": 7.9
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 3.6
+      },
+      {
+        "amount": 11.9
+      },
+      {
+        "amount": 7.9
+      },
+      {
+        "amount": 6.9
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 24.9
+      },
+      {
+        "amount": 10.9
+      },
+      {
+        "amount": 15.5
+      },
+      {
+        "amount": 14.5
+      },
+      {
+        "amount": 6.5
+      },
+      {
+        "amount": 12.25
+      },
+      {
+        "amount": 0.75
+      }
     ],
     "critical": [
-      {"label": "TOPKDV", "amount": 16.98},
-      {"label": "TOPLAM", "amount": 223.65},
-      {"label": "NAKIT", "amount": 225.00}
+      {
+        "label": "TOPKDV",
+        "amount": 16.98
+      },
+      {
+        "label": "TOPLAM",
+        "amount": 223.65
+      },
+      {
+        "label": "NAKIT",
+        "amount": 225.0
+      }
     ]
   },
   "bim_koltuk.jpg": {
@@ -26,42 +121,681 @@
     "total": 26.15,
     "items_match": "pair",
     "items": [
-      {"name": "PAT.CIPSI PATITO", "amount": 3.25},
-      {"name": "PAT.CIPSI PATITO", "amount": 3.25},
-      {"name": "SUT AROMALI", "amount": 1.00},
-      {"name": "ETI KARAM GURME 50 G", "amount": 1.75},
-      {"name": "ETI KARAM GURME 50 G", "amount": 1.75},
-      {"name": "200ML.MUZ.SUT", "amount": 1.00},
-      {"name": "SUT AROMALI", "amount": 1.00},
-      {"name": "200ML.MUZ.SUT", "amount": 1.00},
-      {"name": "SUT AROMALI", "amount": 1.00},
-      {"name": "SUT AROMALI", "amount": 1.00},
-      {"name": "KEK 35 G KEKSTRA", "amount": 0.70},
-      {"name": "KEK 35 G KEKSTRA", "amount": 0.70},
-      {"name": "ALISVERIS POSETI", "amount": 0.25},
-      {"name": "POPKEK MUZLU 60G", "amount": 3.00},
-      {"name": "DANKEK 40 GR", "amount": 1.00},
-      {"name": "DANKEK 40 GR", "amount": 1.00},
-      {"name": "ETI KARAM GURME 50 G", "amount": 3.50}
+      {
+        "name": "PAT.CIPSI PATITO",
+        "amount": 3.25
+      },
+      {
+        "name": "PAT.CIPSI PATITO",
+        "amount": 3.25
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1.0
+      },
+      {
+        "name": "ETI KARAM GURME 50 G",
+        "amount": 1.75
+      },
+      {
+        "name": "ETI KARAM GURME 50 G",
+        "amount": 1.75
+      },
+      {
+        "name": "200ML.MUZ.SUT",
+        "amount": 1.0
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1.0
+      },
+      {
+        "name": "200ML.MUZ.SUT",
+        "amount": 1.0
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1.0
+      },
+      {
+        "name": "SUT AROMALI",
+        "amount": 1.0
+      },
+      {
+        "name": "KEK 35 G KEKSTRA",
+        "amount": 0.7
+      },
+      {
+        "name": "KEK 35 G KEKSTRA",
+        "amount": 0.7
+      },
+      {
+        "name": "ALISVERIS POSETI",
+        "amount": 0.25
+      },
+      {
+        "name": "POPKEK MUZLU 60G",
+        "amount": 3.0
+      },
+      {
+        "name": "DANKEK 40 GR",
+        "amount": 1.0
+      },
+      {
+        "name": "DANKEK 40 GR",
+        "amount": 1.0
+      },
+      {
+        "name": "ETI KARAM GURME 50 G",
+        "amount": 3.5
+      }
     ],
     "critical": [
-      {"label": "TOPKDV", "amount": 1.96},
-      {"label": "TOPLAM", "amount": 26.15},
-      {"label": "KREDI KARTI", "amount": 26.15}
+      {
+        "label": "TOPKDV",
+        "amount": 1.96
+      },
+      {
+        "label": "TOPLAM",
+        "amount": 26.15
+      },
+      {
+        "label": "KREDI KARTI",
+        "amount": 26.15
+      }
     ]
   },
   "can_bolat.jpg": {
     "merchant": "CAN BOLAT MARKET",
     "date": "2016-02-14",
-    "total": 480.00,
+    "total": 480.0,
     "items_match": "pair",
     "items": [
-      {"name": "T.GIDA", "amount": 480.00}
+      {
+        "name": "T.GIDA",
+        "amount": 480.0
+      }
     ],
     "critical": [
-      {"label": "KDV", "amount": 35.56},
-      {"label": "TOP", "amount": 480.00},
-      {"label": "NAKIT", "amount": 480.00}
+      {
+        "label": "KDV",
+        "amount": 35.56
+      },
+      {
+        "label": "TOP",
+        "amount": 480.0
+      },
+      {
+        "label": "NAKIT",
+        "amount": 480.0
+      }
+    ]
+  },
+  "market_tam.jpg": {
+    "merchant": null,
+    "date": "2020-01-06",
+    "total": 307.85,
+    "note": "Dar/düşük çözünürlüklü uzun fiş; başlık kırpık (işletme adı yok). Miktar satırları (1,684 kg X 8,95) kalemin ÜSTÜNDE. Fiyat multiset.",
+    "items_match": "amount",
+    "items": [
+      {
+        "amount": 9.5
+      },
+      {
+        "amount": 9.95
+      },
+      {
+        "amount": 9.95
+      },
+      {
+        "amount": 9.95
+      },
+      {
+        "amount": 4.95
+      },
+      {
+        "amount": 4.95
+      },
+      {
+        "amount": 5.45
+      },
+      {
+        "amount": 1.65
+      },
+      {
+        "amount": 1.45
+      },
+      {
+        "amount": 1.45
+      },
+      {
+        "amount": 6.95
+      },
+      {
+        "amount": 2.25
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 6.75
+      },
+      {
+        "amount": 5.25
+      },
+      {
+        "amount": 10.95
+      },
+      {
+        "amount": 13.5
+      },
+      {
+        "amount": 2.25
+      },
+      {
+        "amount": 8.5
+      },
+      {
+        "amount": 1.75
+      },
+      {
+        "amount": 1.75
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 35.95
+      },
+      {
+        "amount": 2.75
+      },
+      {
+        "amount": 2.75
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 19.95
+      },
+      {
+        "amount": 8.95
+      },
+      {
+        "amount": 10.45
+      },
+      {
+        "amount": 39.5
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 15.07
+      },
+      {
+        "amount": 16.93
+      },
+      {
+        "amount": 10.8
+      },
+      {
+        "amount": 3.45
+      },
+      {
+        "amount": 3.45
+      },
+      {
+        "amount": 0.25
+      },
+      {
+        "amount": 0.25
+      },
+      {
+        "amount": 0.25
+      },
+      {
+        "amount": 0.25
+      }
+    ],
+    "critical": [
+      {
+        "label": "TOPKDV",
+        "amount": 22.79
+      },
+      {
+        "label": "TOPLAM",
+        "amount": 307.85
+      }
+    ]
+  },
+  "market_ust_kirpik.jpg": {
+    "merchant": null,
+    "date": "2020-01-06",
+    "total": null,
+    "note": "market_tam'ın üst kırpığı (toplam görünmez).",
+    "items_match": "amount",
+    "items": [
+      {
+        "amount": 9.5
+      },
+      {
+        "amount": 9.95
+      },
+      {
+        "amount": 9.95
+      },
+      {
+        "amount": 9.95
+      },
+      {
+        "amount": 4.95
+      },
+      {
+        "amount": 4.95
+      },
+      {
+        "amount": 5.45
+      },
+      {
+        "amount": 1.65
+      },
+      {
+        "amount": 1.45
+      },
+      {
+        "amount": 1.45
+      },
+      {
+        "amount": 6.95
+      },
+      {
+        "amount": 2.25
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 6.75
+      },
+      {
+        "amount": 5.25
+      },
+      {
+        "amount": 10.95
+      },
+      {
+        "amount": 13.5
+      },
+      {
+        "amount": 2.25
+      },
+      {
+        "amount": 8.5
+      },
+      {
+        "amount": 1.75
+      },
+      {
+        "amount": 1.75
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      }
+    ],
+    "critical": []
+  },
+  "market_alt_kirpik.jpg": {
+    "merchant": null,
+    "date": null,
+    "total": 307.85,
+    "note": "market_tam'ın alt kırpığı (tarih/başlık görünmez).",
+    "items_match": "amount",
+    "items": [
+      {
+        "amount": 35.95
+      },
+      {
+        "amount": 2.75
+      },
+      {
+        "amount": 2.75
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 1.25
+      },
+      {
+        "amount": 19.95
+      },
+      {
+        "amount": 8.95
+      },
+      {
+        "amount": 10.45
+      },
+      {
+        "amount": 39.5
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 15.07
+      },
+      {
+        "amount": 16.93
+      },
+      {
+        "amount": 10.8
+      },
+      {
+        "amount": 3.45
+      },
+      {
+        "amount": 3.45
+      },
+      {
+        "amount": 0.25
+      },
+      {
+        "amount": 0.25
+      },
+      {
+        "amount": 0.25
+      },
+      {
+        "amount": 0.25
+      }
+    ],
+    "critical": [
+      {
+        "label": "TOPKDV",
+        "amount": 22.79
+      },
+      {
+        "label": "TOPLAM",
+        "amount": 307.85
+      }
+    ]
+  },
+  "bim_kirli_tam.jpg": {
+    "merchant": "BIM BIRLESIK MAGAZALAR A.S.",
+    "date": "2021-09-04",
+    "total": 223.65,
+    "note": "bim_kirli'nin aynı fişin tam/dik fotoğrafı (komagene reklamı arka planda).",
+    "items_match": "amount",
+    "items": [
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 13.9
+      },
+      {
+        "amount": 6.5
+      },
+      {
+        "amount": 6.9
+      },
+      {
+        "amount": 6.9
+      },
+      {
+        "amount": 4.5
+      },
+      {
+        "amount": 3.75
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 4.5
+      },
+      {
+        "amount": 5.9
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 4.5
+      },
+      {
+        "amount": 2.5
+      },
+      {
+        "amount": 10.5
+      },
+      {
+        "amount": 6.5
+      },
+      {
+        "amount": 7.9
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 3.6
+      },
+      {
+        "amount": 11.9
+      },
+      {
+        "amount": 7.9
+      },
+      {
+        "amount": 6.9
+      },
+      {
+        "amount": 3.95
+      },
+      {
+        "amount": 24.9
+      },
+      {
+        "amount": 10.9
+      },
+      {
+        "amount": 15.5
+      },
+      {
+        "amount": 14.5
+      },
+      {
+        "amount": 6.5
+      },
+      {
+        "amount": 12.25
+      },
+      {
+        "amount": 0.75
+      }
+    ],
+    "critical": [
+      {
+        "label": "TOPKDV",
+        "amount": 16.98
+      },
+      {
+        "label": "TOPLAM",
+        "amount": 223.65
+      },
+      {
+        "label": "NAKIT",
+        "amount": 225.0
+      }
+    ]
+  },
+  "manav_iptal.jpg": {
+    "merchant": null,
+    "date": null,
+    "total": 1423.28,
+    "note": "Manav/market: miktar satırı kalemin ÜSTÜNDE (0,795 X 24,90 TL), sol kenar kırpık, ** İPTAL ** + negatif tutar (KİVİ -69,22). Net toplam 1.423,28.",
+    "items_match": "amount",
+    "items": [
+      {
+        "amount": 69.99
+      },
+      {
+        "amount": 69.99
+      },
+      {
+        "amount": 139.9
+      },
+      {
+        "amount": 49.99
+      },
+      {
+        "amount": 95.99
+      },
+      {
+        "amount": 14.97
+      },
+      {
+        "amount": 34.99
+      },
+      {
+        "amount": 134.9
+      },
+      {
+        "amount": 134.9
+      },
+      {
+        "amount": 49.99
+      },
+      {
+        "amount": 27.0
+      },
+      {
+        "amount": 19.8
+      },
+      {
+        "amount": 90.57
+      },
+      {
+        "amount": 47.49
+      },
+      {
+        "amount": 77.9
+      },
+      {
+        "amount": 54.79
+      },
+      {
+        "amount": 25.61
+      },
+      {
+        "amount": 18.76
+      },
+      {
+        "amount": 44.03
+      },
+      {
+        "amount": 37.91
+      },
+      {
+        "amount": 69.22
+      },
+      {
+        "amount": -69.22
+      },
+      {
+        "amount": 38.42
+      },
+      {
+        "amount": 64.29
+      },
+      {
+        "amount": 81.1
+      }
+    ],
+    "critical": [
+      {
+        "label": "TOPKDV",
+        "amount": 14.09
+      },
+      {
+        "label": "TOPLAM",
+        "amount": 1423.28
+      }
+    ]
+  },
+  "trendyolgo.jpg": {
+    "merchant": "Uber Eats Trendyol Go",
+    "date": "2026-10-18",
+    "total": 250.0,
+    "note": "Uygulama/dijital fiş fotoğrafı: Ürün/Adet/Tutar sütunları, 'Toplam:' etiketi ile 250,00 ayrı satırda (etiket tutarın ALTINDA), adres/not satırları işletme değil.",
+    "items_match": "pair",
+    "items": [
+      {
+        "name": "Miksos Mega Double Döner (XL)",
+        "amount": 240.0
+      },
+      {
+        "name": "Burcu Mayonez",
+        "amount": 5.0
+      },
+      {
+        "name": "Burcu Ketçap",
+        "amount": 5.0
+      }
+    ],
+    "critical": [
+      {
+        "label": "TOPLAM",
+        "amount": 250.0
+      }
     ]
   }
 }
