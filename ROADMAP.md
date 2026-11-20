@@ -113,7 +113,7 @@ Fazlar sonradan netleşen ihtiyaçlara göre genişlemiştir; Faz 10 ilk plana d
 ### Faz 8: Hata yönetimi ve test
 - [x] Kamera izni reddedildi → yedek ekran, ayarlar bağlantısı, galeri ve manuel yolları (`scan_camera_test.dart`)
 - [x] OCR boş veya tutar bulunamadı → "Fiş net okunamadı, bilgileri manuel girmek ister misiniz?" modalı
-- [x] Ağ hatası → fiş cihaz kuyruğuna alınır, çevrimdışı bandı gösterilir, bağlantı gelince otomatik yüklenir (SRS 7. madde için çözüm: kullanıcı veri kaybetmez)
+- [x] Ağ hatası → fiş cihaz kuyruğuna alınır, başlıkta küçük çevrimdışı rozeti gösterilir, bağlantı gelince otomatik yüklenir (SRS 7. madde için çözüm: kullanıcı veri kaybetmez)
 - [x] 401 yanıtı → sessiz token yenileme; yenileme reddedilirse otomatik çıkış
 - [x] Test: Go birim ve PG'li entegrasyon testleri, OCR pytest, Flutter widget/birim testleri (`flutter test`), mimari sözleşme testleri, CI (`.github/workflows/ci.yml`)
 - [ ] 1-2 uçtan uca senaryo otomasyonu (şu an docker yığınında elle doğrulanıyor)

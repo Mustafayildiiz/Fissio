@@ -5,6 +5,7 @@ import '../api.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../models.dart';
+import '../ocr/ocr_engine.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets.dart';
@@ -203,6 +204,17 @@ class ReceiptDetailPage extends StatelessWidget {
                       ReceiptImageStrip(expense: e),
                       const SizedBox(height: 16),
                       _DeleteRow(onTap: () => _delete(context, e)),
+                      // Fişi hangi motor okudu (manuel/eski kayıtlarda yok): sönük, küçük bilgi satırı.
+                      if (ocrEngineDisplayName(e.ocrEngine) case final engine?) ...[
+                        const SizedBox(height: 16),
+                        Center(
+                          child: Text(
+                            'İşleyen Motor: $engine',
+                            key: const Key('ocr-engine-note'),
+                            style: FissioText.body(context.c, size: 12, color: context.c.mute.withValues(alpha: .7)),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import '../app_state.dart';
 import '../models.dart';
 import '../money.dart';
+import '../ocr/ocr_engine.dart' show ocrEngineDisplayName;
 import '../receipt_parser/normalize.dart' show foldTR;
 import 'uid.dart';
 
@@ -45,6 +46,9 @@ class BackupExpense {
   /// Tekrar türü (sabit / değişken fatura) ve değişken fatura için tahmini tutar (0 = yok).
   final RecurringKind recurringKind;
   final double recurringEstimate;
+
+  /// Fişi okuyan OCR motoru (`paddleocr` | `custom` | `mlkit`); yalnızca JSON yedeğinde taşınır, bilinmiyorsa null.
+  final String? ocrEngine;
   const BackupExpense({
     required this.uid,
     required this.date,
@@ -57,6 +61,7 @@ class BackupExpense {
     this.recurringRemind = true,
     this.recurringKind = RecurringKind.fixed,
     this.recurringEstimate = 0,
+    this.ocrEngine,
   });
 }
 
@@ -179,6 +184,7 @@ BackupData buildBackup(
             recurringRemind: e.recurringRemind,
             recurringKind: e.recurringKind,
             recurringEstimate: e.recurringEstimate,
+            ocrEngine: e.ocrEngine,
           ),
       ]),
     );
@@ -208,6 +214,7 @@ String exportJson(BackupData b) => const JsonEncoder.withIndent('  ').convert({
               if (e.recurringDay > 0) 'recurring_remind': e.recurringRemind,
               if (e.recurringDay > 0) 'recurring_kind': e.recurringKind.name,
               if (e.recurringDay > 0 && e.recurringEstimate > 0) 'recurring_estimate': e.recurringEstimate,
+              if (e.ocrEngine != null) 'ocr_engine': e.ocrEngine,
               'items': [
                 for (final i in e.items) {'name': i.name, 'amount': i.amount, 'category': i.category},
               ],
@@ -316,6 +323,7 @@ BackupData _parseJson(String text) {
           recurringRemind: e['recurring_remind'] is bool ? e['recurring_remind'] as bool : true,
           recurringKind: recurringKindFrom(e['recurring_kind'] is String ? e['recurring_kind'] as String : null),
           recurringEstimate: e['recurring_estimate'] is num ? (e['recurring_estimate'] as num).toDouble() : 0,
+          ocrEngine: e['ocr_engine'] is String ? e['ocr_engine'] as String : null,
           rawItems: [
             if (e['items'] is List)
               for (final i in e['items'] as List)
@@ -353,6 +361,7 @@ bool _uidOk(String s) => RegExp(r'^[A-Za-z0-9._:-]{1,64}$').hasMatch(s);
   bool recurringRemind = true,
   RecurringKind recurringKind = RecurringKind.fixed,
   double recurringEstimate = 0,
+  String? ocrEngine,
 }) {
   final date = parseDate(dateRaw);
   if (date == null) return (value: null, error: 'tarih okunamadı ("$dateRaw").');
@@ -376,6 +385,8 @@ bool _uidOk(String s) => RegExp(r'^[A-Za-z0-9._:-]{1,64}$').hasMatch(s);
       recurringRemind: recurringRemind,
       recurringKind: recurringKind,
       recurringEstimate: recurringEstimate > 0 && recurringEstimate < 1e10 ? (recurringEstimate * 100).round() / 100 : 0,
+      // Yalnızca bilinen motor kimlikleri (dosya elle düzenlenmiş olabilir); aksi halde yok sayılır.
+      ocrEngine: ocrEngineDisplayName(ocrEngine) != null ? ocrEngine : null,
     ),
     error: null,
   );
@@ -579,6 +590,7 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
           recurringRemind: be.recurringRemind,
           recurringKind: be.recurringKind,
           recurringEstimate: be.recurringEstimate,
+          ocrEngine: be.ocrEngine,
         ),
       );
       imported++;

@@ -196,7 +196,14 @@ class RecurringTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final days = item.daysUntil(today);
-    final soon = days <= 3; // gecikmiş (negatif) de dikkat çeker
+    final overdue = item.isOverdue(today);
+    final soon = !overdue && !item.paidThisMonth && days >= 0 && days <= 3;
+    // Gecikmiş = kırmızı (tehlike), ≤3 gün kala = sarı (uyarı); ödenmiş/uzak gün normal renkte.
+    final dueStyle = overdue
+        ? TextStyle(color: c.danger, fontWeight: FontWeight.w600)
+        : soon
+        ? TextStyle(color: c.warn, fontWeight: FontWeight.w600)
+        : null;
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: item.lastExpenseId)),
@@ -231,10 +238,12 @@ class RecurringTile extends StatelessWidget {
                           TextSpan(text: ' · sonraki ${fmtDate(item.nextDue)}'),
                         ] else ...[
                           TextSpan(text: '${fmtDate(item.nextDue)} · '),
+                          // Tümü listesinde de gecikme görünür (ödeme günü yerine "N gün gecikti").
                           TextSpan(
-                            text: showDue ? daysLeftLabel(days) : 'ayın ${item.day}. günü',
-                            style: soon && showDue ? TextStyle(color: c.accentInk, fontWeight: FontWeight.w600) : null,
+                            text: showDue || overdue ? daysLeftLabel(days) : 'ayın ${item.day}. günü',
+                            style: dueStyle,
                           ),
+                          if (!item.countsInTotal) const TextSpan(text: ' · toplama dahil değil'),
                         ],
                       ],
                     ),
@@ -243,28 +252,41 @@ class RecurringTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  key: Key('recurring-amount-${item.lastExpenseId}'),
-                  // Ödendi: gerçek tutar; değişken fatura: tahmini (≈); sabit: tutar.
-                  item.paidThisMonth
-                      ? fmtMoney(item.actualAmount)
-                      : (item.isVariable ? '≈ ${fmtMoney(item.expected)}' : fmtMoney(item.expected)),
-                  style: FissioText.money(c, size: 15),
-                ),
-                if (item.paidThisMonth)
-                  Text('Ödendi', key: const Key('paid-badge'), style: FissioText.body(c, size: 12, color: c.accentInk))
-                else if (item.hasRange)
-                  Text(
-                    '${fmtMoney(item.minAmount)} – ${fmtMoney(item.maxAmount)}',
-                    key: const Key('range-caption'),
-                    style: FissioText.body(c, size: 12, color: c.mute),
-                  )
-                else if (item.isVariable)
-                  Text('tahmini', style: FissioText.body(c, size: 12, color: c.mute)),
-              ],
+            // Sağ sütun en çok satırın ~%45'i: dar ekranda (320-360 px) uzun tutar/aralık başlığı ezmesin ve taşmasın;
+            // sığmayan tutar küçülür (FittedBox), başlık zaten ellipsis ile kısalır.
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .45),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      key: Key('recurring-amount-${item.lastExpenseId}'),
+                      // Ödendi: gerçek tutar; değişken fatura: tahmini (≈); sabit: tutar.
+                      item.paidThisMonth
+                          ? fmtMoney(item.actualAmount)
+                          : (item.isVariable ? '≈ ${fmtMoney(item.expected)}' : fmtMoney(item.expected)),
+                      style: FissioText.money(c, size: 15),
+                    ),
+                  ),
+                  if (item.paidThisMonth)
+                    Text('Ödendi', key: const Key('paid-badge'), style: FissioText.body(c, size: 12, color: c.accentInk))
+                  else if (item.hasRange)
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '${fmtMoney(item.minAmount)} – ${fmtMoney(item.maxAmount)}',
+                        key: const Key('range-caption'),
+                        style: FissioText.body(c, size: 12, color: c.mute),
+                      ),
+                    )
+                  else if (item.isVariable)
+                    Text('tahmini', style: FissioText.body(c, size: 12, color: c.mute)),
+                ],
+              ),
             ),
           ],
         ),
@@ -331,22 +353,37 @@ class FixedExpensesSection extends StatelessWidget {
           'Sabit giderler',
           trailing: proj.items.isEmpty
               ? null
-              : GestureDetector(
+              : InkWell(
                   key: const Key('recurring-all'),
                   onTap: openAll,
-                  child: Text(
-                    'Tümü',
-                    style: FissioText.body(c, size: 14, weight: FontWeight.w600, color: c.accentInk),
+                  borderRadius: BorderRadius.circular(8),
+                  // Dokunma hedefi küçük bir metin değil: en az 44 px yüksekliğinde.
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        widthFactor: 1,
+                        child: Text(
+                          'Tümü',
+                          style: FissioText.body(c, size: 14, weight: FontWeight.w600, color: c.accentInk),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
         ),
         const SizedBox(height: 8),
-        Container(
+        // Material (dekorlu Container değil): satırların InkWell dalgası kartın ARKASINDA kalıp görünmez olmasın.
+        Material(
           key: const Key('fixed-projection'),
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
-          decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
-          child: proj.items.isEmpty
+          color: c.surf,
+          borderRadius: BorderRadius.circular(kRadius),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+            child: proj.items.isEmpty
               ? Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Text(
@@ -370,7 +407,11 @@ class FixedExpensesSection extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text('${proj.items.length} tekrarlayan gider', style: FissioText.body(c, size: 13, color: c.mute)),
+                    Text(
+                      '${proj.items.length} tekrarlayan gider'
+                      '${proj.items.any((i) => !i.countsInTotal) ? ' · ${proj.items.where((i) => !i.countsInTotal).length} tanesi toplama dahil değil' : ''}',
+                      style: FissioText.body(c, size: 13, color: c.mute),
+                    ),
                     ProjectionBreakdown(proj: proj),
                     if (upcoming.isNotEmpty) ...[
                       const SizedBox(height: 10),
@@ -383,6 +424,7 @@ class FixedExpensesSection extends StatelessWidget {
                       const SizedBox(height: 10),
                   ],
                 ),
+          ),
         ),
       ],
     );

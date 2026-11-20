@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -215,9 +216,23 @@ type expenseInput struct {
 	// RecurringEstimate: degisken fatura icin kullanicinin tahmini aylik tutari (gecmis fatura yokken
 	// projeksiyonda kullanilir); 0/yok = tahmin yok.
 	RecurringEstimate float64 `json:"recurring_estimate"`
+	// OcrEngine: fisi okuyan OCR motoru (paddleocr | custom | mlkit; yalniz bilgi amacli). Yok/null/bos = bilinmiyor:
+	// POST'ta NULL yazilir, PUT'ta mevcut deger KORUNUR (alan atlayan bir duzenleme motoru silmez).
+	OcrEngine *string `json:"ocr_engine"`
 	// BaseUpdatedAt (yalniz PUT): istemcinin duzenlemeye basladigi surumun updated_at degeri (RFC3339). Sunucudaki
 	// kayit bundan YENIYSE (baska cihaz degistirmis) yazilmaz, 409 conflict doner. Bos = denetim yok (eski davranis).
 	BaseUpdatedAt string `json:"base_updated_at"`
+}
+
+// ocrEngineRe: OCR motoru kimligi (kucuk harf/rakam/_/-); yeni bir motor sunucu degisikligi gerektirmez.
+var ocrEngineRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
+
+// ocrArg SQL'e giden motor degeri: nil = yok (INSERT'te NULL, UPDATE'te COALESCE ile mevcut deger korunur).
+func (in *expenseInput) ocrArg() any {
+	if in.OcrEngine == nil {
+		return nil
+	}
+	return *in.OcrEngine
 }
 
 // remind hatirlatici tercihini dondurur (verilmediyse varsayilan: acik).
@@ -317,6 +332,8 @@ type expenseOut struct {
 	// RecurringKind fixed | variable; RecurringEstimate degisken faturanin tahmini tutari (0 = yok).
 	RecurringKind     string  `json:"recurring_kind"`
 	RecurringEstimate float64 `json:"recurring_estimate"`
+	// OcrEngine fisi okuyan OCR motoru; null = manuel girilen / eski kayit.
+	OcrEngine *string `json:"ocr_engine"`
 	// UpdatedAt son degisiklik zamani (RFC3339Nano, UTC, mikrosaniye): PUT base_updated_at ve GET ?since= icin
 	// istemci bu degeri AYNEN geri gonderir.
 	UpdatedAt string `json:"updated_at"`
@@ -365,6 +382,17 @@ func (in *expenseInput) validate() (time.Time, string) {
 		return time.Time{}, "recurring_estimate must be a positive number"
 	}
 	in.RecurringEstimate = math.Round(in.RecurringEstimate*100) / 100
+	if in.OcrEngine != nil {
+		v := strings.ToLower(strings.TrimSpace(*in.OcrEngine))
+		switch {
+		case v == "":
+			in.OcrEngine = nil
+		case !ocrEngineRe.MatchString(v):
+			return time.Time{}, "invalid ocr_engine"
+		default:
+			in.OcrEngine = &v
+		}
+	}
 	// NUL/kontrol karakterleri Postgres'te insert hatasi verir (bulk'ta tum partiyi bozardi): sessizce ayiklanir.
 	in.Merchant = cleanText(in.Merchant)
 	in.Note = cleanText(in.Note)
@@ -429,7 +457,7 @@ func isFKViolation(err error) bool {
 
 const selectExpense = `
 SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
-       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at,
+       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at, e.ocr_engine,
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -441,7 +469,11 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var items []byte
 	var imageIDs pq.Int64Array
 	var updated time.Time
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &imageIDs)
+	var ocr sql.NullString
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &ocr, &imageIDs)
+	if ocr.Valid {
+		e.OcrEngine = &ocr.String
+	}
 	e.Date = d.Format(dateLayout)
 	e.UpdatedAt = formatUpdatedAt(updated)
 	e.Items = []expenseItem{}
@@ -522,10 +554,10 @@ func insertExpense(q interface {
 }, userID, profileID int64, uid string, in expenseInput, d time.Time, itemsJSON string) (int64, bool, error) {
 	var id int64
 	err := q.QueryRow(
-		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate, ocr_engine)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		 ON CONFLICT (user_id, client_uid) DO NOTHING RETURNING id`,
-		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg()).Scan(&id)
+		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), in.ocrArg()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = q.QueryRow(`SELECT id FROM expense.expenses WHERE user_id = $1 AND client_uid = $2`, userID, uid).Scan(&id)
 		return id, false, err
@@ -727,10 +759,11 @@ func (h *handler) updateExpense(c *gin.Context) {
 	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
 		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11, recurring_kind = $12, recurring_estimate = $13,
+		 ocr_engine = COALESCE($15::text, ocr_engine),
 		 updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 		 WHERE id=$7 AND user_id=$8 AND ($14::timestamptz IS NULL OR updated_at <= $14::timestamptz)`,
 		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo,
-		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base)
+		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base, in.ocrArg())
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return

@@ -439,6 +439,7 @@ class FakeBackend {
       'recurring_remind': j['recurring_remind'] ?? true,
       'recurring_kind': j['recurring_kind'] ?? 'fixed',
       'recurring_estimate': j['recurring_estimate'] ?? 0,
+      'ocr_engine': j['ocr_engine'],
       'updated_at': _stamp(),
     };
     u.expenses.add(e);

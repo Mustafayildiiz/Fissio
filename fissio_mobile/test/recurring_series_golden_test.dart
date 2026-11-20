@@ -11,7 +11,7 @@ void main() {
   final data = jsonDecode(File('../testdata/recurring_series.json').readAsStringSync()) as Map<String, dynamic>;
   final cases = (data['cases'] as List).cast<Map<String, dynamic>>();
 
-  test('yeterli vektör var', () => expect(cases.length, greaterThanOrEqualTo(4)));
+  test('yeterli vektör var', () => expect(cases.length, greaterThanOrEqualTo(6)));
 
   for (final c in cases) {
     test(c['name'] as String, () {
@@ -56,6 +56,7 @@ void main() {
         expect(g.isOverdue(today), w['overdue']);
         expect(g.nextDue.toIso8601String().substring(0, 10), w['next_due']);
         expect(g.amount, (w['amount'] as num).toDouble());
+        expect(g.countsInTotal, w['counts_in_total'] ?? true, reason: 'toplama dahil mi (vektörde yoksa true)');
       }
     });
   }

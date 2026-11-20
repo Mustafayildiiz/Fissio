@@ -32,6 +32,8 @@ func TestRecurringSeriesGoldenVectors(t *testing.T) {
 					Overdue  bool    `json:"overdue"`
 					NextDue  string  `json:"next_due"`
 					Amount   float64 `json:"amount"`
+					// Counts: toplama dahil mi; vektorde yoksa true beklenir.
+					Counts *bool `json:"counts_in_total"`
 				} `json:"series"`
 			} `json:"expect"`
 		} `json:"cases"`
@@ -56,7 +58,8 @@ func TestRecurringSeriesGoldenVectors(t *testing.T) {
 		for i, w := range c.Expect.Series {
 			g := items[i]
 			if g.Merchant != w.Merchant || g.ExpectedAmount != w.Expected || g.MinAmount != w.Min || g.MaxAmount != w.Max ||
-				g.HistoryCount != w.History || g.PaidThisMonth != w.Paid || g.Overdue != w.Overdue || g.NextDue != w.NextDue || g.Amount != w.Amount {
+				g.HistoryCount != w.History || g.PaidThisMonth != w.Paid || g.Overdue != w.Overdue || g.NextDue != w.NextDue || g.Amount != w.Amount ||
+				g.CountsInTotal != (w.Counts == nil || *w.Counts) {
 				t.Errorf("%s[%d]: %+v, beklenen %+v", c.Name, i, g, w)
 			}
 		}

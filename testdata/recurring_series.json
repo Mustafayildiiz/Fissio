@@ -113,7 +113,7 @@
     }
    ],
    "expect": {
-    "monthly_total": 60,
+    "monthly_total": 0,
     "series": [
      {
       "merchant": "Yakin abonelik",
@@ -124,7 +124,8 @@
       "paid": false,
       "overdue": true,
       "next_due": "2026-05-05",
-      "amount": 60
+      "amount": 60,
+      "counts_in_total": false
      }
     ]
    }
@@ -174,6 +175,89 @@
       "overdue": false,
       "next_due": "2026-06-10",
       "amount": 400
+     }
+    ]
+   }
+  },
+  {
+   "name": "one_missed_month_still_counts",
+   "today": "2026-05-15",
+   "rows": [
+    {
+     "merchant": "Spor salonu",
+     "category_id": 10,
+     "amount": 200,
+     "date": "2026-03-05",
+     "day": 5,
+     "kind": "fixed",
+     "estimate": 0
+    }
+   ],
+   "expect": {
+    "monthly_total": 200,
+    "series": [
+     {
+      "merchant": "Spor salonu",
+      "expected": 200,
+      "min": 200,
+      "max": 200,
+      "history": 1,
+      "paid": false,
+      "overdue": true,
+      "next_due": "2026-05-05",
+      "amount": 200
+     }
+    ]
+   }
+  },
+  {
+   "name": "two_missed_months_listed_but_not_summed",
+   "today": "2026-05-15",
+   "rows": [
+    {
+     "merchant": "Spor salonu",
+     "category_id": 10,
+     "amount": 200,
+     "date": "2026-02-05",
+     "day": 5,
+     "kind": "fixed",
+     "estimate": 0
+    },
+    {
+     "merchant": "Netflix",
+     "category_id": 10,
+     "amount": 100,
+     "date": "2026-05-02",
+     "day": 2,
+     "kind": "fixed",
+     "estimate": 0
+    }
+   ],
+   "expect": {
+    "monthly_total": 100,
+    "series": [
+     {
+      "merchant": "Spor salonu",
+      "expected": 200,
+      "min": 200,
+      "max": 200,
+      "history": 1,
+      "paid": false,
+      "overdue": true,
+      "next_due": "2026-05-05",
+      "amount": 200,
+      "counts_in_total": false
+     },
+     {
+      "merchant": "Netflix",
+      "expected": 100,
+      "min": 100,
+      "max": 100,
+      "history": 1,
+      "paid": true,
+      "overdue": false,
+      "next_due": "2026-06-02",
+      "amount": 100
      }
     ]
    }

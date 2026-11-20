@@ -60,7 +60,7 @@ struct FissioWidgetView: View {
       Spacer(minLength: 0)
       if entry.signedIn {
         // Hızlı tara: uygulamayı doğrudan tarama ekranında açar (fissio://scan).
-        Link(destination: URL(string: "fissio://scan")!) {
+        Link(destination: URL(string: "fissio://scan?homeWidget")!) {
           HStack(spacing: 6) {
             Image(systemName: "doc.viewfinder")
             Text("Fiş tara").fontWeight(.bold)

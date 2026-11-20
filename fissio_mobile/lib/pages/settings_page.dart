@@ -19,6 +19,7 @@ import '../app_info.dart';
 import 'preferences_page.dart';
 import 'profile_select_page.dart';
 import 'sessions_page.dart';
+import 'sync_status_badge.dart';
 import 'support_page.dart';
 
 /// Ayarlar'ı alttan açılan tam ekran sayfa olarak gösterir ("Bitti" ile kapanır).
@@ -36,12 +37,17 @@ class ProfileAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: appState,
-      builder: (context, _) =>
+      builder: (context, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SyncStatusBadge(),
           ProfileAvatarView(
             name: appState.displayName,
             profile: appState.activeProfile,
             onTap: () => openSettings(context),
           ),
+        ],
+      ),
     );
   }
 }

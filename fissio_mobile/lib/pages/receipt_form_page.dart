@@ -6,6 +6,7 @@ import '../app_state.dart';
 import '../budgets.dart' show parseMoneyInput;
 import '../dialogs.dart';
 import '../models.dart';
+import '../receipt_parser/normalize.dart' show foldTR;
 import '../theme.dart';
 import '../widgets.dart';
 import 'photo_picker.dart';
@@ -103,6 +104,10 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   /// Otomatik olarak devam ettirilen tekrarlayan serinin adı (bilgi notu için).
   String? _inheritedFrom;
 
+  /// Devralınan serinin işletme adı. Seri anahtarı işletme adına bağlıdır; bulanık eşleşmede ("BEDAŞ A.Ş." → "BEDAŞ")
+  /// fiş kaydedilirken bu ad kullanılır ki fiş seriyi SÜRDÜRSÜN, ikinci bir seri açıp toplamı çiftlemesin.
+  String? _inheritedMerchant;
+
   bool get _editing => widget.initial != null;
 
   double get _total => _rows.fold(0.0, (s, r) => s + r.value);
@@ -183,7 +188,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   /// otomatik "ödendi" olur. Kullanıcı ayara dokunduysa ya da fiş düzenleniyorsa karışılmaz.
   void _inheritSeries() {
     if (_editing || _recurringTouched || _draft.recurringDay > 0) return;
-    final s = _app.seriesFor(_merchant.text, _draft.categoryId);
+    final s = _app.seriesFor(_merchant.text, _draft.categoryId, amount: _net);
     if (s == null) return;
     setState(() {
       _draft
@@ -193,6 +198,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         ..recurringRemind = s.remind;
       _estimate.text = s.estimate > 0 ? s.estimate.toStringAsFixed(2).replaceAll('.', ',') : '';
       _inheritedFrom = s.title;
+      _inheritedMerchant = s.merchant;
     });
   }
 
@@ -238,7 +244,10 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     _recurringTouched = true;
     setState(() {
       _draft.recurringDay = on ? _draft.date.day : 0;
-      if (!on) _inheritedFrom = null;
+      if (!on) {
+        _inheritedFrom = null;
+        _inheritedMerchant = null;
+      }
     });
     if (on && _draft.recurringRemind) _app.notifier.requestPermission();
   }
@@ -340,7 +349,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
             key: const Key('recurring-inherited'),
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
             child: Text(
-              '"$_inheritedFrom" tekrarlayan giderinin devamı olarak işaretlendi; bu ayın kalemi ödendi sayılacak.',
+              '"$_inheritedFrom" tekrarlayan giderinin devamı olarak işaretlendi; bu ayın kalemi ödendi sayılacak.'
+              '${_inheritedMerchant != null && foldTR(_inheritedMerchant!) != foldTR(_merchant.text.trim()) ? ' İşletme adı "$_inheritedMerchant" olarak kaydedilir.' : ''}',
               style: FissioText.body(c, size: 13, color: c.accentInk).copyWith(height: 1.35),
             ),
           ),
@@ -376,8 +386,14 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       showMessage(context, 'En az bir ürün ve tutar girin.');
       return;
     }
+    var merchant = _merchant.text.trim();
+    // Devralınan seriye hâlâ uyuyorsa (kullanıcı adı başka bir işletmeye çevirmediyse) serinin adıyla kaydet.
+    if (!_editing && _inheritedMerchant != null && _draft.recurringDay > 0) {
+      final s = _app.seriesFor(merchant, _draft.categoryId, amount: _net);
+      if (s != null) merchant = s.merchant;
+    }
     _draft
-      ..merchant = _merchant.text.trim()
+      ..merchant = merchant
       ..note = _note.text.trim()
       ..recurringEstimate = _draft.recurringKind == RecurringKind.variable ? (parseMoneyInput(_estimate.text) ?? 0) : 0
       ..items = items;
@@ -727,7 +743,11 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
           flex: 2,
           child: TextField(
             controller: r.amount,
-            onChanged: (_) => setState(() {}),
+            onChanged: (_) {
+              setState(() {});
+              // Bulanık seri eşleşmesi tutara da bakar: tutar girilince/değişince öneri yeniden denenir.
+              _inheritSeries();
+            },
             textAlign: TextAlign.right,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             cursorColor: c.accentInk,

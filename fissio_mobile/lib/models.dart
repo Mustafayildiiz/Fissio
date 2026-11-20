@@ -320,6 +320,10 @@ class Expense {
   /// korunur). Bekleyen düzenlemede ([LocalSnapshot.pendingEdits]) düzenlemenin dayandığı sunucu sürümüdür.
   final String? updatedAt;
 
+  /// Fişi okuyan OCR motoru (`paddleocr` | `custom` | `mlkit`); manuel girilen ve eski kayıtlarda null.
+  /// Yalnızca bilgi amaçlıdır (fiş detayında gösterilir), düzenlemede korunur.
+  final String? ocrEngine;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -343,6 +347,7 @@ class Expense {
     this.syncFailures = 0,
     this.syncError,
     this.updatedAt,
+    this.ocrEngine,
   });
 
   bool get isRecurring => recurringDay > 0;
@@ -376,6 +381,7 @@ class Expense {
     String? syncError,
     bool clearSyncError = false,
     String? updatedAt,
+    String? ocrEngine,
   }) => Expense(
     id: id ?? this.id,
     merchant: merchant ?? this.merchant,
@@ -399,6 +405,7 @@ class Expense {
     syncFailures: clearSyncError ? 0 : (syncFailures ?? this.syncFailures),
     syncError: clearSyncError ? null : (syncError ?? this.syncError),
     updatedAt: updatedAt ?? this.updatedAt,
+    ocrEngine: ocrEngine ?? this.ocrEngine,
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -422,6 +429,7 @@ class Expense {
     recurringKind: recurringKindFrom(j['recurring_kind'] as String?),
     recurringEstimate: (j['recurring_estimate'] as num?)?.toDouble() ?? 0,
     updatedAt: j['updated_at'] as String?,
+    ocrEngine: j['ocr_engine'] as String?,
   );
 
   /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
@@ -449,6 +457,7 @@ class Expense {
     // Sunucudan önbelleğe alınan (senkronlanmış) fişlerin fotoğraf kimlikleri.
     if (imageIds.isNotEmpty) 'image_ids': imageIds,
     if (updatedAt != null) 'updated_at': updatedAt,
+    if (ocrEngine != null) 'ocr_engine': ocrEngine,
   };
 
   factory Expense.fromLocalJson(Map<String, dynamic> j) {
@@ -480,6 +489,7 @@ class Expense {
       syncError: j['sync_error'] as String?,
       imageIds: ((j['image_ids'] as List?) ?? []).map((e) => (e as num).toInt()).toList(),
       updatedAt: j['updated_at'] as String?,
+      ocrEngine: j['ocr_engine'] as String?,
     );
   }
 }
@@ -535,6 +545,9 @@ class ReceiptDraft {
   RecurringKind recurringKind;
   double recurringEstimate;
 
+  /// Taramada fişi okuyan motor (bkz. [Expense.ocrEngine]); manuel girişte null. Kayıtta sunucuya/cihaza yazılır.
+  String? ocrEngine;
+
   ReceiptDraft({
     this.id,
     this.clientUid,
@@ -554,6 +567,7 @@ class ReceiptDraft {
     this.recurringRemind = true,
     this.recurringKind = RecurringKind.fixed,
     this.recurringEstimate = 0,
+    this.ocrEngine,
   }) : date = date ?? DateTime.now(),
        items = items ?? [],
        pendingImages = pendingImages ?? [];
@@ -587,6 +601,8 @@ class ReceiptDraft {
     'recurring_kind': recurringKind.name,
     // 0 = tahmin yok (güncellemede kaldırır); yalnızca tekrarlayan değişken faturada anlamlıdır.
     'recurring_estimate': recurringDay > 0 && recurringKind == RecurringKind.variable ? recurringEstimate : 0,
+    // Yalnızca tarama ile gelen fişte; null/atlanırsa sunucu mevcut değeri korur (PUT motoru silmez).
+    if (ocrEngine != null) 'ocr_engine': ocrEngine,
   };
 
   factory ReceiptDraft.from(Expense e) {
@@ -620,6 +636,7 @@ class ReceiptDraft {
       recurringRemind: e.recurringRemind,
       recurringKind: e.recurringKind,
       recurringEstimate: e.recurringEstimate,
+      ocrEngine: e.ocrEngine,
     );
   }
 

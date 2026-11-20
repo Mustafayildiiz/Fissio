@@ -36,6 +36,10 @@ const (
 	recurringVariable = "variable"
 	// recurringWindow hareketli ortalamanin ay sayisi.
 	recurringWindow = 3
+	// recurringSumMonths: odenmemis bir seri, son fisinden bu kadar takvim ayina kadar projeksiyon TOPLAMINA girer
+	// (bu ay + en fazla 1 kacirilan ay). Daha eskisi (iptal edilmis abonelik olabilir) listede "gecikmis" kalir ama
+	// Kalan/aylik toplami sismirmez. Mobil: kRecurringSumMonths.
+	recurringSumMonths = 2
 )
 
 type recurringRow struct {
@@ -78,8 +82,11 @@ type recurringOut struct {
 	// PaidThisMonth bu ay serinin fisi girilmis (odendi / gerceklesti); ActualAmount o fisin tutari.
 	PaidThisMonth bool    `json:"paid_this_month"`
 	ActualAmount  float64 `json:"actual_amount"`
-	// MonthAmount bu ayin projeksiyonuna giren tutar: odendiyse gercek, degilse beklenen.
+	// MonthAmount bu ayin projeksiyonuna giren tutar: odendiyse gercek, degilse beklenen; toplama girmeyen
+	// (CountsInTotal=false) bayat seride 0.
 	MonthAmount float64 `json:"month_amount"`
+	// CountsInTotal: seri aylik/kalan toplama dahil mi (bkz. recurringSumMonths).
+	CountsInTotal bool `json:"counts_in_total"`
 }
 
 type recurringTotals struct {
@@ -216,13 +223,14 @@ func buildRecurring(rows []recurringRow, today time.Time) ([]recurringOut, recur
 		thisMonth, paid := byMonth[curKey]
 		expected, min, max, used := expectation(latest, windowMonths(months, curKey, paid))
 		due, overdue := nextDue(latest.Day, latest.Date, today)
+		counts := curKey-(latest.Date.Year()*12+int(latest.Date.Month())) <= recurringSumMonths
 		o := recurringOut{
 			SeriesKey: seriesKey(latest.Merchant, latest.CategoryID), ProfileID: latest.ProfileID, Merchant: latest.Merchant,
 			CategoryID: latest.CategoryID, CategoryName: latest.CategoryName, Amount: round2(latest.Amount), Day: latest.Day,
 			Remind: latest.Remind, LastExpenseID: latest.ID, LastDate: latest.Date.Format(dateLayout),
 			NextDue: due.Format(dateLayout), Overdue: overdue,
 			Kind:    latest.Kind, Estimate: round2(latest.Estimate), ExpectedAmount: expected, MinAmount: min, MaxAmount: max,
-			HistoryCount: used, PaidThisMonth: paid,
+			HistoryCount: used, PaidThisMonth: paid, CountsInTotal: counts,
 		}
 		if paid {
 			// Bu ayin faturasi girildi: tahmin gercek tutarla degisir.
@@ -231,7 +239,7 @@ func buildRecurring(rows []recurringRow, today time.Time) ([]recurringOut, recur
 			t.Paid += o.ActualAmount
 			t.Min += o.ActualAmount
 			t.Max += o.ActualAmount
-		} else {
+		} else if counts {
 			o.MonthAmount = expected
 			t.Remaining += expected
 			t.Min += min

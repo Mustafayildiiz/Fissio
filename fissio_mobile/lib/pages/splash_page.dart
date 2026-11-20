@@ -23,13 +23,19 @@ class _SplashPageState extends State<SplashPage> {
   }
 
   Future<void> _boot() async {
-    final results = await Future.wait<Object?>([
-      // Widget kısayolu (soğuk açılış) oturum geri yüklenirken okunur.
-      deepLinks.init().then((_) => appState.restoreSession()),
-      Future<void>.delayed(const Duration(milliseconds: 1200)),
-    ]);
+    // Widget kısayolu (soğuk açılış) oturum geri yüklenirken okunur.
+    final restore = deepLinks.init().then((_) => appState.restoreSession());
+    // Splash en az 1,2 sn görünür; ama widget'tan "hızlı tara" ile açıldıysa kamerayı geciktirmemek için beklenmez.
+    final minDelay = Future<void>.delayed(const Duration(milliseconds: 1200));
+    final ok = await restore;
+    if (!deepLinks.hasPendingScan) await minDelay;
     if (!mounted) return;
-    final ok = results[0] as bool;
+    // Hızlı tara + oturum var ama aktif profil seçili değilse (ilk açılış / silinmiş profil) ilk profili seç:
+    // kullanıcı profil seçiciye düşmeden doğrudan kameraya gitsin.
+    if (ok && deepLinks.hasPendingScan && appState.activeProfile == null && appState.profiles.isNotEmpty) {
+      await appState.selectProfile(appState.profiles.first);
+      if (!mounted) return;
+    }
     // Widget'tan "hızlı tara" ile açıldıysa ve aktif profil varsa profil seçimi atlanır; kabuk taramayı açar.
     final direct = ok && deepLinks.hasPendingScan && appState.activeProfile != null;
     Navigator.of(context).pushReplacement(

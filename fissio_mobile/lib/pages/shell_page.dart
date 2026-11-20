@@ -48,10 +48,15 @@ class _ShellPageState extends State<ShellPage> {
     setState(() => _index = 1);
   }
 
+  bool _scanOpen = false;
+
   void _addReceipt() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ScanPage()),
-    );
+    // Widget'a art arda dokunulursa ikinci bir tarama sayfası üst üste açılmasın.
+    if (_scanOpen) return;
+    _scanOpen = true;
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const ScanPage()))
+        .whenComplete(() => _scanOpen = false);
   }
 
   @override

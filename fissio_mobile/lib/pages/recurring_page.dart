@@ -8,18 +8,23 @@ import 'budget_widgets.dart';
 
 /// Tekrarlayan giderler: aylık sabit gider projeksiyonu, yaklaşan ödemeler ve tüm seriler.
 class RecurringPage extends StatelessWidget {
-  const RecurringPage({super.key});
+  const RecurringPage({super.key, this.app, this.now});
+
+  /// Verilmezse global [appState]; [now] testlerde "bugün"ü sabitler (Özet bölümüyle aynı kalıp).
+  final AppState? app;
+  final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final state = app ?? appState;
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: appState,
+          listenable: state,
           builder: (context, _) {
-            final proj = appState.recurring;
-            final today = DateTime.now();
+            final proj = state.recurring;
+            final today = now ?? DateTime.now();
             final upcoming = upcomingPaymentsOf(proj.items, today);
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -47,7 +52,8 @@ class RecurringPage extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         '${proj.items.length} tekrarlayan gider · her seri bir kez sayılır: ödenenler gerçek tutarla, '
-                        'kalanlar beklenen tutarla (değişken faturalar son 3 ayın ortalamasıyla).',
+                        'kalanlar beklenen tutarla (değişken faturalar son 3 ayın ortalamasıyla). Son ödemesi 2 aydan eski '
+                        'gecikmiş giderler listede görünür ama toplama girmez.',
                         style: FissioText.body(c, size: 14, color: c.mute),
                       ),
                       const SizedBox(height: 4),

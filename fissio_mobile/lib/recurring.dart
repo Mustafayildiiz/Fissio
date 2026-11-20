@@ -23,6 +23,15 @@ import 'theme.dart' show fmtDate, fmtMoney;
 /// Hareketli ortalamanın ay sayısı.
 const kRecurringWindow = 3;
 
+/// Ödenmemiş bir seri, son fişinden bu kadar takvim ayına kadar projeksiyon TOPLAMINA girer (bu ay + en fazla 1
+/// kaçırılan ay). Daha eskisi (iptal edilmiş abonelik olabilir) listede "gecikmiş" kalır ama Kalan/aylık toplamı
+/// şişirmez. Go `recurringSumMonths`.
+const kRecurringSumMonths = 2;
+
+/// Yeni fişin tutarı bir serinin beklenen tutarından en çok bu oranda sapıyorsa (±%30) işletme adı yalnızca
+/// BULANIK eşleşse bile aynı seri sayılır ([seriesMatchFor]).
+const kRecurringFuzzyAmountTolerance = 0.30;
+
 class RecurringItem {
   const RecurringItem({
     required this.seriesKey,
@@ -45,10 +54,11 @@ class RecurringItem {
     this.paidThisMonth = false,
     this.actualAmount = 0,
     double? monthAmount,
+    this.countsInTotal = true,
   }) : expected = expected ?? amount,
        minAmount = minAmount ?? expected ?? amount,
        maxAmount = maxAmount ?? expected ?? amount,
-       monthAmount = monthAmount ?? (paidThisMonth ? actualAmount : (expected ?? amount));
+       monthAmount = monthAmount ?? (paidThisMonth ? actualAmount : (countsInTotal ? (expected ?? amount) : 0));
   final String seriesKey;
   final String profileUid;
   final String merchant;
@@ -78,8 +88,11 @@ class RecurringItem {
   final bool paidThisMonth;
   final double actualAmount;
 
-  /// Bu ayın projeksiyonuna giren tutar: ödendiyse gerçek, değilse beklenen.
+  /// Bu ayın projeksiyonuna giren tutar: ödendiyse gerçek, değilse beklenen; toplama girmeyen (bayat) seride 0.
   final double monthAmount;
+
+  /// Seri aylık/kalan toplama dahil mi (bkz. [kRecurringSumMonths]); false ise yalnızca listede "gecikmiş" görünür.
+  final bool countsInTotal;
 
   bool get isVariable => kind == RecurringKind.variable;
 
@@ -202,7 +215,9 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
       }
     }
     final actual = paid ? _r2(thisMonth.amount) : 0.0;
-    final monthAmount = paid ? actual : expected;
+    // Ödenmemiş ve son fişi (bu ay + 1 kaçırılan aydan) eskiyse listede kalır ama toplama girmez.
+    final counts = curKey - (latest.date.year * 12 + latest.date.month) <= kRecurringSumMonths;
+    final monthAmount = paid ? actual : (counts ? expected : 0.0);
     items.add(
       RecurringItem(
         seriesKey: recurringSeriesKey(latest.merchant, latest.categoryId),
@@ -225,6 +240,7 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
         paidThisMonth: paid,
         actualAmount: actual,
         monthAmount: monthAmount,
+        countsInTotal: counts,
       ),
     );
     monthly += monthAmount;
@@ -232,7 +248,7 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
       paidT += actual;
       minT += actual;
       maxT += actual;
-    } else {
+    } else if (counts) {
       remainT += expected;
       minT += minA;
       maxT += maxA;
@@ -255,10 +271,54 @@ RecurringProjection buildRecurring(List<Expense> expenses, DateTime today) {
 }
 
 /// Önümüzdeki [days] gün içinde ödemesi gelen seriler + gecikmiş (ödenmemiş, günü geçmiş) seriler; en eski önce.
+/// Bu ay zaten ödenmiş seri (sonraki ödemesi gelecek ay) "yaklaşan" sayılmaz: o "Ödendi" olarak ayrıca gösterilir.
 List<RecurringItem> upcomingPaymentsOf(List<RecurringItem> items, DateTime today, {int days = 30}) => [
   for (final i in items)
-    if ((i.daysUntil(today) >= 0 && i.daysUntil(today) <= days) || i.isOverdue(today)) i,
+    if (!i.paidThisMonth && ((i.daysUntil(today) >= 0 && i.daysUntil(today) <= days) || i.isOverdue(today))) i,
 ];
+
+/// İşletme adı jetonları (küçük harf, Türkçe katlanmış, harf/rakam) — [recurringSeriesKey]'in jeton kısmı.
+List<String> _merchantTokens(String merchant) =>
+    foldTR(merchant).split(RegExp(r'[^\p{L}\p{N}]+', unicode: true)).where((t) => t.isNotEmpty).toList();
+
+/// Yeni bir fişin ([merchant] + [categoryId] + isteğe bağlı [amount]) devam ettirdiği aktif seri.
+///
+/// 1) BİREBİR: aynı seri anahtarı (kategori + normalize işletme adı) — her zaman öncelikli, eski davranış.
+/// 2) BULANIK (OCR "BEDAŞ" / "BEDAŞ A.Ş." diye farklı okuyunca yeni ay faturası seriye bağlansın diye): aynı
+///    kategori, işletme jetonlarından biri diğerinin alt kümesi (≥1 ortak jeton ≥3 karakter) ve ÜÇ koşul birden:
+///    seri bu ay henüz ÖDENMEMİŞ (ay içinde zaten ödeme yapılmışsa ikinci bir alışveriş seriye bağlanmaz), fiş tutarı
+///    verilmiş ve serinin beklenen tutarının ±[kRecurringFuzzyAmountTolerance] içinde. Birden çok aday varsa tutarı
+///    en yakın olan; eşitlikte hiçbiri (belirsizse devralınmaz).
+RecurringItem? seriesMatchFor(List<RecurringItem> items, String merchant, int? categoryId, {double? amount}) {
+  if (categoryId == null) return null;
+  final mt = _merchantTokens(merchant);
+  if (mt.isEmpty) return null;
+  final key = recurringSeriesKey(merchant, categoryId);
+  final exact = items.where((i) => i.seriesKey == key).firstOrNull;
+  if (exact != null) return exact;
+  if (amount == null || amount <= 0) return null;
+  RecurringItem? best;
+  var bestDiff = double.infinity;
+  var tie = false;
+  for (final i in items) {
+    if (i.categoryId != categoryId || i.paidThisMonth || i.expected <= 0) continue;
+    final it = _merchantTokens(i.merchant);
+    if (it.isEmpty) continue;
+    final a = mt.toSet(), b = it.toSet();
+    final subset = a.containsAll(b) || b.containsAll(a);
+    if (!subset || !a.intersection(b).any((t) => t.length >= 3)) continue;
+    final diff = (amount - i.expected).abs() / i.expected;
+    if (diff > kRecurringFuzzyAmountTolerance) continue;
+    if (diff < bestDiff - 1e-9) {
+      best = i;
+      bestDiff = diff;
+      tie = false;
+    } else if ((diff - bestDiff).abs() <= 1e-9) {
+      tie = true;
+    }
+  }
+  return tie ? null : best;
+}
 
 /// Zamanlanacak tek bir yerel hatırlatıcı.
 class ReminderPlan {

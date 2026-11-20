@@ -115,6 +115,13 @@ class AppState extends ChangeNotifier {
   /// Son yenileme bağlantı yüzünden başarısız oldu: ekranlar cihazdaki son (önbellek) veriyi gösterir.
   bool offline = false;
 
+  /// Cihazın bir ağa bağlı olup olmadığı ([ConnectivityMonitor]); internet/sunucu erişimi garantisi değildir.
+  /// Durum rozeti bağlantı kopunca hemen görünsün diye [offline] ile birlikte kullanılır.
+  bool connected = true;
+
+  /// Bulut senkronu açıkken bağlantı sorunu var mı (durum rozeti için).
+  bool get connectionTrouble => _syncEnabled && (offline || !connected);
+
   VoidCallback? onSessionExpired;
 
   Timer? _tick;
@@ -441,8 +448,25 @@ class AppState extends ChangeNotifier {
     });
     try {
       _connSub = _connectivity.onChanged.listen((online) {
-        if (online) unawaited(flushNow(force: true));
+        if (connected != online) {
+          connected = online;
+          notifyListeners();
+        }
+        if (online) {
+          unawaited(flushNow(force: true));
+          // Ağ geldi ama sunucuya ulaşılabildiği henüz kanıtlanmadı: `offline` elle sıfırlanmaz, yenilemenin
+          // sonucu (başarı/başarısızlık) belirler.
+          if (offline) unawaited(refresh());
+        }
       });
+      unawaited(
+        _connectivity.isOnline().then((v) {
+          if (connected != v) {
+            connected = v;
+            notifyListeners();
+          }
+        }),
+      );
     } catch (_) {
       // eklenti yoksa (test/masaüstü) yalnızca zamanlayıcı ve uygulama-öne-gelme tetikler
     }
@@ -1194,6 +1218,7 @@ class AppState extends ChangeNotifier {
       // Çevrimdışı kuyruktaki değişken fatura (elektrik, su...) sunucuya "sabit" olarak gitmesin.
       recurringKind: d.recurringKind,
       recurringEstimate: d.recurringEstimate,
+      ocrEngine: d.ocrEngine,
     );
   }
 
@@ -1236,11 +1261,11 @@ class AppState extends ChangeNotifier {
   /// Aktif profilde [merchant] + [categoryId] ile eşleşen AKTİF tekrarlayan seri (yoksa null). Yeni fiş formu,
   /// aynı kurumun yeni ay faturasını girerken "Her ay tekrarlanır"ı (gün, tür, tahmin) otomatik önerir; böylece
   /// fiş seriyi sürdürür ve o ayın kalemi otomatik "ödendi" olur.
-  RecurringItem? seriesFor(String merchant, int? categoryId) {
-    if (categoryId == null || merchant.trim().isEmpty) return null;
-    final key = recurringSeriesKey(merchant, categoryId);
-    return recurring.items.where((i) => i.seriesKey == key).firstOrNull;
-  }
+  ///
+  /// Önce birebir seri anahtarı; yoksa ve [amount] verildiyse BULANIK eşleşme (OCR işletme adını farklı okuyunca yeni
+  /// ay faturası seriye bağlansın): işletme adı jetonları alt küme + o ay ödenmemiş + tutar ±%30 ([seriesMatchFor]).
+  RecurringItem? seriesFor(String merchant, int? categoryId, {double? amount}) =>
+      seriesMatchFor(recurring.items, merchant, categoryId, amount: amount);
 
   Future<SaveResult> _updateLocal(ReceiptDraft d) async {
     final old = _snap.expenses.where((e) => e.id == d.id).firstOrNull;
@@ -1414,7 +1439,8 @@ class AppState extends ChangeNotifier {
       }
     }
     final raw = mergePageTexts(merged.where((t) => t.trim().isNotEmpty).toList());
-    final ocr = sub.ocr.copyWith(rawText: raw, pageTexts: merged, failedPages: stillFailed);
+    // Karışık motor (ör. ilk tarama sunucu, yeniden tarama cihaz): fişte ilk taramanın motoru korunur.
+    final ocr = sub.ocr.copyWith(rawText: raw, pageTexts: merged, failedPages: stillFailed, engine: prev.ocr.engine);
     ParsedReceipt parsed;
     try {
       parsed = await api.parseReceiptText(raw);

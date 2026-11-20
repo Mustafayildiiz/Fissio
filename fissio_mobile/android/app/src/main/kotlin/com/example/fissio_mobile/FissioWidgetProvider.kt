@@ -124,6 +124,9 @@ class FissioWidgetProvider : HomeWidgetProvider() {
             ?: Intent(context, MainActivity::class.java)).apply {
             action = HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION
             data = uri
+            // Uygulama zaten açıksa (arka planda) yeni görev/ikinci örnek yerine mevcut MainActivity'ye onNewIntent ile
+            // gelsin; böylece sıcak açılışta Flutter yeniden başlamaz ve fissio://scan doğrudan taramaya gider.
+            flags = flags or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
             context,

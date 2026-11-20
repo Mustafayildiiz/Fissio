@@ -1,9 +1,9 @@
 import 'package:fissio_mobile/budgets.dart';
 import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/pages/budget_widgets.dart';
+import 'package:fissio_mobile/pages/sync_status_badge.dart';
 import 'package:fissio_mobile/stats.dart';
 import 'package:fissio_mobile/theme.dart';
-import 'package:fissio_mobile/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -173,7 +173,7 @@ void main() {
     expect(snap.budgets.every((b) => b.state != SyncState.synced), isTrue);
   });
 
-  testWidgets('çevrimdışı önbellekten açılan Özet bölümleri bütçeyi ve projeksiyonu gösterir; bilgi bandı hata değildir', (tester) async {
+  testWidgets('çevrimdışı önbellekten açılan Özet bölümleri bütçeyi ve projeksiyonu gösterir; çevrimdışı rozeti hata değildir', (tester) async {
     tester.view.physicalSize = const Size(900, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -189,7 +189,7 @@ void main() {
           body: SingleChildScrollView(
             child: Column(
               children: [
-                OfflineBanner(pending: h2.app.pendingCount),
+                SyncStatusBadge(app: h2.app),
                 BudgetsSection(app: h2.app),
                 FixedExpensesSection(app: h2.app, now: _now),
               ],
@@ -199,8 +199,8 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byKey(const Key('offline-banner')), findsOneWidget);
-    expect(find.textContaining('Çevrimdışısın'), findsOneWidget);
+    expect(find.byKey(const Key('sync-status-badge-offline')), findsOneWidget);
+    expect(find.textContaining('Çevrimdışısın'), findsNothing, reason: 'büyük bant yok; yalnızca küçük rozet');
     expect(find.text('Toplam aylık bütçe'), findsOneWidget);
     expect(find.text('Market / Gıda'), findsOneWidget);
     expect(find.byKey(const Key('fixed-projection')), findsOneWidget);

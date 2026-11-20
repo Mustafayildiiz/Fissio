@@ -171,6 +171,15 @@ components:
           description: >-
             Değişken fatura için kullanıcının tahmini aylık tutarı; geçmişte 2'den az ay varsa projeksiyonda
             kullanılır. 0/yok = tahmin yok. Yalnızca tekrarlayan değişken faturada saklanır (diğerlerinde 0).
+        ocr_engine:
+          type: string
+          nullable: true
+          pattern: '^[a-z0-9_-]{1,32}$'
+          example: paddleocr
+          description: >-
+            Fişi okuyan OCR motoru (`paddleocr`, `custom`, cihaz içi Google ML Kit için `mlkit`); yalnızca bilgi
+            amaçlıdır. Küçük harfe çevrilir; biçime uymayan değer 400 döner. Yok/null/boş = manuel girilen ya da eski
+            kayıt: oluşturmada NULL yazılır, PUT'ta mevcut değer KORUNUR (alanı atlayan düzenleme silmez).
         items:
           type: array
           items: { $ref: '#/components/schemas/Item' }
@@ -232,6 +241,11 @@ components:
         month_amount:
           type: number
           description: Bu ayın projeksiyonuna giren tutar — ödendiyse gerçek, değilse beklenen.
+        counts_in_total:
+          type: boolean
+          description: >-
+            Seri aylık/kalan toplama dahil mi. Ödenmemiş ve son fişi 2 takvim ayından eski seri (iptal edilmiş
+            abonelik olabilir) listede "gecikmiş" kalır ama toplama girmez (month_amount = 0).
     Expense:
       allOf:
         - $ref: '#/components/schemas/ExpenseInput'

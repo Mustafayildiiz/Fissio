@@ -51,11 +51,11 @@ class OcrResult {
 
   OcrResult withFailedPages(List<int> failed) => copyWith(failedPages: failed);
 
-  OcrResult copyWith({String? rawText, List<String>? pageTexts, List<int>? failedPages}) => OcrResult(
+  OcrResult copyWith({String? rawText, List<String>? pageTexts, List<int>? failedPages, String? engine}) => OcrResult(
     rawText: rawText ?? this.rawText,
     blocks: blocks,
     confidence: confidence,
-    engine: engine,
+    engine: engine ?? this.engine,
     modelVersion: modelVersion,
     elapsedMs: elapsedMs,
     metadata: metadata,
@@ -137,6 +137,34 @@ class CustomOcrEngine implements OcrEngine {
 
 /// Sunucu OCR motorunun kullanıcıya gösterilen adı.
 String ocrEngineLabel(String e) => e == 'paddleocr' ? 'PP-OCRv4 Mobile' : 'Custom OCR';
+
+/// Cihaz içi (Google ML Kit) motorunun fişte saklanan kimliği. Motorun kod adı `ondevice`'tır
+/// ([OnDeviceOcrEngine.name]); saklanan değer kullanıcıya/sunucuya anlamlı `mlkit`'tir.
+const kStoredMlKit = 'mlkit';
+
+/// Tarama sonucundaki motor adını ([OcrResult.engine]) fişe yazılacak kimliğe çevirir
+/// (`ondevice` → `mlkit`, `paddleocr`/`custom` aynen); bilinmeyen/`unknown` null döner.
+String? storedOcrEngineId(String? engine) {
+  switch (engine?.trim().toLowerCase()) {
+    case 'ondevice':
+    case kStoredMlKit:
+      return kStoredMlKit;
+    case 'paddleocr':
+      return 'paddleocr';
+    case 'custom':
+      return 'custom';
+    default:
+      return null;
+  }
+}
+
+/// Fiş detayında gösterilen motor adı; bilinmiyorsa (manuel/eski kayıt) null.
+String? ocrEngineDisplayName(String? stored) => switch (stored) {
+  'paddleocr' => 'PaddleOCR',
+  'custom' => 'Custom OCR',
+  kStoredMlKit => 'Google ML Kit',
+  _ => null,
+};
 
 typedef OcrEngineBuilder =OcrEngine Function(ApiClient api);
 

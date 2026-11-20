@@ -220,5 +220,13 @@ void main() {
       expect(d.consumeScan(), isTrue);
       expect(d.consumeScan(), isFalse, reason: 'tek seferlik');
     });
+
+    test('iOS widget adresi (fissio://scan?homeWidget) ve boş yol da taramayı tetikler', () {
+      final d = DeepLinkController();
+      d.handle(Uri.parse('fissio://scan?homeWidget'));
+      expect(d.consumeScan(), isTrue);
+      d.handle(Uri.parse('fissio://home?homeWidget'));
+      expect(d.hasPendingScan, isFalse, reason: 'yalnızca scan hedefi kamerayı açar');
+    });
   });
 }

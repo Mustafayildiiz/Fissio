@@ -240,14 +240,18 @@ class GroupedCard extends StatelessWidget {
       if (i > 0 && dividers) rows.add(Divider(height: 1, thickness: 1, color: c.line));
       rows.add(children[i]);
     }
-    return Container(
+    // Material (dekorlu Container değil): içindeki InkWell dokunma efekti kartın arkasında kalıp görünmez olmasın.
+    return SizedBox(
       width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
+      child: Material(
         color: c.surf,
         borderRadius: BorderRadius.circular(kRadius),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: padding,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+        ),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
     );
   }
 }
@@ -898,38 +902,6 @@ class ErrorBanner extends StatelessWidget {
           Expanded(child: Text(message, style: FissioText.body(c, size: 14))),
           if (onRetry != null)
             TextButton(onPressed: onRetry, child: const Text('Tekrar dene')),
-        ],
-      ),
-    );
-  }
-}
-
-/// Bağlantı yokken (okuma-geçişli yerel önbellekten çalışırken) gösterilen sakin bilgi bandı: hata değildir.
-class OfflineBanner extends StatelessWidget {
-  const OfflineBanner({super.key, this.pending = 0});
-
-  /// Bağlantı gelince buluta yüklenecek bekleyen kayıt/değişiklik sayısı.
-  final int pending;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Container(
-      key: const Key('offline-banner'),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
-      child: Row(
-        children: [
-          Icon(LucideIcons.wifiOff, color: c.mute, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              pending > 0
-                  ? 'Çevrimdışısın; cihazdaki son veriler gösteriliyor. $pending değişiklik bağlantı gelince yüklenecek.'
-                  : 'Çevrimdışısın; cihazdaki son veriler gösteriliyor.',
-              style: FissioText.body(c, size: 14, color: c.mute),
-            ),
-          ),
         ],
       ),
     );

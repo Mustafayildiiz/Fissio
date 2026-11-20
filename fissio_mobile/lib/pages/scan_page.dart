@@ -10,6 +10,7 @@ import '../api.dart';
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../models.dart';
+import '../ocr/ocr_engine.dart';
 import '../ocr/picked_image.dart';
 import '../ocr/scan_session.dart';
 import '../services/scan_camera.dart';
@@ -264,7 +265,9 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
         await _showUnreadableModal();
         return;
       }
-      final draft = _draftWith(ReceiptDraft.fromParsed(res.parsed));
+      // Fişi hangi motorun okuduğu: sonuçtaki motor (sunucu → paddleocr/custom; cihaz ya da ağ hatası geri dönüşü → mlkit).
+      // Tercih edilen motordan değil, dönen sonuçtan alınır.
+      final draft = _draftWith(ReceiptDraft.fromParsed(res.parsed)..ocrEngine = storedOcrEngineId(res.ocr.engine));
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => ReceiptFormPage(initialDraft: draft)),
       );

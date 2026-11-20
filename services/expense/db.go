@@ -143,6 +143,8 @@ ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_remind BOOLEAN N
 -- Tekrar turu: sabit (kira, abonelik) / degisken (elektrik, su, dogalgaz faturasi) ve degisken icin tahmini tutar.
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_kind TEXT NOT NULL DEFAULT 'fixed' CHECK (recurring_kind IN ('fixed','variable'));
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_estimate NUMERIC(12,2) CHECK (recurring_estimate > 0);
+-- ocr_engine: fisi okuyan OCR motoru (paddleocr | custom | mlkit); NULL = manuel girilen / eski kayit. Yalniz bilgi amacli.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS ocr_engine TEXT;
 CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;
 -- Son degisiklik zamani: iyimser eszamanlilik (PUT base_updated_at -> 409) ve artimli liste (GET /expenses?since=).
 -- INSERT varsayilanla, her UPDATE acikca (bkz. updateExpense) gunceller; fotograf ekleme/silme guncellemez.

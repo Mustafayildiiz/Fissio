@@ -489,5 +489,7 @@ class SyncService {
     'recurring_kind': e.recurringKind.name,
     if (e.recurringDay > 0 && e.recurringKind == RecurringKind.variable && e.recurringEstimate > 0)
       'recurring_estimate': e.recurringEstimate,
+    // Fişi okuyan OCR motoru (yalnızca bilgi); null ise gönderilmez, sunucudaki değer korunur.
+    if (e.ocrEngine != null) 'ocr_engine': e.ocrEngine,
   };
 }

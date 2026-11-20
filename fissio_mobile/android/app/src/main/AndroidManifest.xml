@@ -37,6 +37,8 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Flutter'in varsayılan derin bağlantı işleme kapalı: aksi halde sıcak açılışta fissio://scan, '/' rotasına (ikinci SplashPage) çevrilir. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <!-- fissio://scan : ana ekran widget'ının hızlı tarama kısayolu. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
@@ -50,6 +52,7 @@
         <activity-alias android:name=".LauncherPurple" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
             android:icon="@mipmap/ic_launcher_purple">
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -64,6 +67,7 @@
         <activity-alias android:name=".LauncherGreen" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
             android:icon="@mipmap/ic_launcher_green">
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -78,6 +82,7 @@
         <activity-alias android:name=".LauncherDarkred" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
             android:icon="@mipmap/ic_launcher_darkred">
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -92,6 +97,7 @@
         <activity-alias android:name=".LauncherBlue" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
             android:icon="@mipmap/ic_launcher_blue">
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -106,6 +112,7 @@
         <activity-alias android:name=".LauncherGraphite" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
             android:icon="@mipmap/ic_launcher_graphite">
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -120,6 +127,7 @@
         <activity-alias android:name=".LauncherInk" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
             android:icon="@mipmap/ic_launcher_ink">
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

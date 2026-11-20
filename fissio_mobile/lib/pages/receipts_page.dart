@@ -277,11 +277,6 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
             Padding(
               padding: const EdgeInsets.only(top: 12),
               child: ErrorBanner(appState.error!, onRetry: appState.refresh),
-            )
-          else if (appState.offline)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: OfflineBanner(pending: appState.pendingCount),
             ),
           if (items.isEmpty && !appState.loading && appState.error == null)
             Padding(
