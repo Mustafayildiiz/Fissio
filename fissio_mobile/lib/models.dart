@@ -328,6 +328,18 @@ class Expense {
   /// eklemeyi önler (sunucuda hesap içinde tekil). Fiş/manuel kayıtta null.
   final String? documentNo;
 
+  /// Platform sipariş kodu (Yemeksepeti/Trendyol/Google Play…; etiketli değerden büyük harfe çevrilerek çıkarılır). Ön özet +
+  /// resmi fatura birleştirmesinin ve (sipariş, belge türü) mükerrer denetiminin anahtarıdır; yoksa null.
+  final String? orderId;
+
+  /// Kayıt resmi bir E-Arşiv/E-Fatura belgesine dayanıyor mu: [documentNo] doluysa true (sunucu `has_official_invoice` ile aynı
+  /// türetim; resmi kayıt kilitlidir, üçüncü bir belge üzerine yazamaz).
+  bool get hasOfficialInvoice => documentNo != null;
+
+  /// YALNIZCA `POST /expenses` cevabında: sunucu resmi faturayı mevcut bir ön özet kaydına birleştirdi (id = hedef kayıt).
+  /// Saklanmaz ve kopyalanmaz.
+  final bool merged;
+
   Expense({
     required this.id,
     required this.merchant,
@@ -353,6 +365,8 @@ class Expense {
     this.updatedAt,
     this.ocrEngine,
     this.documentNo,
+    this.orderId,
+    this.merged = false,
   });
 
   bool get isRecurring => recurringDay > 0;
@@ -388,6 +402,7 @@ class Expense {
     String? updatedAt,
     String? ocrEngine,
     String? documentNo,
+    String? orderId,
   }) => Expense(
     id: id ?? this.id,
     merchant: merchant ?? this.merchant,
@@ -413,6 +428,7 @@ class Expense {
     updatedAt: updatedAt ?? this.updatedAt,
     ocrEngine: ocrEngine ?? this.ocrEngine,
     documentNo: documentNo ?? this.documentNo,
+    orderId: orderId ?? this.orderId,
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
@@ -438,6 +454,8 @@ class Expense {
     updatedAt: j['updated_at'] as String?,
     ocrEngine: j['ocr_engine'] as String?,
     documentNo: j['document_no'] as String?,
+    orderId: j['order_id'] as String?,
+    merged: j['status'] == 'merged',
   );
 
   /// Cihazda saklanan (yüklenmemiş) fiş kaydı.
@@ -467,6 +485,7 @@ class Expense {
     if (updatedAt != null) 'updated_at': updatedAt,
     if (ocrEngine != null) 'ocr_engine': ocrEngine,
     if (documentNo != null) 'document_no': documentNo,
+    if (orderId != null) 'order_id': orderId,
   };
 
   factory Expense.fromLocalJson(Map<String, dynamic> j) {
@@ -500,6 +519,7 @@ class Expense {
       updatedAt: j['updated_at'] as String?,
       ocrEngine: j['ocr_engine'] as String?,
       documentNo: j['document_no'] as String?,
+      orderId: j['order_id'] as String?,
     );
   }
 }
@@ -561,6 +581,9 @@ class ReceiptDraft {
   /// Dijital fatura kimliği (bkz. [Expense.documentNo]); yalnızca PDF/e-fatura içe aktarmada.
   String? documentNo;
 
+  /// Platform sipariş kodu (bkz. [Expense.orderId]); dijital fiş içe aktarmada metinden çıkarılır.
+  String? orderId;
+
   ReceiptDraft({
     this.id,
     this.clientUid,
@@ -582,6 +605,7 @@ class ReceiptDraft {
     this.recurringEstimate = 0,
     this.ocrEngine,
     this.documentNo,
+    this.orderId,
   }) : date = date ?? DateTime.now(),
        items = items ?? [],
        pendingImages = pendingImages ?? [];
@@ -619,6 +643,8 @@ class ReceiptDraft {
     if (ocrEngine != null) 'ocr_engine': ocrEngine,
     // Dijital faturada ETTN / VKN_FaturaNo; yoksa gönderilmez (PUT mevcut değeri korur).
     if (documentNo != null) 'document_no': documentNo,
+    // Sipariş kodu (ön özet / resmi fatura eşleştirmesi); yoksa gönderilmez (PUT mevcut değeri korur).
+    if (orderId != null) 'order_id': orderId,
   };
 
   factory ReceiptDraft.from(Expense e) {
@@ -654,6 +680,7 @@ class ReceiptDraft {
       recurringEstimate: e.recurringEstimate,
       ocrEngine: e.ocrEngine,
       documentNo: e.documentNo,
+      orderId: e.orderId,
     );
   }
 

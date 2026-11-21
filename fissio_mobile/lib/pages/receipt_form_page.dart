@@ -407,6 +407,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         context,
         !res.imagesOk
             ? 'Fiş kaydedildi ancak fotoğraflar yüklenemedi; fiş detayından tekrar ekleyin.'
+            : res.merged
+            ? 'Resmi fatura, mevcut sipariş kaydıyla birleştirildi (yeni fiş oluşturulmadı).'
             : res.queued
             ? 'Çevrimdışı kaydedildi. Bağlantı gelince otomatik yüklenecek.'
             : res.localOnly

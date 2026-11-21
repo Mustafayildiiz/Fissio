@@ -41,7 +41,8 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Dijital fiş / e-fatura PDF'i: Dosyalar / Mail / WhatsApp'ta "Fissio ile aç" (AppDelegate.application(_:open:)). -->
+	<!-- Dijital fiş / e-fatura: PDF, .eml e-posta ve HTML sipariş özeti. Dosyalar / Mail / WhatsApp'ta "Fissio ile aç"
+	     (AppDelegate.application(_:open:)). Share Extension (Paylaş sayfası) hedefi YOK; kaynak seviyesi, cihazda doğrulanmadı. -->
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -54,6 +55,31 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>E-posta</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.email-message</string>
+				<string>com.apple.mail.email</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>HTML</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.html</string>
 			</array>
 		</dict>
 	</array>

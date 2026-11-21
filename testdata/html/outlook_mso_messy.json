@@ -1,0 +1,10 @@
+{
+  "name": "outlook_mso_messy",
+  "note": "Gerçek platform maili gibi dağınık biçim: MSO koşullu yorumlar, <o:p>, kapatılmamış <td>/<tr>, iç içe tablolar, satır içi <style>, gizli öğeler, takip pikseli.",
+  "html": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html xmlns:o=\"urn:schemas-microsoft-com:office:office\"><head><meta charset=\"utf-8\"><!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]--><style type=\"text/css\">td{font-family:Arial}.hide{display:none}@media only screen{.x{width:100%}}</style><title>Siparişiniz</title></head><body style=\"margin:0\"><!--[if mso]><table><tr><td><![endif]--><table width=\"600\" align=\"center\"><tr><td><table><tr><td><span style=\"mso-hide:all;display:none;font-size:0;max-height:0\">Önizleme metni</span></td></tr><tr><td><p class=\"MsoNormal\">Merhaba<o:p></o:p></p><p>Sipariş&nbsp;No:&nbsp;<b>TY-5501288</b><o:p>&nbsp;</o:p></p></td></tr><tr><td><table><tr><td>Ürün<td>Adet<td>Tutar<tr><td>Kablosuz Mouse<td>1<td>349,90 TL<tr><td>USB Kablo<td>2<td>59,80 TL</table></td></tr><tr><td><table><tr><td><b>Genel Toplam</b></td><td><b>409,70 TL</b></td></tr></table></td></tr></table></td></tr></table><!--[if mso]></td></tr></table><![endif]--><img src=\"https://t.example.com/open.gif\" width=\"1\" height=\"1\" style=\"display:block\"><div style=\"display:none;visibility:hidden\">gizli</div><p style=\"font-size:11px\">Bu e-posta size bilgi vermek amacıyla gönderilmiştir. <a href=\"#\">Abonelikten çık</a></p><script>var t=1;</script></body></html>",
+  "expect": {
+    "text": "Merhaba\nSipariş No: TY-5501288\nÜrün Adet Tutar\nKablosuz Mouse 1 349,90 TL\nUSB Kablo 2 59,80 TL\nGenel Toplam 409,70 TL",
+    "order_id": "TY-5501288",
+    "document_no": ""
+  }
+}

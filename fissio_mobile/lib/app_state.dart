@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory, File, FileSystemException, Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ChangeNotifier, VoidCallback;
@@ -14,7 +15,10 @@ import 'data/uid.dart';
 import 'models.dart';
 import 'ocr/ocr_engine.dart';
 import 'ocr/on_device_ocr_engine.dart';
+import 'receipt_parser/digital_ids.dart';
 import 'receipt_parser/digital_receipt.dart';
+import 'receipt_parser/eml.dart';
+import 'receipt_parser/html_text.dart';
 import 'receipt_parser/merge.dart' show mergePageTexts;
 import 'receipt_parser/parser.dart' show parseReceiptText;
 import 'receipt_parser/normalize.dart' show foldTR;
@@ -36,7 +40,12 @@ class SaveResult {
 
   /// Senkron kapalı: fiş yalnızca cihazda.
   final bool localOnly;
-  const SaveResult({this.imagesOk = true, this.queued = false, this.localOnly = false});
+
+  /// Resmi fatura yeni kayıt açmadı: mevcut bir ön özet (sipariş özeti) kaydına işlendi ve kilitlendi.
+  final bool merged;
+  const SaveResult({this.imagesOk = true, this.queued = false, this.localOnly = false, this.merged = false});
+
+  SaveResult asMerged() => SaveResult(imagesOk: imagesOk, queued: queued, localOnly: localOnly, merged: true);
 }
 
 const readOnlyCloudMessage =
@@ -105,6 +114,8 @@ class AppState extends ChangeNotifier {
   static String _activeKey(int uid) => 'active_profile:$uid';
   static String _syncKey(int uid) => 'sync_enabled:$uid';
   static String _alertsKey(int uid) => 'budget_alerts:$uid';
+  static String _emailCardKey(int uid) => 'email_card_dismissed:$uid';
+  static String _emailSeenKey(int uid) => 'email_import_seen:$uid';
 
   AuthUser? user;
   LocalSnapshot _snap = LocalSnapshot();
@@ -334,6 +345,8 @@ class AppState extends ChangeNotifier {
     _snap = await _local.load(id);
     categories = List.of(_snap.categories);
     _syncEnabled = (await _read(_syncKey(id))) != '0';
+    _emailCardDismissed = (await _read(_emailCardKey(id))) == '1';
+    _emailImportSeen = (await _read(_emailSeenKey(id))) == '1';
     activeProfileId = await _read(_activeKey(id));
     _alertsSent = {};
     try {
@@ -383,14 +396,18 @@ class AppState extends ChangeNotifier {
   Future<void> deleteAccount(String password) async {
     final id = user?.id;
     await api.deleteAccount(password);
+    // ÖNCE oturumu bellekte kapat (arka plan flush durur, uçuştaki flush `stale()` olur), SONRA yerel veriyi sil: aksi halde
+    // silme sürerken biten bir flush `_persist` ile hesabın yerel verisini diske geri yazabilirdi (silme adımı çoğaldıkça pencere büyür).
+    // `dropCache: false`: yerel veri zaten silinecek, çıkış yolu diske ayrıca bir şey yazmasın.
+    await _localSignOut(dropCache: false);
     if (id != null) {
       await _local.deleteAll(id);
       await _delete(_syncKey(id));
       await _delete(_activeKey(id));
       await _delete(_alertsKey(id));
+      await _delete(_emailCardKey(id));
+      await _delete(_emailSeenKey(id));
     }
-    // Hesap silindi: yerel veri zaten silindi, çıkış yolu diske yeniden bir şey yazmasın.
-    await _localSignOut(dropCache: false);
   }
 
   Future<void> _localSignOut({bool dropCache = true}) async {
@@ -428,6 +445,9 @@ class AppState extends ChangeNotifier {
     categories = [];
     activeProfileId = null;
     _syncEnabled = true;
+    _inbound = null;
+    _emailCardDismissed = false;
+    _emailImportSeen = false;
     _alertsSent = {};
     loading = false;
     error = null;
@@ -573,6 +593,88 @@ class AppState extends ChangeNotifier {
     }
   }
   int _flushFailures = 0;
+
+  // --- E-posta ile otomatik fiş aktarımı ---
+
+  InboundAddress? _inbound;
+  bool _emailCardDismissed = false;
+  bool _emailImportSeen = false;
+
+  /// Son bilinen yönlendirme adresi/durumu (henüz yüklenmediyse null).
+  InboundAddress? get inbound => _inbound;
+
+  /// E-posta aktarımı sunulabilir mi: bulut senkronu AÇIK ve sunucuda özellik yapılandırılmış. Senkron kapalıyken hiçbir şey
+  /// sunucuya yazılamaz, bu yüzden adım/sihirbaz/kart gösterilmez.
+  bool get emailImportAvailable => _syncEnabled && (_inbound?.enabled ?? false);
+
+  /// Ana sayfadaki "Yeni: E-Faturalarını Otomatik Aktar" kartı gösterilsin mi: kapatılmadıysa VE özellik henüz tanıtılmadıysa
+  /// (onboarding'in e-posta adımı gösterildiyse ya da sihirbaz/kart açıldıysa kart gereksizdir: o, mevcut kullanıcılar içindir).
+  bool get showEmailImportCard => emailImportAvailable && !_emailCardDismissed && !_emailImportSeen;
+
+  /// Ayarlar'daki "Yeni" rozeti: kullanıcı sihirbazı/kartı henüz açmadı.
+  bool get emailImportIsNew => emailImportAvailable && !_emailImportSeen;
+
+  /// Yönlendirme adresini sunucudan alır (yoksa üretilir). Senkron kapalıysa ya da hata/çevrimdışıysa son bilinen değer döner
+  /// (ağ hatası sessizdir: özellik yalnızca gizli kalır).
+  Future<InboundAddress?> loadInbound() async {
+    if (user == null) return null;
+    if (!_syncEnabled) return _inbound;
+    try {
+      final info = await api.inboundAddress();
+      if (user == null) return _inbound;
+      _inbound = info;
+      notifyListeners();
+    } on ApiException {
+      // Çevrimdışı / sunucu hatası: son bilinen değer kalır.
+    }
+    return _inbound;
+  }
+
+  /// Aktarılan fişlerin düşeceği profili seçer (null = en eski/varsayılan profil). Sunucu profil kimliği gerekir; profil henüz
+  /// sunucuda değilse (çevrimdışı oluşturuldu) [ApiException] fırlatılır.
+  Future<InboundAddress> setInboundProfile(Profile? profile) async {
+    if (profile != null && profile.serverId == null) throw ApiException('Profil henüz sunucuda değil; bağlantı gelince tekrar deneyin.');
+    final info = await api.setInboundProfile(profile?.serverId);
+    _inbound = info;
+    notifyListeners();
+    return info;
+  }
+
+  /// Adresi yeniler (eski adres hemen geçersiz olur).
+  Future<InboundAddress> rotateInbound() async {
+    final info = await api.rotateInboundAddress();
+    _inbound = info;
+    notifyListeners();
+    return info;
+  }
+
+  /// Gmail yönlendirme onayını yoklar (sihirbaz açıkken); bekleyen yoksa ya da hata varsa null.
+  Future<ForwardingConfirmation?> pollForwardingConfirmation() async {
+    if (user == null || !_syncEnabled) return null;
+    try {
+      return await api.forwardingConfirmation();
+    } on ApiException {
+      return null;
+    }
+  }
+
+  /// Ana sayfa kartını kapatır (kalıcı, hesap başına).
+  Future<void> dismissEmailImportCard() async {
+    final id = user?.id;
+    if (id == null) return;
+    _emailCardDismissed = true;
+    await _write(_emailCardKey(id), '1');
+    notifyListeners();
+  }
+
+  /// Sihirbaz/kart açıldı: "Yeni" rozeti kaybolur (kalıcı, hesap başına).
+  Future<void> markEmailImportSeen() async {
+    final id = user?.id;
+    if (id == null || _emailImportSeen) return;
+    _emailImportSeen = true;
+    await _write(_emailSeenKey(id), '1');
+    notifyListeners();
+  }
 
   // --- Bulut senkronu ---
 
@@ -927,9 +1029,15 @@ class AppState extends ChangeNotifier {
 
     // Yeni fiş.
     d.clientUid ??= newClientUid();
-    // Aynı dijital fatura ikinci kez eklenmesin (sunucu da 409 verir; cihaz içi kayıtlar için burada denetlenir).
-    if (d.documentNo != null && allExpenses.any((e) => e.documentNo == d.documentNo && e.clientUid != d.clientUid)) {
-      throw ApiException('Bu dijital fatura zaten eklenmiş.', status: 409, code: 'duplicate_document');
+    // Mükerrer dijital belge / aynı sipariş reddedilir; resmi fatura, ön özet kaydına birleştirilir (sunucu aynı kuralı uygular;
+    // cihaz içi ve çevrimdışı kayıtlar için karar burada, aynı `decideMerge` ile verilir).
+    final decision = _digitalDecision(d);
+    if (decision.action == kMergeDuplicate) throw _duplicateError(decision);
+    // Senkron KAPALIyken bulut kayıtları salt okunurdur (readOnlyCloudMessage): hedef bir bulut ön özetiyse birleştirmek imkânsızdır;
+    // resmi fatura yerel kayıt olarak saklanır ve senkron açılınca toplu yüklemede SUNUCU aynı kararla birleştirir (`merged`).
+    final cloudTargetReadOnly = !_syncEnabled && decision.target != null && decision.target!.id > 0;
+    if (decision.action == kMergeMerge && !cloudTargetReadOnly) {
+      return (await _saveMerged(d, decision.target!)).asMerged();
     }
     if (!_syncEnabled) {
       await _queueLocal(d, profile, SyncState.localOnly);
@@ -953,6 +1061,8 @@ class AppState extends ChangeNotifier {
     _snap.cloudExpenses = [..._snap.cloudExpenses.where((x) => x.id != saved.id), _withProfileUid(saved)];
     var imagesOk = true;
     var queued = false;
+    // Sunucu birleştirdiyse (önbellek bayattı / çevrimdışı kuyruk): hedef kayıt zaten önbellekte güncellendi.
+    final mergedByServer = saved.merged;
     if (d.pendingImages.isNotEmpty) {
       try {
         await api.uploadImages(saved.id, d.pendingImages);
@@ -968,7 +1078,69 @@ class AppState extends ChangeNotifier {
       }
     }
     await refresh(); // fotoğraf kimlikleri (image_ids) listede/detayda görünsün
-    return SaveResult(imagesOk: imagesOk, queued: queued);
+    return SaveResult(imagesOk: imagesOk, queued: queued, merged: mergedByServer);
+  }
+
+  // --- Dijital fiş: mükerrer / ön özet + resmi fatura birleştirme (yerel karar) ---
+
+  static String _isoDay(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  MergeDoc _mergeDocOf(Expense e) => MergeDoc(
+    id: e.id,
+    merchant: e.merchant,
+    amountCents: (e.amount * 100).round(),
+    date: _isoDay(e.date),
+    documentNo: e.documentNo ?? '',
+    orderId: e.orderId ?? '',
+    items: [for (final i in e.items) i.name],
+  );
+
+  /// Taslağın `document_no`/`order_id`'sine göre kayıt / mükerrer / birleştirme kararı (Go `DecideMerge` ikizi). Hesaptaki tüm
+  /// fişler (cihaz kuyruğu + bulut önbelleği, tüm profiller) aday olur; taslağın kendisi hariçtir.
+  ({String action, Expense? target, bool byDocument}) _digitalDecision(ReceiptDraft d) {
+    if (d.documentNo == null && d.orderId == null) return (action: kMergeCreate, target: null, byDocument: false);
+    final pool = [for (final e in allExpenses) if (d.clientUid == null || e.clientUid != d.clientUid) e];
+    final incoming = MergeDoc(
+      merchant: d.merchant,
+      amountCents: (d.savedAmount * 100).round(),
+      date: _isoDay(d.date),
+      documentNo: d.documentNo ?? '',
+      orderId: d.orderId ?? '',
+      items: [for (final i in d.items) i.name],
+    );
+    final dec = decideMerge(incoming, [for (final e in pool) _mergeDocOf(e)]);
+    final target = dec.action == kMergeCreate ? null : pool.where((e) => e.id == dec.targetId).firstOrNull;
+    if (target == null) return (action: kMergeCreate, target: null, byDocument: false);
+    return (action: dec.action, target: target, byDocument: d.documentNo != null && target.documentNo == d.documentNo);
+  }
+
+  ApiException _duplicateError(({String action, Expense? target, bool byDocument}) dec) => dec.byDocument
+      ? ApiException('Bu dijital fatura zaten eklenmiş.', status: 409, code: 'duplicate_document')
+      : ApiException('Bu sipariş zaten eklenmiş.', status: 409, code: 'duplicate_order');
+
+  /// Resmi faturayı [target] ön özet kaydına işler: kullanıcının alanları (işletme, tarih, kategori, not, mevcut kalemler)
+  /// korunur; `document_no` (kayıt kilitlenir), boşsa `order_id`, kesin toplam ve — hedefte kalem yoksa — kalemler yazılır.
+  /// Kayıt mevcut düzenleme yoluyla gider (bulut: PUT, çevrimdışı: bekleyen düzenleme, cihaz: yerel güncelleme).
+  Future<SaveResult> _saveMerged(ReceiptDraft d, Expense target) {
+    final md = ReceiptDraft.from(target);
+    if (target.items.isEmpty) {
+      md.items = [for (final i in d.items) i];
+      md.discount = d.discount;
+    }
+    final want = d.savedAmount;
+    final gap = ((want - md.savedAmount) * 100).round() / 100;
+    if (gap > 0.005) {
+      // KDV'siz kalem toplamı: fark ayrı "KDV" kalemi (kaydedilen tutar resmi toplam olsun).
+      md.items.add(ExpenseItem('KDV', gap, categoryId: md.categoryId, categoryName: _categoryName(md.categoryId) ?? kOtherCategory));
+    } else if (gap < -0.005) {
+      md.discount = ((md.discount + (-gap)) * 100).round() / 100;
+    }
+    md.documentNo = d.documentNo;
+    md.orderId ??= d.orderId;
+    md.ocrEngine ??= d.ocrEngine;
+    md.pendingImages = d.pendingImages;
+    return _saveDraftCore(md);
   }
 
   // --- Bütçe limitleri ---
@@ -1241,6 +1413,7 @@ class AppState extends ChangeNotifier {
       recurringEstimate: d.recurringEstimate,
       ocrEngine: d.ocrEngine,
       documentNo: d.documentNo,
+      orderId: d.orderId,
     );
   }
 
@@ -1506,6 +1679,93 @@ class AppState extends ChangeNotifier {
   /// istek atılmaz. Belge kimliği (ETTN / VKN_FaturaNo) bulunursa ve hesapta zaten ekliyse [ApiException] (409,
   /// `duplicate_document`) fırlatılır.
   Future<ReceiptDraft> readDigitalReceipt(String path) async {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.eml')) return _readEmlFile(path);
+    if (lower.endsWith('.html') || lower.endsWith('.htm')) return _readHtmlFile(path);
+    return _readPdfFile(path);
+  }
+
+  /// `.eml` (paylaşılan / dosyadan seçilen e-posta): öncelik (1) PDF eki (ya da zip içindeki PDF) — metin katmanı, taranmışsa
+  /// mevcut OCR yedeği; (2) PDF yoksa (ya da okunamıyorsa) HTML gövde temizlenip metin ayrıştırıcıya; (3) düz metin gövde.
+  Future<ReceiptDraft> _readEmlFile(String path) async {
+    final EmlMessage msg;
+    try {
+      msg = parseEml(await _readFileBytes(path));
+    } on EmlException {
+      throw ApiException('E-posta dosyası okunamadı.');
+    }
+    ApiException? pdfError;
+    for (final a in msg.pdfs) {
+      final tmp = await _writeTempPdf(a.bytes);
+      try {
+        return await _readPdfFile(tmp);
+      } on ApiException catch (e) {
+        if (e.duplicateDocument || e.duplicateOrder || e.network) rethrow;
+        pdfError = e; // PDF okunamadı: gövdeye düş
+      } finally {
+        try {
+          await File(tmp).delete();
+        } catch (_) {}
+      }
+    }
+    final body = msg.html.trim().isNotEmpty ? htmlToText(msg.html) : msg.text;
+    final text = stripForwardPreamble(body);
+    if (text.trim().isEmpty) throw pdfError ?? ApiException('E-postada okunabilir fiş metni bulunamadı.');
+    return _draftFromDigitalText(text, engine: kStoredEmail, subject: msg.subject, from: msg.from);
+  }
+
+  /// `.html` dosyası (ya da paylaşılan HTML sipariş özeti): temizlenip metin ayrıştırıcıya gider.
+  Future<ReceiptDraft> _readHtmlFile(String path) async {
+    final raw = await _readFileBytes(path);
+    final text = stripForwardPreamble(htmlToText(utf8.decode(raw, allowMalformed: true)));
+    if (text.trim().isEmpty) throw ApiException('HTML içinde okunabilir fiş metni bulunamadı.');
+    return _draftFromDigitalText(text, engine: kStoredEmail);
+  }
+
+  Future<Uint8List> _readFileBytes(String path) async {
+    final f = File(path);
+    try {
+      if (await f.length() > 30 * 1024 * 1024) throw ApiException('Dosya çok büyük (en çok 30 MB).');
+      return await f.readAsBytes();
+    } on FileSystemException {
+      throw ApiException('Dosya okunamadı.');
+    }
+  }
+
+  Future<String> _writeTempPdf(Uint8List bytes) async {
+    final f = File('${Directory.systemTemp.path}${Platform.pathSeparator}fissio_eml_${DateTime.now().microsecondsSinceEpoch}.pdf');
+    await f.writeAsBytes(bytes, flush: true);
+    return f.path;
+  }
+
+  /// Metinden (PDF katmanı / HTML / düz metin) taslak: belge kimliği + sipariş kodu çıkarılır, mükerrer ise [ApiException]
+  /// fırlatılır (ön özet + resmi fatura birleştirmesi kayıtta yapılır: [saveDraft]).
+  Future<ReceiptDraft> _draftFromDigitalText(String text, {required String engine, String? subject, String? from}) async {
+    final documentNo = extractDocumentNo(text);
+    final orderId = extractOrderId(text);
+    final local = parseReceiptText(text, now: _clock()).toParsedReceipt(otherCategoryId: _otherCategoryId());
+    final parsed = (await _refineTextWithServer(text, local)) ?? local;
+    if (parsed.needsManual) {
+      throw ApiException('Metinden tutar okunamadı. Bilgileri elle girebilirsiniz.');
+    }
+    final draft = _withVatLine(ReceiptDraft.fromParsed(parsed), parsed)
+      ..ocrEngine = engine
+      ..documentNo = documentNo
+      ..orderId = orderId;
+    if (draft.merchant.trim().isEmpty && from != null) {
+      final m = RegExp(r'^\s*"?([^"<]+?)"?\s*<').firstMatch(from);
+      if (m != null) draft.merchant = m[1]!.trim();
+    }
+    if (draft.note.isEmpty && subject != null && subject.trim().isNotEmpty) {
+      final n = 'E-posta: ${subject.trim()}';
+      draft.note = n.length > 200 ? n.substring(0, 200) : n;
+    }
+    final decision = _digitalDecision(draft);
+    if (decision.action == kMergeDuplicate) throw _duplicateError(decision);
+    return draft;
+  }
+
+  Future<ReceiptDraft> _readPdfFile(String path) async {
     final List<String> pageTexts;
     try {
       pageTexts = await pdfReader.readText(path);
@@ -1516,15 +1776,18 @@ class AppState extends ChangeNotifier {
 
     final text = joinPageTexts(pageTexts);
     final documentNo = extractDocumentNo(text);
-    _rejectDuplicate(documentNo);
+    final orderId = extractOrderId(text);
     final local = parseReceiptText(text, now: _clock()).toParsedReceipt(otherCategoryId: _otherCategoryId());
     final parsed = (await _refineTextWithServer(text, local)) ?? local;
     if (parsed.needsManual) {
       throw ApiException('PDF içinden tutar okunamadı. Bilgileri elle girebilirsiniz.');
     }
-    return _withVatLine(ReceiptDraft.fromParsed(parsed), parsed)
+    final draft = _withVatLine(ReceiptDraft.fromParsed(parsed), parsed)
       ..ocrEngine = kStoredPdf
-      ..documentNo = documentNo;
+      ..documentNo = documentNo
+      ..orderId = orderId;
+    _rejectDuplicateDraft(draft);
+    return draft;
   }
 
   /// E-fatura / e-arşiv kalem tutarları KDV'sizdir ("Mal Hizmet Tutarı" + KDV = "Ödenecek Tutar"); ayrıştırıcı bunu
@@ -1551,18 +1814,19 @@ class AppState extends ChangeNotifier {
     if (res.ocr.isEmpty || res.parsed.needsManual) {
       throw ApiException('PDF okunamadı. Bilgileri elle girebilirsiniz.');
     }
-    final documentNo = extractDocumentNo(res.ocr.rawText);
-    _rejectDuplicate(documentNo);
-    return _withVatLine(ReceiptDraft.fromParsed(res.parsed), res.parsed)
+    final draft = _withVatLine(ReceiptDraft.fromParsed(res.parsed), res.parsed)
       ..pendingImages = pages
       ..ocrEngine = storedOcrEngineId(res.ocr.engine)
-      ..documentNo = documentNo;
+      ..documentNo = extractDocumentNo(res.ocr.rawText)
+      ..orderId = extractOrderId(res.ocr.rawText);
+    _rejectDuplicateDraft(draft);
+    return draft;
   }
 
-  void _rejectDuplicate(String? documentNo) {
-    if (documentNo != null && expenseWithDocument(documentNo) != null) {
-      throw ApiException('Bu dijital fatura zaten eklenmiş.', status: 409, code: 'duplicate_document');
-    }
+  /// Aynı belge / aynı sipariş (+aynı tür) zaten kayıtlıysa [ApiException] (409). Ön özete birleşecek resmi fatura reddedilmez.
+  void _rejectDuplicateDraft(ReceiptDraft d) {
+    final decision = _digitalDecision(d);
+    if (decision.action == kMergeDuplicate) throw _duplicateError(decision);
   }
 
   /// Cihazda okunan metin için sunucu ayrıştırıcısı ([_refineOnDeviceWithServer] ile aynı kurallar): YALNIZCA senkron

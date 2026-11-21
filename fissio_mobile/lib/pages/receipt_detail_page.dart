@@ -204,6 +204,21 @@ class ReceiptDetailPage extends StatelessWidget {
                       ReceiptImageStrip(expense: e),
                       const SizedBox(height: 16),
                       _DeleteRow(onTap: () => _delete(context, e)),
+                      // Dijital fiş: sipariş kodu ve resmi fatura durumu (resmi kayıt kilitlidir: ikinci bir belge üzerine yazamaz).
+                      if (e.orderId != null || e.hasOfficialInvoice) ...[
+                        const SizedBox(height: 16),
+                        Center(
+                          child: Text(
+                            [
+                              if (e.orderId != null) 'Sipariş No: ${e.orderId}',
+                              if (e.hasOfficialInvoice) 'Resmi fatura bağlı' else 'Sipariş özeti (resmi fatura bekleniyor)',
+                            ].join(' · '),
+                            key: const Key('digital-note'),
+                            textAlign: TextAlign.center,
+                            style: FissioText.body(context.c, size: 12, color: context.c.mute.withValues(alpha: .7)),
+                          ),
+                        ),
+                      ],
                       // Fişi hangi motor okudu (manuel/eski kayıtlarda yok): sönük, küçük bilgi satırı.
                       // Tercihler > "Fiş detayında OCR motorunu göster" kapalıysa satır hiç çizilmez.
                       if ((themeController.showOcrEngine ? ocrEngineDisplayName(e.ocrEngine) : null) case final engine?) ...[

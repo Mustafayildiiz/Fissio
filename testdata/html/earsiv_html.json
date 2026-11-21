@@ -1,0 +1,10 @@
+{
+  "name": "earsiv_html",
+  "note": "E-Arşiv faturanın HTML görünümü: ETTN etiketli UUID + VKN/Fatura No (document_no çıkar).",
+  "html": "<html><body><h3>e-Arşiv Fatura</h3><p>Satıcı VKN: 1234567890</p><p>Fatura No: GIB2026000000123</p><p>ETTN: 3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f</p><p>Ödenecek Tutar: 210,00 TL</p></body></html>",
+  "expect": {
+    "text": "e-Arşiv Fatura\nSatıcı VKN: 1234567890\nFatura No: GIB2026000000123\nETTN: 3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f\nÖdenecek Tutar: 210,00 TL",
+    "order_id": "",
+    "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f"
+  }
+}

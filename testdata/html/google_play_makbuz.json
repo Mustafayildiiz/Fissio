@@ -1,0 +1,10 @@
+{
+  "name": "google_play_makbuz",
+  "note": "Google Play: noktalı sipariş kodu (GPA.xxxx-xxxx-xxxx-xxxxx).",
+  "html": "<html><body style=\"font-family:Arial\"><h1>Google Play</h1><p>Teşekkürler. Satın alma işleminiz tamamlandı.</p><p>Sipariş numarası: GPA.3345-1234-5678-12345</p><p>Sipariş tarihi: 12.11.2026</p><table><tr><td>Premium Abonelik</td><td>₺59,99</td></tr><tr><td>Toplam</td><td>₺59,99</td></tr></table><p>Bu e-posta Google Play tarafından gönderildi.</p></body></html>",
+  "expect": {
+    "text": "Google Play\nTeşekkürler. Satın alma işleminiz tamamlandı.\nSipariş numarası: GPA.3345-1234-5678-12345\nSipariş tarihi: 12.11.2026\nPremium Abonelik ₺59,99\nToplam ₺59,99",
+    "order_id": "GPA.3345-1234-5678-12345",
+    "document_no": ""
+  }
+}

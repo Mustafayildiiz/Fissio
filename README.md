@@ -11,6 +11,7 @@ Akıllı fiş işleme ve mikro harcama yönetimi. Fişin fotoğrafını çekin; 
 - **Profiller:** Her hesapta birden fazla harcama profili (varsayılan "Kişisel").
 - **Çevrimdışı kullanım ve bulut eşitleme:** Bağlantı yokken fişler cihazda kuyruğa alınır, bağlantı gelince eşitlenir. Eşitleme kapalıyken hiçbir veri (okunan metin dahil) sunucuya gitmez.
 - **Güvenli hesap:** E-posta doğrulama kodu (OTP), kısa ömürlü erişim + yenilenen oturum belirteci, oturum yönetimi, kod ile şifre sıfırlama, hesap silme.
+- **Dijital fiş (PDF / e-posta):** E-fatura PDF'i, `.eml` ve HTML sipariş özeti "Paylaş → Fissio" ile cihazda okunur; ayrıca Gmail/Outlook filtresi ya da "İlet" ile kullanıcıya özel adrese yönlendirilen e-postalar otomatik kaydedilir. Sipariş özeti + sonradan gelen resmi fatura tek fişte birleşir, aynı belge/sipariş ikinci kez eklenmez.
 - **Veri taşıma:** JSON yedek ve CSV dışa/içe aktarma.
 - **Kişiselleştirme:** Açık/koyu tema, vurgu rengi, fiş detay görünümü.
 

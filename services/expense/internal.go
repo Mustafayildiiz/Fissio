@@ -23,6 +23,8 @@ var userOwnedTables = []string{
 	"expenses",
 	"category_rules",
 	"budgets",
+	"inbound_aliases",
+	"forwarding_confirmations",
 	"profiles",
 }
 

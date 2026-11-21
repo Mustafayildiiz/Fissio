@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -5,6 +7,7 @@ import '../stats.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'budget_widgets.dart';
+import 'email_import_card.dart';
 import 'receipt_detail_page.dart';
 import 'settings_page.dart';
 
@@ -24,6 +27,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   HomePeriod _period = HomePeriod.month;
+
+  @override
+  void initState() {
+    super.initState();
+    // E-posta aktarımı kartı için yönlendirme adresi/durumu (oturum yoksa ya da senkron kapalıysa ağa çıkmaz).
+    unawaited(appState.loadInbound());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +71,7 @@ class _HomePageState extends State<HomePage> {
                       ErrorBanner(appState.error!, onRetry: appState.refresh),
                       const SizedBox(height: 16),
                     ],
+                    const EmailImportCard(),
                     _TotalBlock(stats: stats, period: _period),
                     const Rule2(margin: EdgeInsets.symmetric(vertical: 20)),
                     SectionLabel(

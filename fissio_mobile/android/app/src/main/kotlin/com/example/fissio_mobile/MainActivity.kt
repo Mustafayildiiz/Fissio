@@ -23,19 +23,23 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Uygulama açıkken başka bir uygulamadan "Paylaş → Fissio" ile PDF geldi: Dart tarafına yerel yolu ilet.
-        extractSharedPdf(intent)?.let { path ->
+        // Uygulama açıkken başka bir uygulamadan "Paylaş → Fissio" ile PDF/.eml/HTML geldi: Dart tarafına yerel yolu ilet.
+        extractSharedFile(intent)?.let { path ->
             shareChannel?.invokeMethod("onFile", path)
             clearSharedIntent()
         }
     }
 
     /**
-     * "Paylaş → Fissio" (ACTION_SEND) ve "Birlikte aç" (ACTION_VIEW) ile gelen PDF'i uygulama önbelleğine kopyalar ve
-     * yerel yolunu döner (yoksa null). Dosya hiçbir yere gönderilmez; okuma cihaz içidir. 20 MB üstü ve PDF olmayan
-     * içerik reddedilir. Eski kopyalar (>1 gün) silinir.
+     * "Paylaş → Fissio" (ACTION_SEND) ve "Birlikte aç" (ACTION_VIEW) ile gelen dijital fişi (PDF, .eml e-posta ya da HTML
+     * sipariş özeti) uygulama önbelleğine kopyalar ve yerel yolunu döner (yoksa null). Önbellek dosyasının UZANTISI MIME türünden
+     * gelir (.pdf / .eml / .html): Dart tarafı dosyayı uzantısına göre ayrıştırır. Dosya hiçbir yere gönderilmez; okuma cihaz
+     * içidir. 20 MB üstü ve desteklenmeyen türler reddedilir. Eski kopyalar (>1 gün) silinir.
+     *
+     * `ACTION_SEND` + `text/html` çoğu zaman `EXTRA_STREAM` olmadan, HTML'i `EXTRA_HTML_TEXT` / `EXTRA_TEXT` içinde taşır: bu
+     * durumda metin `.html` dosyasına yazılır.
      */
-    private fun extractSharedPdf(intent: Intent?): String? {
+    private fun extractSharedFile(intent: Intent?): String? {
         if (intent == null) return null
         val uri: Uri? = when (intent.action) {
             Intent.ACTION_SEND ->
@@ -44,14 +48,24 @@ class MainActivity : FlutterActivity() {
             Intent.ACTION_VIEW -> intent.data
             else -> null
         }
-        if (uri == null || uri.scheme == "fissio") return null
+        if (uri?.scheme == "fissio") return null
         return try {
-            val type = intent.type ?: contentResolver.getType(uri)
-            if (type != "application/pdf") return null
+            val type = (intent.type ?: uri?.let { contentResolver.getType(it) })?.lowercase()
+            val ext = SHARED_TYPES[type] ?: return null
             val dir = File(cacheDir, "shared").apply { mkdirs() }
             val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
             dir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
-            val out = File(dir, "pdf_${System.currentTimeMillis()}.pdf")
+            val out = File(dir, "shared_${System.currentTimeMillis()}.$ext")
+            if (uri == null) {
+                // Akış yok: HTML gövde metin olarak gelmiştir.
+                if (intent.action != Intent.ACTION_SEND || ext != "html") return null
+                val body = intent.getStringExtra(Intent.EXTRA_HTML_TEXT) ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                if (body.isNullOrBlank()) return null
+                val bytes = body.toByteArray(Charsets.UTF_8)
+                if (bytes.size > MAX_SHARED_BYTES) return null
+                out.writeBytes(bytes)
+                return out.absolutePath
+            }
             var total = 0L
             contentResolver.openInputStream(uri)?.use { input ->
                 out.outputStream().use { output ->
@@ -81,6 +95,8 @@ class MainActivity : FlutterActivity() {
             data = null
             type = null
             removeExtra(Intent.EXTRA_STREAM)
+            removeExtra(Intent.EXTRA_TEXT)
+            removeExtra(Intent.EXTRA_HTML_TEXT)
         })
     }
 
@@ -90,9 +106,9 @@ class MainActivity : FlutterActivity() {
         shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL).also { ch ->
             ch.setMethodCallHandler { call, result ->
                 when (call.method) {
-                    // Soğuk açılış: uygulama paylaşılan PDF ile başlatıldıysa yolu ver (bir kez).
+                    // Soğuk açılış: uygulama paylaşılan dosyayla (PDF/.eml/HTML) başlatıldıysa yolu ver (bir kez).
                     "getInitialFile" -> {
-                        val path = extractSharedPdf(intent)
+                        val path = extractSharedFile(intent)
                         if (path != null) clearSharedIntent()
                         result.success(path)
                     }
@@ -160,6 +176,13 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        /** Paylaşım ile kabul edilen MIME türleri → önbellek dosyası uzantısı (AndroidManifest filtreleriyle aynı küme). */
+        private val SHARED_TYPES = mapOf(
+            "application/pdf" to "pdf",
+            "message/rfc822" to "eml",
+            "text/html" to "html",
+        )
+
         const val CHANNEL = "fissio/launcher_icon"
         const val SHARE_CHANNEL = "fissio/share_intent"
         const val MAX_SHARED_BYTES = 20L * 1024 * 1024

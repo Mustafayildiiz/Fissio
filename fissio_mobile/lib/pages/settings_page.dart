@@ -13,6 +13,7 @@ import 'account_widgets.dart';
 import 'avatar_picker.dart';
 import 'auth_page.dart';
 import 'data_management_page.dart';
+import 'email_import_card.dart' show EmailImportSettingsRow;
 import 'info_page.dart';
 import 'onboarding_page.dart';
 import '../app_info.dart';
@@ -234,8 +235,10 @@ class SettingsPage extends StatelessWidget {
                     const SizedBox(height: 12),
                     GroupedCard(
                       children: [
-                        _row(context, LucideIcons.bookOpen, 'Tanıtım Rehberini Görüntüle',
+                        _row(context, LucideIcons.bookOpen, 'Uygulama Rehberi / Tanıtımı',
                             () => _openOnboarding(context, onb)),
+                        // İkinci, bağımsız rehber: interaktif e-posta kurulum sihirbazı. "Yeni" rozeti sihirbaz/kart açılınca kaybolur.
+                        const EmailImportSettingsRow(),
                         _row(context, LucideIcons.lifeBuoy, 'Destek',
                             () => _push(context, const SupportPage())),
                         _row(context, LucideIcons.info, 'Hakkımızda',

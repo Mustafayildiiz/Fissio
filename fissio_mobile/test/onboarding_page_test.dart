@@ -99,7 +99,7 @@ void main() {
   });
 
   group('Ayarlar satırı', () {
-    const rowLabel = 'Tanıtım Rehberini Görüntüle';
+    const rowLabel = 'Uygulama Rehberi / Tanıtımı';
 
     testWidgets('satır görünür; açılan rehber kapanınca Ayarlara dönülür ve satır görünür kalır', (tester) async {
       _tallScreen(tester);

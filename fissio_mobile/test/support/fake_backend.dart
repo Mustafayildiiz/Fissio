@@ -7,6 +7,7 @@ import 'package:fissio_mobile/data/connectivity.dart';
 import 'package:fissio_mobile/data/local_store.dart';
 import 'package:fissio_mobile/device_info.dart';
 import 'package:fissio_mobile/ocr/ocr_engine.dart';
+import 'package:fissio_mobile/receipt_parser/digital_ids.dart';
 import 'package:fissio_mobile/theme_controller.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -17,6 +18,12 @@ import 'fakes.dart';
 /// kaydeder (`log`), bağlantıyı kesebilir (`offline`) ve belirli yolları geçici olarak reddedebilir.
 class FakeBackend {
   bool offline = false;
+
+  /// Sunucuda e-posta aktarımı yapılandırılmış mı (`GET /inbound-address` → enabled).
+  bool inboundEnabled = true;
+
+  /// `GET /inbound-address/confirmation` kaç kez yoklandı.
+  int confirmationPolls = 0;
 
   /// Her istekten sonra çağrılır (ağın ortada kesilmesini simüle etmek için).
   void Function(String method, String path)? afterRequest;
@@ -349,7 +356,7 @@ class FakeBackend {
     }
     if (path == '/expenses/bulk' && m == 'POST') {
       final results = <Map<String, dynamic>>[];
-      var created = 0, skipped = 0, failed = 0;
+      var created = 0, skipped = 0, merged = 0, failed = 0;
       final list = (j['expenses'] as List).cast<Map<String, dynamic>>();
       if (failMultiBulk && list.length > 1) return _err(500, 'internal', 'internal error');
       for (var i = 0; i < list.length; i++) {
@@ -366,25 +373,36 @@ class FakeBackend {
           results.add({'index': i, 'client_uid': uid, 'status': 'skipped', 'id': ex['id']});
           continue;
         }
-        if (e['document_no'] != null && u.expenses.any((x) => x['document_no'] == e['document_no'])) {
+        final dec = _decide(u, e, uid);
+        if (dec.action == kMergeDuplicate) {
           failed++;
-          results.add({'index': i, 'client_uid': uid, 'status': 'error', 'error': 'duplicate_document'});
+          results.add({'index': i, 'client_uid': uid, 'status': 'error', 'error': dec.code});
+          continue;
+        }
+        if (dec.action == kMergeMerge) {
+          final target = _applyMerge(u, dec.target!, e);
+          merged++;
+          results.add({'index': i, 'client_uid': uid, 'status': 'merged', 'id': target['id']});
           continue;
         }
         final saved = _newExpense(u, e, (e['profile_id'] ?? j['profile_id']) as int);
         created++;
         results.add({'index': i, 'client_uid': uid, 'status': 'created', 'id': saved['id']});
       }
-      return _json(200, {'created': created, 'skipped': skipped, 'failed': failed, 'results': results});
+      return _json(200, {'created': created, 'skipped': skipped, 'merged': merged, 'failed': failed, 'results': results});
     }
     if (path == '/expenses' && m == 'POST') {
       if (j['merchant'] == 'BAD') return _err(400, 'bad_request', 'amount must be a positive number');
       final uid = j['client_uid'] as String?;
       final ex = uid == null ? null : u.expenses.where((x) => x['client_uid'] == uid).firstOrNull;
       if (ex != null) return _json(200, ex);
-      // Sunucu gibi: aynı dijital fatura (document_no) hesapta ikinci kez eklenemez.
-      if (j['document_no'] != null && u.expenses.any((x) => x['document_no'] == j['document_no'])) {
-        return _err(409, 'duplicate_document', 'this document was already added');
+      // Sunucu gibi: mükerrer belge/sipariş reddedilir, resmi fatura mevcut ön özete birleşir (Dart decideMerge = Go ikizi).
+      final dec = _decide(u, j, uid);
+      if (dec.action == kMergeDuplicate) {
+        return _err(409, dec.code, dec.code == 'duplicate_document' ? 'this document was already added' : 'this order was already added');
+      }
+      if (dec.action == kMergeMerge) {
+        return _json(200, {..._applyMerge(u, dec.target!, j), 'status': 'merged'});
       }
       return _json(201, _newExpense(u, j, j['profile_id'] as int));
     }
@@ -397,6 +415,11 @@ class FakeBackend {
         if (m == 'GET') return _json(200, u.expenses[idx]);
         if (m == 'PUT') {
           putBodies.add(Map<String, dynamic>.of(j)..['id'] = id);
+          // Sunucu gibi: resmi kayıt (document_no dolu) FARKLI bir belge numarasıyla ezilemez.
+          final curDoc = u.expenses[idx]['document_no'];
+          if (j['document_no'] != null && curDoc != null && curDoc != j['document_no']) {
+            return _err(409, 'document_locked', 'this record is already bound to an official invoice');
+          }
           final base = j.remove('base_updated_at') as String?;
           if (base != null) {
             final baseAt = DateTime.tryParse(base);
@@ -412,6 +435,7 @@ class FakeBackend {
             'category_name': _catName(j['category_id']),
             'updated_at': _stamp(),
           };
+          u.expenses[idx]['has_official_invoice'] = u.expenses[idx]['document_no'] != null;
           return _json(200, u.expenses[idx]);
         }
         if (m == 'DELETE') {
@@ -429,8 +453,32 @@ class FakeBackend {
         return _json(204, null);
       }
     }
+    if (path == '/inbound-address' && m == 'GET') return _json(200, _inbound(u));
+    if (path == '/inbound-address' && m == 'PUT') {
+      u.inboundProfileId = (j['profile_id'] as num?)?.toInt();
+      return _json(200, _inbound(u));
+    }
+    if (path == '/inbound-address/rotate' && m == 'POST') {
+      u.alias = 'rotated${++_seq}x9k2m4q7p1w8';
+      u.lastReceivedAt = null;
+      return _json(200, _inbound(u));
+    }
+    if (path == '/inbound-address/confirmation' && m == 'GET') {
+      confirmationPolls++;
+      return u.confirmation == null ? _json(204, null) : _json(200, u.confirmation);
+    }
     return _err(404, 'not_found', 'no route $m $path');
   }
+
+  Map<String, dynamic> _inbound(FakeUser u) => inboundEnabled
+      ? {
+          'enabled': true,
+          'address': '${u.alias}@fis.test',
+          if (u.inboundProfileId != null) 'profile_id': u.inboundProfileId,
+          if (u.lastReceivedAt != null) 'last_received_at': u.lastReceivedAt,
+          if (u.lastStatus != null) 'last_status': u.lastStatus,
+        }
+      : {'enabled': false};
 
   String _catName(Object? id) =>
       categories.where((c) => c['id'] == id).map((c) => c['name'] as String).firstOrNull ?? 'Diğer';
@@ -454,10 +502,57 @@ class FakeBackend {
       'recurring_estimate': j['recurring_estimate'] ?? 0,
       'ocr_engine': j['ocr_engine'],
       'document_no': j['document_no'],
+      'order_id': j['order_id'],
+      'has_official_invoice': j['document_no'] != null,
       'updated_at': _stamp(),
     };
     u.expenses.add(e);
     return e;
+  }
+
+  /// Sunucudaki akıllı birleştirme kararı: Dart `decideMerge` (Go `DecideMerge` ikizi) hesaptaki fişlere uygulanır.
+  ({String action, Map<String, dynamic>? target, String code}) _decide(FakeUser u, Map<String, dynamic> j, String? uid) {
+    if (j['document_no'] == null && j['order_id'] == null) return (action: kMergeCreate, target: null, code: '');
+    final pool = [for (final x in u.expenses) if (uid == null || x['client_uid'] != uid) x];
+    final dec = decideMerge(
+      MergeDoc(
+        merchant: '${j['merchant'] ?? ''}',
+        amountCents: (((j['amount'] as num?) ?? 0) * 100).round(),
+        date: '${j['date'] ?? ''}',
+        documentNo: (j['document_no'] as String?) ?? '',
+        orderId: (j['order_id'] as String?) ?? '',
+        items: [for (final i in (j['items'] as List?) ?? const []) '${(i as Map)['name']}'],
+      ),
+      [
+        for (final x in pool)
+          MergeDoc(
+            id: x['id'] as int,
+            merchant: '${x['merchant']}',
+            amountCents: (((x['amount'] as num)) * 100).round(),
+            date: '${x['date']}',
+            documentNo: (x['document_no'] as String?) ?? '',
+            orderId: (x['order_id'] as String?) ?? '',
+            items: [for (final i in (x['items'] as List?) ?? const []) '${(i as Map)['name']}'],
+          ),
+      ],
+    );
+    final target = dec.action == kMergeCreate ? null : pool.where((x) => x['id'] == dec.targetId).firstOrNull;
+    if (target == null) return (action: kMergeCreate, target: null, code: '');
+    final byDoc = j['document_no'] != null && target['document_no'] == j['document_no'];
+    return (action: dec.action, target: target, code: byDoc ? 'duplicate_document' : 'duplicate_order');
+  }
+
+  Map<String, dynamic> _applyMerge(FakeUser u, Map<String, dynamic> target, Map<String, dynamic> j) {
+    final idx = u.expenses.indexWhere((x) => x['id'] == target['id']);
+    final t = u.expenses[idx];
+    t['document_no'] = j['document_no'];
+    t['order_id'] ??= j['order_id'];
+    t['amount'] = j['amount'];
+    t['ocr_engine'] ??= j['ocr_engine'];
+    if ((t['items'] as List).isEmpty) t['items'] = j['items'] ?? [];
+    t['has_official_invoice'] = true;
+    t['updated_at'] = _stamp();
+    return t;
   }
 }
 
@@ -472,6 +567,13 @@ class FakeUser {
   final List<Map<String, dynamic>> profiles = [];
   final List<Map<String, dynamic>> expenses = [];
   final List<Map<String, dynamic>> budgets = [];
+
+  /// E-posta aktarımı (sunucu `inbound_aliases` / `forwarding_confirmations` karşılığı).
+  String alias = 'k3j9x2m4q7p1w8zt';
+  int? inboundProfileId;
+  String? lastReceivedAt;
+  String? lastStatus;
+  Map<String, dynamic>? confirmation;
 }
 
 class MemPrefs implements DeletablePrefsStore {

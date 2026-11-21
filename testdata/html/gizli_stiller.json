@@ -1,0 +1,10 @@
+{
+  "name": "gizli_stiller",
+  "note": "font-size:0.9em / max-height:0.5 görünür sayılır; display:none, visibility:hidden, font-size:0px, hidden atılır.",
+  "html": "<html><body><p style=\"font-size: 0.9em\">Görünür A</p><p style=\"display: none\">Gizli B</p><p style=\"visibility:hidden\">Gizli C</p><p style=\"font-size:0px\">Gizli D</p><p hidden>Gizli E</p><p style=\"max-height:0.5em\">Görünür F</p><p style=\"opacity:0\">Gizli G</p><p>Satır<br>kırma<br/>testi</p><ul><li>Bir</li><li>İki</li></ul></body></html>",
+  "expect": {
+    "text": "Görünür A\nGörünür F\nSatır\nkırma\ntesti\nBir\nİki",
+    "order_id": "",
+    "document_no": ""
+  }
+}

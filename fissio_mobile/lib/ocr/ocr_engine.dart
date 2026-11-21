@@ -145,6 +145,9 @@ const kStoredMlKit = 'mlkit';
 /// Metin katmanlı dijital fiş / e-fatura PDF'inin ayrıştırıcısı (OCR yok; metin doğrudan okunur).
 const kStoredPdf = 'pdf';
 
+/// E-posta (HTML gövde / .eml / yönlendirilen mail) kaynaklı dijital fişin `ocrEngine` kimliği (sunucu webhook'uyla aynı).
+const kStoredEmail = 'email';
+
 /// Tarama sonucundaki motor adını ([OcrResult.engine]) fişe yazılacak kimliğe çevirir
 /// (`ondevice` → `mlkit`, `paddleocr`/`custom` aynen); bilinmeyen/`unknown` null döner.
 String? storedOcrEngineId(String? engine) {
@@ -169,6 +172,7 @@ String? ocrEngineDisplayName(String? stored) => switch (stored) {
   'custom' => 'Custom OCR',
   kStoredMlKit => 'Google ML Kit',
   kStoredPdf => 'PDF / E-Fatura Ayrıştırıcı',
+  kStoredEmail => 'E-posta Ayrıştırıcı',
   _ => null,
 };
 

@@ -46,6 +46,11 @@ void main() {
     expect(reference.any((f) => f.contains('import-digital') && f.contains('fissio')), isTrue, reason: 'fissio://import-digital');
     expect(reference.any((f) => f.contains('android.intent.action.SEND') && f.contains('application/pdf')), isTrue, reason: 'PDF paylaşımı');
     expect(reference.any((f) => f.contains('android.intent.action.VIEW') && f.contains('application/pdf')), isTrue, reason: 'PDF aç');
+    // Dijital fiş paylaşımı: .eml (message/rfc822) ve HTML sipariş özeti de PDF ile aynı SEND/VIEW filtrelerinde.
+    for (final type in ['message/rfc822', 'text/html']) {
+      expect(reference.any((f) => f.contains('android.intent.action.SEND') && f.contains(type)), isTrue, reason: '$type paylaşımı');
+      expect(reference.any((f) => f.contains('android.intent.action.VIEW') && f.contains(type)), isTrue, reason: '$type aç');
+    }
     for (final n in names) {
       expect(filtersOf(entries[n]!), reference, reason: '$n girişinin filtreleri MainActivity ile aynı olmalı');
       expect(entries[n]!.contains('flutter_deeplinking_enabled'), isTrue, reason: '$n: Flutter varsayılan derin bağlantısı kapalı olmalı');
@@ -91,5 +96,21 @@ void main() {
     // Tema anahtarları Dart ile aynı.
     expect(theming, contains(WidgetKeys.theme));
     expect(theming, contains(WidgetKeys.accent));
+  });
+
+  test('MainActivity SHARED_TYPES = manifestteki paylaşım MIME türleri (pdf/eml/html uzantı eşlemesiyle)', () {
+    final kt = File('${root.path}/kotlin/com/example/fissio_mobile/MainActivity.kt').readAsStringSync();
+    final block = kt.substring(kt.indexOf('val SHARED_TYPES'), kt.indexOf('const val CHANNEL'));
+    final map = {for (final m in RegExp(r'"([a-z]+/[a-z0-9.+-]+)"\s+to\s+"(\w+)"').allMatches(block)) m[1]!: m[2]!};
+    expect(map, {'application/pdf': 'pdf', 'message/rfc822': 'eml', 'text/html': 'html'});
+    final reference = filtersOf(entries['MainActivity']!);
+    final manifestTypes = {
+      for (final f in reference)
+        for (final part in f.split('|'))
+          if (RegExp(r'^[a-z]+/[a-z0-9.+-]+$').hasMatch(part) && !part.startsWith('android.')) part,
+    };
+    expect(manifestTypes, map.keys.toSet());
+    // Soğuk/sıcak açılışta yalnızca uzantıya göre dağıtılır: Dart tarafı .pdf/.eml/.html'i tanır.
+    expect(kt.contains('EXTRA_HTML_TEXT'), isTrue, reason: 'EXTRA_STREAM olmadan HTML paylaşımı');
   });
 }

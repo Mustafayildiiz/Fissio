@@ -12,6 +12,11 @@ düzenleyin, üç test paketi de okur.
 | `recurring_due.json` | tekrarlayan gider vadesi + gecikmiş | Go `recurring_due_golden_test.go`, Dart `test/recurring_logic_test.dart` |
 | `recurring_series.json` | tekrarlayan seri penceresi/bitişi/gecikmiş | Go `recurring_series_golden_test.go`, Dart `test/recurring_series_golden_test.dart` |
 | `parse/*.json` | fiş ayrıştırma (işletme, tutar, tarih, kalemler, `needs_review`, `discount_total`); beklenenler Go `Parse` çıktısıdır (üretim seed kategorileriyle) | Go `golden_parse_test.go`, Dart `test/golden_parse_test.dart` |
+| `html/*.json` | dijital fiş: HTML e-posta gövdesi → temiz metin (`HTMLToText` + `StripForwardPreamble`), `order_id`/`document_no` çıkarımı; `expect.text` Go çıktısıdır (`go test ./internal/digital -run Golden -update` ile yeniden üretilir, elle gözden geçirilir) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `preamble.json` | "İlet (Forward)" önsözü temizliği (Gmail / Outlook / Apple / Türkçe / `>` alıntı) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `digital_ids.json` | `ExtractDocumentNo` (ETTN / `VKN_FaturaNo`) + `ExtractOrderID` (YALNIZCA etiketli sipariş kodu) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `merge_decision.json` | ön özet + resmi fatura birleştirme kararı `DecideMerge` (kural A mükerrer / B birleştir / C asla; tutar TL → kuruşa yuvarlanır) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `eml/*.json` | `.eml` (RFC 5322/MIME) ayrıştırma: QP/base64, windows-1254, RFC 2047, multipart, `message/rfc822` eki, PDF ve zip içi PDF. Dart tarafı alıcı (`recipients`) alanını sınamaz (alias çözümü yalnızca sunucuda) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
 | `merchant_brands.json` | başlıkta işletme satırı seçen marka listesi (Go sözlüğünün `brands` birleşimi = Dart `receipt_parser/brands.dart`) | Go `golden_parse_test.go`, Dart `test/golden_parse_test.dart` |
 
 ## Yol çözümü

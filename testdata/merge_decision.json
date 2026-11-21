@@ -1,0 +1,538 @@
+{
+  "note": "DecideMerge: Go otorite, Dart ikizi (merge_decision.dart). amount TL, kuruşa yuvarlanır.",
+  "cases": [
+    {
+      "name": "A_ayni_document_no",
+      "incoming": {
+        "id": 0,
+        "merchant": "X",
+        "amount": 10,
+        "date": "2026-11-10",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 7,
+          "merchant": "X",
+          "amount": 10,
+          "date": "2026-11-10",
+          "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "duplicate",
+        "target_id": 7
+      }
+    },
+    {
+      "name": "A_ayni_order_ayni_tur_ozet",
+      "incoming": {
+        "id": 0,
+        "merchant": "Yemeksepeti",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "",
+        "order_id": "YS-1",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 3,
+          "merchant": "Yemeksepeti",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "YS-1",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "duplicate",
+        "target_id": 3
+      }
+    },
+    {
+      "name": "A_ayni_order_ayni_tur_resmi",
+      "incoming": {
+        "id": 0,
+        "merchant": "Kosebasi",
+        "amount": 210,
+        "date": "2026-11-15",
+        "document_no": "11111111-2222-4333-8444-555555555555",
+        "order_id": "YS-1",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 4,
+          "merchant": "Kosebasi",
+          "amount": 210,
+          "date": "2026-11-15",
+          "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+          "order_id": "YS-1",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "duplicate",
+        "target_id": 4
+      }
+    },
+    {
+      "name": "A_ozet_resmi_varken_gelirse",
+      "incoming": {
+        "id": 0,
+        "merchant": "Yemeksepeti",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "",
+        "order_id": "YS-1",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 5,
+          "merchant": "Kosebasi Doner",
+          "amount": 210,
+          "date": "2026-11-15",
+          "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+          "order_id": "YS-1",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "duplicate",
+        "target_id": 5
+      }
+    },
+    {
+      "name": "B_order_id_ile_birlesir",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner Ltd",
+        "amount": 212.5,
+        "date": "2026-11-17",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "YS-1",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 9,
+          "merchant": "Yemeksepeti",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "YS-1",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "merge",
+        "target_id": 9
+      }
+    },
+    {
+      "name": "B_order_id_yok_tutar_tarih_isletme",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-16",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 11,
+          "merchant": "KOSEBASI DONER",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "merge",
+        "target_id": 11
+      }
+    },
+    {
+      "name": "B_kalem_benzerligi_dusuk_birlesmez",
+      "incoming": {
+        "id": 0,
+        "merchant": "Migros",
+        "amount": 100,
+        "date": "2026-11-10",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": [
+          "Sut",
+          "Ekmek"
+        ]
+      },
+      "candidates": [
+        {
+          "id": 12,
+          "merchant": "Migros",
+          "amount": 100,
+          "date": "2026-11-10",
+          "document_no": "",
+          "order_id": "",
+          "items": [
+            "Televizyon",
+            "Kulaklik"
+          ]
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "B_kalem_benzer_birlesir",
+      "incoming": {
+        "id": 0,
+        "merchant": "Migros",
+        "amount": 100,
+        "date": "2026-11-10",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": [
+          "Süt 1 L",
+          "Ekmek"
+        ]
+      },
+      "candidates": [
+        {
+          "id": 13,
+          "merchant": "Migros",
+          "amount": 100,
+          "date": "2026-11-11",
+          "document_no": "",
+          "order_id": "",
+          "items": [
+            "SUT 1 L",
+            "EKMEK"
+          ]
+        }
+      ],
+      "expect": {
+        "action": "merge",
+        "target_id": 13
+      }
+    },
+    {
+      "name": "B_tarih_penceresi_disinda",
+      "incoming": {
+        "id": 0,
+        "merchant": "Migros",
+        "amount": 100,
+        "date": "2026-11-20",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 14,
+          "merchant": "Migros",
+          "amount": 100,
+          "date": "2026-11-10",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "B_tutar_farkli",
+      "incoming": {
+        "id": 0,
+        "merchant": "Migros",
+        "amount": 100,
+        "date": "2026-11-10",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 15,
+          "merchant": "Migros",
+          "amount": 100.01,
+          "date": "2026-11-10",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "B_isletme_farkli",
+      "incoming": {
+        "id": 0,
+        "merchant": "Migros",
+        "amount": 100,
+        "date": "2026-11-10",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 16,
+          "merchant": "Carrefour",
+          "amount": 100,
+          "date": "2026-11-10",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "C_ayni_gun_iki_siparis_belirsiz",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 20,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        },
+        {
+          "id": 21,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "C_farkli_order_id_asla",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "YS-2",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 22,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "YS-1",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "C_iki_ozet_birlesmez",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "",
+        "order_id": "YS-2",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 23,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "YS-1",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "C_ozet_order_yok_birlesmez",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 24,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "C_resmiye_birlesmez_uclu_belge",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "11111111-2222-4333-8444-555555555555",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 25,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    },
+    {
+      "name": "B_order_id_olan_gelen_adayda_yok_fuzzy",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "YS-1",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 26,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "merge",
+        "target_id": 26
+      }
+    },
+    {
+      "name": "B_ayni_gun_biri_baska_siparis_tek_aday",
+      "incoming": {
+        "id": 0,
+        "merchant": "Köşebaşı Döner",
+        "amount": 210,
+        "date": "2026-11-14",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [
+        {
+          "id": 27,
+          "merchant": "Köşebaşı Döner",
+          "amount": 210,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "YS-9",
+          "items": []
+        },
+        {
+          "id": 28,
+          "merchant": "Köşebaşı Döner",
+          "amount": 190,
+          "date": "2026-11-14",
+          "document_no": "",
+          "order_id": "",
+          "items": []
+        }
+      ],
+      "expect": {
+        "action": "merge",
+        "target_id": 27
+      }
+    },
+    {
+      "name": "bos_aday_olusturur",
+      "incoming": {
+        "id": 0,
+        "merchant": "Migros",
+        "amount": 100,
+        "date": "2026-11-10",
+        "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+        "order_id": "",
+        "items": []
+      },
+      "candidates": [],
+      "expect": {
+        "action": "create",
+        "target_id": 0
+      }
+    }
+  ]
+}

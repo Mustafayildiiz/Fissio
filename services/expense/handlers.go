@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
 
+	"fissio/expense/internal/digital"
 	"fissio/expense/internal/receiptparse"
 	"fissio/expense/internal/scan"
 )
@@ -25,6 +26,8 @@ type handler struct {
 	ocrFactory *scan.OcrEngineFactory
 	// scanLim: kullanici basina tarama siniri (nil = surec geneli varsayilan, bkz. internal/scan).
 	scanLim *scan.Limiter
+	// inbound: e-posta ile otomatik fis aktarimi ayarlari (bos Domain = ozellik kapali, bkz. inbound.go).
+	inbound inboundConfig
 }
 
 const dateLayout = "2006-01-02"
@@ -223,6 +226,12 @@ type expenseInput struct {
 	// (kisa fis/siparis/Z numaralari kabul EDILMEZ: baska belgelerle cakisirdi). Ayni hesapta tekildir: ikinci kez
 	// eklenirse 409 duplicate_document. Yok/null/bos = belge numarasi yok (POST'ta NULL, PUT'ta mevcut KORUNUR).
 	DocumentNo *string `json:"document_no"`
+	// OrderID: platform siparis kodu (Yemeksepeti, Trendyol, Google Play...). Ayni hesapta ayni (order_id, belge turu)
+	// ikinci kez eklenemez (409 duplicate_order); on ozet + resmi fatura ayni order_id'yle tek kayda birlesir
+	// (digital_merge.go). Yok/null/bos = yok (POST'ta NULL, PUT'ta mevcut KORUNUR).
+	OrderID *string `json:"order_id"`
+	// HasOfficialInvoice: salt okunur (document_no'dan turetilir); istemci gonderirse yok sayilir.
+	HasOfficialInvoice *bool `json:"has_official_invoice"`
 	// BaseUpdatedAt (yalniz PUT): istemcinin duzenlemeye basladigi surumun updated_at degeri (RFC3339). Sunucudaki
 	// kayit bundan YENIYSE (baska cihaz degistirmis) yazilmaz, 409 conflict doner. Bos = denetim yok (eski davranis).
 	BaseUpdatedAt string `json:"base_updated_at"`
@@ -251,6 +260,14 @@ func (in *expenseInput) documentArg() any {
 		return nil
 	}
 	return *in.DocumentNo
+}
+
+// orderArg SQL'e giden siparis kodu: nil = yok (INSERT'te NULL, UPDATE'te COALESCE ile mevcut deger korunur).
+func (in *expenseInput) orderArg() any {
+	if in.OrderID == nil {
+		return nil
+	}
+	return *in.OrderID
 }
 
 // ocrArg SQL'e giden motor degeri: nil = yok (INSERT'te NULL, UPDATE'te COALESCE ile mevcut deger korunur).
@@ -362,6 +379,12 @@ type expenseOut struct {
 	OcrEngine *string `json:"ocr_engine"`
 	// DocumentNo dijital fatura kimligi (ETTN ya da VKN_FaturaNo); null = yok.
 	DocumentNo *string `json:"document_no"`
+	// OrderID platform siparis kodu; null = yok.
+	OrderID *string `json:"order_id"`
+	// HasOfficialInvoice: kayit resmi bir e-fatura/e-arsiv belgesine dayaniyor (document_no'dan turetilir, salt okunur).
+	HasOfficialInvoice bool `json:"has_official_invoice"`
+	// Status: yalniz POST /expenses cevabinda "merged" (istek mevcut bir on ozet kaydina birlestirildi; id hedeftir).
+	Status string `json:"status,omitempty"`
 	// UpdatedAt son degisiklik zamani (RFC3339Nano, UTC, mikrosaniye): PUT base_updated_at ve GET ?since= icin
 	// istemci bu degeri AYNEN geri gonderir.
 	UpdatedAt string `json:"updated_at"`
@@ -431,6 +454,16 @@ func (in *expenseInput) validate() (time.Time, string) {
 			return time.Time{}, "invalid document_no"
 		}
 	}
+	if in.OrderID != nil {
+		v := strings.TrimSpace(*in.OrderID)
+		if v == "" {
+			in.OrderID = nil
+		} else if n := digital.NormalizeOrderID(v); n != "" {
+			in.OrderID = &n
+		} else {
+			return time.Time{}, "invalid order_id"
+		}
+	}
 	// NUL/kontrol karakterleri Postgres'te insert hatasi verir (bulk'ta tum partiyi bozardi): sessizce ayiklanir.
 	in.Merchant = cleanText(in.Merchant)
 	in.Note = cleanText(in.Note)
@@ -498,6 +531,21 @@ func duplicateDocument(c *gin.Context) {
 	c.JSON(http.StatusConflict, gin.H{"error": "this document was already added", "code": "duplicate_document"})
 }
 
+// isDuplicateOrder: (user_id, order_id, has_official_invoice) tekil indeksi ihlali (ayni siparis, ayni belge turu).
+func isDuplicateOrder(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "uq_expenses_order_kind"
+}
+
+// documentLocked: kayıt zaten (başka) bir resmi belgeye bağlı; üçüncü bir belge üzerine yazamaz.
+func documentLocked(c *gin.Context) {
+	c.JSON(http.StatusConflict, gin.H{"error": "this record is already bound to an official invoice", "code": "document_locked"})
+}
+
+func duplicateOrder(c *gin.Context) {
+	c.JSON(http.StatusConflict, gin.H{"error": "this order was already added", "code": "duplicate_order"})
+}
+
 func isFKViolation(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == "23503"
@@ -505,7 +553,7 @@ func isFKViolation(err error) bool {
 
 const selectExpense = `
 SELECT e.id, e.merchant, e.amount, e.spent_at, e.category_id, c.name, e.note, e.items, e.profile_id, e.client_uid,
-       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at, e.ocr_engine, e.document_no,
+       COALESCE(e.recurring_day, 0), e.recurring_remind, e.recurring_kind, COALESCE(e.recurring_estimate, 0), e.updated_at, e.ocr_engine, e.document_no, e.order_id, e.has_official_invoice,
        ARRAY(SELECT i.id FROM expense.receipt_images i WHERE i.expense_id = e.id ORDER BY i.position, i.id)
 FROM expense.expenses e JOIN expense.categories c ON c.id = e.category_id `
 
@@ -517,13 +565,16 @@ func scanExpense(s scanner) (expenseOut, error) {
 	var items []byte
 	var imageIDs pq.Int64Array
 	var updated time.Time
-	var ocr, doc sql.NullString
-	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &ocr, &doc, &imageIDs)
+	var ocr, doc, order sql.NullString
+	err := s.Scan(&e.ID, &e.Merchant, &e.Amount, &d, &e.CategoryID, &e.CategoryName, &e.Note, &items, &e.ProfileID, &e.ClientUID, &e.RecurringDay, &e.RecurringRemind, &e.RecurringKind, &e.RecurringEstimate, &updated, &ocr, &doc, &order, &e.HasOfficialInvoice, &imageIDs)
 	if ocr.Valid {
 		e.OcrEngine = &ocr.String
 	}
 	if doc.Valid {
 		e.DocumentNo = &doc.String
+	}
+	if order.Valid {
+		e.OrderID = &order.String
 	}
 	e.Date = d.Format(dateLayout)
 	e.UpdatedAt = formatUpdatedAt(updated)
@@ -573,20 +624,24 @@ func (h *handler) createExpense(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
-	id, created, err := insertExpense(tx, userID, profileID, uid, in, d, string(itemsJSON))
+	id, outcome, dup, err := writeExpense(tx, userID, profileID, uid, in, d, string(itemsJSON))
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
 	}
-	if isDuplicateDocument(err) {
+	switch dup {
+	case "duplicate_document":
 		duplicateDocument(c)
+		return
+	case "duplicate_order":
+		duplicateOrder(c)
 		return
 	}
 	if err != nil {
 		serverError(c)
 		return
 	}
-	if created {
+	if outcome == writeCreated {
 		if err := saveRules(tx, userID, collectRuleUpdates(in)); err != nil {
 			serverError(c)
 			return
@@ -597,10 +652,10 @@ func (h *handler) createExpense(c *gin.Context) {
 		return
 	}
 	status := http.StatusCreated
-	if !created {
-		status = http.StatusOK // ayni client_uid daha once kaydedilmis (idempotent tekrar)
+	if outcome != writeCreated {
+		status = http.StatusOK // ayni client_uid daha once kaydedilmis (idempotent tekrar) ya da on ozete birlestirildi
 	}
-	h.respondExpense(c, status, id)
+	h.respondExpenseMarked(c, status, id, outcome == writeMerged)
 }
 
 // insertExpense fisi ekler; (user_id, client_uid) zaten varsa mevcut kaydin id'sini ve created=false doner.
@@ -609,10 +664,10 @@ func insertExpense(q interface {
 }, userID, profileID int64, uid string, in expenseInput, d time.Time, itemsJSON string) (int64, bool, error) {
 	var id int64
 	err := q.QueryRow(
-		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate, ocr_engine, document_no)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		`INSERT INTO expense.expenses (user_id, profile_id, client_uid, merchant, amount, spent_at, category_id, note, items, recurring_day, recurring_remind, recurring_kind, recurring_estimate, ocr_engine, document_no, order_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 ON CONFLICT (user_id, client_uid) DO NOTHING RETURNING id`,
-		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), in.ocrArg(), in.documentArg()).Scan(&id)
+		userID, profileID, uid, in.Merchant, in.Amount, d, in.CategoryID, in.Note, itemsJSON, in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), in.ocrArg(), in.documentArg(), in.orderArg()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = q.QueryRow(`SELECT id FROM expense.expenses WHERE user_id = $1 AND client_uid = $2`, userID, uid).Scan(&id)
 		return id, false, err
@@ -634,6 +689,11 @@ func (h *handler) loadExpense(userID, id int64) (expenseOut, error) {
 }
 
 func (h *handler) respondExpense(c *gin.Context, status int, id int64) {
+	h.respondExpenseMarked(c, status, id, false)
+}
+
+// respondExpenseMarked: merged=true ise cevapta status:"merged" (istek mevcut bir on ozet kaydina birlestirildi; id hedeftir).
+func (h *handler) respondExpenseMarked(c *gin.Context, status int, id int64, merged bool) {
 	e, err := h.loadExpense(c.GetInt64("userID"), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "expense not found"})
@@ -642,6 +702,9 @@ func (h *handler) respondExpense(c *gin.Context, status int, id int64) {
 	if err != nil {
 		serverError(c)
 		return
+	}
+	if merged {
+		e.Status = writeMerged
 	}
 	c.JSON(status, e)
 }
@@ -808,23 +871,42 @@ func (h *handler) updateExpense(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
+	// Resmi kayıt kilidi: kayıt zaten bir belgeye (document_no) bağlıysa FARKLI bir belge numarası üzerine yazılamaz. (Aynı değer ya
+	// da alanı atlamak serbesttir; atlanırsa COALESCE mevcut değeri korur.) Bayat önbellekten gelen "birleştirme" PUT'u bu yüzden
+	// ETTN1'i ETTN2 ile ezemez.
+	if in.DocumentNo != nil {
+		var cur sql.NullString
+		err := tx.QueryRow(`SELECT document_no FROM expense.expenses WHERE id = $1 AND user_id = $2 FOR UPDATE`, id, c.GetInt64("userID")).Scan(&cur)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			serverError(c)
+			return
+		}
+		if err == nil && cur.Valid && cur.String != *in.DocumentNo {
+			documentLocked(c)
+			return
+		}
+	}
 	// updated_at kesin artar: clock_timestamp() (islem baslangici olan now() degil; satir kilidini bekleyen bir PUT
 	// onu ezen surumden ESKI zaman yazmasin) ve en az onceki deger + 1 us. Surum denetimi ayni UPDATE'in WHERE'inde:
 	// satir kilitli yeniden degerlendirilir, denetim ile yazma arasinda yaris yoktur.
 	res, err := tx.Exec(
 		`UPDATE expense.expenses SET merchant=$1, amount=$2, spent_at=$3, category_id=$4, note=$5, items=$6,
 		 profile_id = COALESCE($9::bigint, profile_id), recurring_day = $10, recurring_remind = $11, recurring_kind = $12, recurring_estimate = $13,
-		 ocr_engine = COALESCE($15::text, ocr_engine), document_no = COALESCE($16::text, document_no),
+		 ocr_engine = COALESCE($15::text, ocr_engine), document_no = COALESCE($16::text, document_no), order_id = COALESCE($17::text, order_id),
 		 updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 		 WHERE id=$7 AND user_id=$8 AND ($14::timestamptz IS NULL OR updated_at <= $14::timestamptz)`,
 		in.Merchant, in.Amount, d, in.CategoryID, in.Note, string(itemsJSON), id, c.GetInt64("userID"), moveTo,
-		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base, in.ocrArg(), in.documentArg())
+		in.recurringArg(), in.remind(), in.kind(), in.estimateArg(), base, in.ocrArg(), in.documentArg(), in.orderArg())
 	if isFKViolation(err) {
 		badRequest(c, "unknown category_id")
 		return
 	}
 	if isDuplicateDocument(err) {
 		duplicateDocument(c)
+		return
+	}
+	if isDuplicateOrder(err) {
+		duplicateOrder(c)
 		return
 	}
 	if err != nil {

@@ -1,0 +1,10 @@
+{
+  "name": "spotify_makbuz",
+  "note": "Spotify: İngilizce \"Order ID\", &nbsp; ve entity çözümü.",
+  "html": "<html><body><div>Receipt&nbsp;for&nbsp;Spotify&nbsp;Premium</div><div>Order ID: 8473920165</div><div>Spotify Premium Individual &amp; Family</div><div>Total: &#8378;59,99</div><div style=\"font-size:0.9em\">Vergiler dahildir</div><div>View in browser</div></body></html>",
+  "expect": {
+    "text": "Receipt for Spotify Premium\nOrder ID: 8473920165\nSpotify Premium Individual & Family\nTotal: ₺59,99\nVergiler dahildir",
+    "order_id": "8473920165",
+    "document_no": ""
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "zip_icinde_pdf",
+  "note": "application/zip eki: içindeki .pdf çıkarılır, .txt atılır.",
+  "eml": "From: a@b.com\r\nTo: x@fis.fissio.app\r\nSubject: Fatura zip\r\nContent-Type: multipart/mixed; boundary=\"z1\"\r\n\r\n--z1\r\nContent-Type: text/plain\r\n\r\nEkte.\r\n--z1\r\nContent-Type: application/zip; name=\"fatura.zip\"\r\nContent-Disposition: attachment; filename=\"fatura.zip\"\r\nContent-Transfer-Encoding: base64\r\n\r\nUEsDBBQAAAAIAHu2dF1fBVmyEQAAAA8AAAAKAAAAZmF0dXJhLnBkZlMNcHHTNdQz4VJNS8xO5QIA\r\nUEsDBBQAAAAIAHu2dF2DFtyMAwAAAAEAAAAKAAAAbm90bGFyLnR4dKsAAFBLAQIUABQAAAAIAHu2\r\ndF1fBVmyEQAAAA8AAAAKAAAAAAAAAAAAAACAAQAAAABmYXR1cmEucGRmUEsBAhQAFAAAAAgAe7Z0\r\nXYMW3IwDAAAAAQAAAAoAAAAAAAAAAAAAAIABOQAAAG5vdGxhci50eHRQSwUGAAAAAAIAAgBwAAAA\r\nZAAAAAAA\r\n--z1--\r\n",
+  "expect": {
+    "subject": "Fatura zip",
+    "from": "a@b.com",
+    "message_id": "",
+    "text": "Ekte.",
+    "html": "",
+    "pdf_names": [
+      "fatura.pdf"
+    ],
+    "recipients": [
+      "x@fis.fissio.app"
+    ]
+  }
+}

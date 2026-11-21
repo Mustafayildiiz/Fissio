@@ -37,6 +37,9 @@ class ApiException implements Exception {
 
   /// Aynı dijital fatura (ETTN / VKN_FaturaNo) hesapta zaten ekli (`POST|PUT /expenses` 409).
   bool get duplicateDocument => status == 409 && code == 'duplicate_document';
+
+  /// Aynı sipariş + aynı belge türü hesapta zaten var.
+  bool get duplicateOrder => status == 409 && code == 'duplicate_order';
   @override
   String toString() => message;
 }
@@ -103,7 +106,8 @@ class DeviceSession {
   );
 }
 
-/// `POST /expenses/bulk` yanıtı: fiş başına sonuç (created | skipped | error).
+/// `POST /expenses/bulk` yanıtı: fiş başına sonuç (created | skipped | merged | error). `merged`: resmi fatura sunucuda
+/// mevcut bir ön özet kaydına birleştirildi (id = hedef kayıt).
 class BulkItemResult {
   final int index;
   final String clientUid;
@@ -111,7 +115,39 @@ class BulkItemResult {
   final int? id;
   final String? error;
   const BulkItemResult(this.index, this.clientUid, this.status, this.id, this.error);
-  bool get ok => status == 'created' || status == 'skipped';
+  bool get ok => status == 'created' || status == 'skipped' || status == 'merged';
+}
+
+/// `GET /inbound-address`: kullanıcıya özel e-posta yönlendirme adresi ve son aktarım durumu. [enabled] false ise sunucuda
+/// özellik yapılandırılmamıştır (INBOUND_EMAIL_DOMAIN boş): diğer alanlar boştur ve arayüz adımı/sihirbazı gizler.
+class InboundAddress {
+  final bool enabled;
+  final String address;
+  final int? profileId;
+
+  /// Son başarılı aktarım (fiş oluştu / birleşti / mükerrer); henüz yoksa null.
+  final DateTime? lastReceivedAt;
+  final String? lastStatus;
+  const InboundAddress({this.enabled = false, this.address = '', this.profileId, this.lastReceivedAt, this.lastStatus});
+
+  /// Aktarım çalışıyor mu: en az bir e-posta işlenmiş.
+  bool get active => enabled && lastReceivedAt != null;
+
+  factory InboundAddress.fromJson(Map<String, dynamic> j) => InboundAddress(
+    enabled: (j['enabled'] as bool?) ?? false,
+    address: (j['address'] as String?) ?? '',
+    profileId: (j['profile_id'] as num?)?.toInt(),
+    lastReceivedAt: j['last_received_at'] == null ? null : DateTime.tryParse(j['last_received_at'] as String)?.toLocal(),
+    lastStatus: j['last_status'] as String?,
+  );
+}
+
+/// Gmail yönlendirme onayı (`GET /inbound-address/confirmation`): kod ve (varsa, yalnızca Google'a ait) onay bağlantısı.
+class ForwardingConfirmation {
+  final String code;
+  final String? link;
+  final DateTime? receivedAt;
+  const ForwardingConfirmation(this.code, this.link, this.receivedAt);
 }
 
 class BulkResponse {
@@ -338,6 +374,8 @@ class ApiClient {
       'last_profile': 'Son profil silinemez.',
       'conflict': 'Fiş başka bir cihazda değiştirilmiş.',
       'duplicate_document': 'Bu dijital fatura zaten eklenmiş.',
+      'duplicate_order': 'Bu sipariş zaten eklenmiş.',
+      'document_locked': 'Bu kayıt zaten başka bir resmi faturaya bağlı; üzerine yeni belge yazılamaz.',
     };
     if (code != null && byCode.containsKey(code)) return byCode[code]!;
     const map = {
@@ -580,6 +618,32 @@ class ApiClient {
           as Map<String, dynamic>;
 
   Future<void> deleteBudget(int id) => _send('DELETE', _expense, '/budgets/$id');
+
+  // --- E-posta ile otomatik fiş aktarımı ---
+
+  /// Kullanıcıya özel yönlendirme adresi (yoksa sunucu üretir). Özellik kapalıysa `enabled: false`.
+  Future<InboundAddress> inboundAddress() async =>
+      InboundAddress.fromJson(await _send('GET', _expense, '/inbound-address') as Map<String, dynamic>);
+
+  /// Aktarılan fişlerin düşeceği profil (null = en eski/varsayılan profil).
+  Future<InboundAddress> setInboundProfile(int? profileId) async => InboundAddress.fromJson(
+    await _send('PUT', _expense, '/inbound-address', body: {'profile_id': profileId ?? 0}) as Map<String, dynamic>,
+  );
+
+  /// Adresi yeniler (eski adres hemen geçersiz olur).
+  Future<InboundAddress> rotateInboundAddress() async =>
+      InboundAddress.fromJson(await _send('POST', _expense, '/inbound-address/rotate') as Map<String, dynamic>);
+
+  /// Son 24 saatteki Gmail yönlendirme onayı; bekleyen yoksa null.
+  Future<ForwardingConfirmation?> forwardingConfirmation() async {
+    final j = await _send('GET', _expense, '/inbound-address/confirmation');
+    if (j is! Map<String, dynamic>) return null;
+    return ForwardingConfirmation(
+      (j['code'] as String?) ?? '',
+      j['link'] as String?,
+      j['received_at'] == null ? null : DateTime.tryParse(j['received_at'] as String)?.toLocal(),
+    );
+  }
 
   // --- Fiş fotoğrafları (hesaba bağlı, sunucuda saklanır) ---
   /// Bir fişe fotoğraf yükler (tekrarlanan `file` alanı); yeni görsel kimliklerini döner.

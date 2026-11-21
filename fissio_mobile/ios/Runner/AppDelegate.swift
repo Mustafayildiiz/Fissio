@@ -25,9 +25,10 @@ import UserNotifications
     registerShareChannel(engineBridge.pluginRegistry)
   }
 
-  // MARK: - Dijital fiş (PDF)
+  // MARK: - Dijital fiş (PDF / .eml / HTML)
 
-  /// Başka uygulamadan açılan PDF (Dosyalar, Mail, WhatsApp "Birlikte aç"): uygulama önbelleğine kopyalanır ve yerel yol
+  /// Başka uygulamadan açılan PDF, .eml e-posta ya da HTML sipariş özeti (Dosyalar, Mail, WhatsApp "Birlikte aç"): uygulama
+  /// önbelleğine KAYNAĞIN UZANTISIYLA kopyalanır (Dart tarafı dosyayı uzantısına göre ayrıştırır) ve yerel yol
   /// Dart'a iletilir. Dosya hiçbir yere gönderilmez. DİKKAT: Share Extension (Paylaş sayfasında görünme) Xcode hedefi
   /// gerektirir ve burada YOK; "Birlikte aç" Info.plist CFBundleDocumentTypes ile çalışır. Windows'ta derlenip doğrulanamaz.
   override func application(
@@ -35,7 +36,7 @@ import UserNotifications
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
-    if url.isFileURL, url.pathExtension.lowercased() == "pdf", let path = copyToCache(url) {
+    if url.isFileURL, Self.sharedExtensions.contains(url.pathExtension.lowercased()), let path = copyToCache(url) {
       if let ch = shareChannel {
         ch.invokeMethod("onFile", arguments: path)
       } else {
@@ -46,13 +47,17 @@ import UserNotifications
     return super.application(app, open: url, options: options)
   }
 
+  /// Kabul edilen uzantılar (Info.plist CFBundleDocumentTypes ile aynı küme); `htm` → `html` olarak saklanır.
+  private static let sharedExtensions: Set<String> = ["pdf", "eml", "html", "htm"]
+
   private func copyToCache(_ url: URL) -> String? {
     let scoped = url.startAccessingSecurityScopedResource()
     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
     guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 20 * 1024 * 1024 else { return nil }
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shared", isDirectory: true)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let dest = dir.appendingPathComponent("pdf_\(Int(Date().timeIntervalSince1970 * 1000)).pdf")
+    let ext = url.pathExtension.lowercased() == "htm" ? "html" : url.pathExtension.lowercased()
+    let dest = dir.appendingPathComponent("shared_\(Int(Date().timeIntervalSince1970 * 1000)).\(ext)")
     do {
       try FileManager.default.copyItem(at: url, to: dest)
       return dest.path

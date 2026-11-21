@@ -40,7 +40,7 @@
             <!-- Flutter'in varsayılan derin bağlantı işleme kapalı: aksi halde sıcak açılışta fissio://scan, '/' rotasına (ikinci SplashPage) çevrilir. -->
             <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
             <!-- Hızlı eylemler (HER renk girişinde aynı filtreler olmalı: yalnızca seçili renk etkindir, diğerleri devre dışıdır):
-             fissio://scan = kamerayla tara, fissio://import-digital = dijital fiş/PDF ekle, application/pdf SEND/VIEW =
+             fissio://scan = kamerayla tara, fissio://import-digital = dijital fiş/PDF ekle, application/pdf, message/rfc822 (.eml) ve text/html SEND/VIEW =
              başka uygulamadan "Paylaş → Fissio". test/android_manifest_test.dart bu eşitliği doğrular. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
@@ -58,12 +58,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity>
 
@@ -92,12 +96,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherGreen" android:targetActivity=".MainActivity"
@@ -124,12 +132,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherDarkred" android:targetActivity=".MainActivity"
@@ -156,12 +168,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherBlue" android:targetActivity=".MainActivity"
@@ -188,12 +204,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherGraphite" android:targetActivity=".MainActivity"
@@ -220,12 +240,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherInk" android:targetActivity=".MainActivity"
@@ -252,12 +276,16 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
 

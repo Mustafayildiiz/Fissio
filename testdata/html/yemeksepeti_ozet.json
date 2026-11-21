@@ -1,0 +1,10 @@
+{
+  "name": "yemeksepeti_ozet",
+  "note": "Yemeksepeti sipariş özeti: gizli preheader, takip pikseli, altbilgi/sosyal medya atılır, tablo hücreleri tek satır.",
+  "html": "<html><head><title>Siparişiniz alındı</title><style>.x{color:red}</style></head><body><div style=\"display:none;font-size:0\">Siparişinizin özeti burada</div><table><tr><td><img src=\"https://track.example/p.gif\" width=\"1\" height=\"1\"></td></tr><tr><td><h2>Siparişin için teşekkürler!</h2></td></tr><tr><td>Restoran</td><td>Köşebaşı Döner</td></tr><tr><td>Sipariş No</td><td>YS-4F7A91C2</td></tr><tr><td>Sipariş Tarihi</td><td>14.11.2026 13:05</td></tr><tr><td>1 x Tavuk Döner Porsiyon</td><td>185,00 TL</td></tr><tr><td>1 x Ayran</td><td>25,00 TL</td></tr><tr><td>Teslimat Ücreti</td><td>0,00 TL</td></tr><tr><td><b>Toplam</b></td><td><b>210,00 TL</b></td></tr></table><p>Bizi takip edin: <a href=\"https://facebook.com/yemeksepeti\">Facebook</a> | <a href=\"#\">Instagram</a></p><p>Abonelikten çık | Gizlilik Politikası</p><p>&copy; 2026 Yemek Sepeti. Tüm hakları saklıdır.</p><script>var a=1;</script></body></html>",
+  "expect": {
+    "text": "Siparişin için teşekkürler!\nRestoran Köşebaşı Döner\nSipariş No YS-4F7A91C2\nSipariş Tarihi 14.11.2026 13:05\n1 x Tavuk Döner Porsiyon 185,00 TL\n1 x Ayran 25,00 TL\nTeslimat Ücreti 0,00 TL\nToplam 210,00 TL",
+    "order_id": "YS-4F7A91C2",
+    "document_no": ""
+  }
+}

@@ -11,21 +11,27 @@ import '../theme.dart';
 import '../widgets.dart';
 import 'receipt_form_page.dart';
 
-/// PDF seçer ve yerel dosya yolunu döner (iptal = null). Testlerde değiştirilebilir.
+/// Dijital fiş dosyası (PDF, .eml e-posta ya da HTML) seçer ve yerel dosya yolunu döner (iptal = null). Testlerde değiştirilebilir.
+/// (Ad tarihsel: önceleri yalnızca PDF'ti; [AppState.readDigitalReceipt] dosyayı uzantısına göre ayrıştırır.)
 typedef PdfPicker = Future<String?> Function();
 
 const _maxPdfBytes = 20 * 1024 * 1024;
 
-/// Cihazdan `.pdf` seçer. `content://` gibi dosya yolu olmayan kaynaklar geçici dosyaya kopyalanır.
+/// Seçilebilen dijital fiş uzantıları (Android/iOS paylaşım hedefleriyle aynı küme).
+const kDigitalExtensions = ['pdf', 'eml', 'html', 'htm'];
+
+/// Cihazdan `.pdf` / `.eml` / `.html` seçer. `content://` gibi dosya yolu olmayan kaynaklar geçici dosyaya (aynı uzantıyla) kopyalanır.
 Future<String?> pickPdfFile() async {
-  final f = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['pdf']);
+  final f = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: kDigitalExtensions);
   if (f == null) return null;
   final len = await f.length();
-  if (len != null && len > _maxPdfBytes) throw ApiException('PDF çok büyük (en fazla 20 MB).');
+  if (len != null && len > _maxPdfBytes) throw ApiException('Dosya çok büyük (en fazla 20 MB).');
   final path = f.path;
   if (path != null) return path;
   final dir = await getTemporaryDirectory();
-  final file = File('${dir.path}/fissio_import_${DateTime.now().millisecondsSinceEpoch}.pdf');
+  final dot = f.name.lastIndexOf('.');
+  final ext = dot >= 0 ? f.name.substring(dot + 1).toLowerCase() : 'pdf';
+  final file = File('${dir.path}/fissio_import_${DateTime.now().millisecondsSinceEpoch}.${kDigitalExtensions.contains(ext) ? ext : 'pdf'}');
   await file.writeAsBytes(await f.readAsBytes(), flush: true);
   return file.path;
 }

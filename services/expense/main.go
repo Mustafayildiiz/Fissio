@@ -50,7 +50,7 @@ func main() {
 		authURL = "http://auth:9090"
 	}
 
-	h := &handler{db: db, ocrFactory: scan.NewOcrEngineFactoryFromEnv()}
+	h := &handler{db: db, ocrFactory: scan.NewOcrEngineFactoryFromEnv(), inbound: inboundConfigFromEnv()}
 	// Iptal edilen oturum (cikis, uzaktan cikis, hesap silme) en gec 10 sn icinde reddedilir.
 	sessions := newSessionChecker(authURL, internalToken, 10*time.Second)
 	r := buildRouterWith(h, verifier, sessions.alive)
@@ -108,7 +108,14 @@ func buildRouterWith(h *handler, v accessVerifier, alive func(sid string, userID
 		c.JSON(http.StatusOK, gin.H{"service": "expense", "status": "ok", "time": time.Now().UTC()})
 	})
 
+	// Harici posta yonlendiricisinin webhook'u: JWT yok, X-Webhook-Secret ile korunur (bkz. inbound.go).
+	r.POST("/webhooks/inbound-email", h.inboundEmail)
+
 	api := r.Group("/", authMiddlewareWith(v, alive))
+	api.GET("/inbound-address", h.getInboundAddress)
+	api.PUT("/inbound-address", h.putInboundAddress)
+	api.POST("/inbound-address/rotate", h.rotateInboundAddress)
+	api.GET("/inbound-address/confirmation", h.getForwardingConfirmation)
 	api.GET("/profiles", h.listProfiles)
 	api.POST("/profiles", h.createProfile)
 	api.PUT("/profiles/:id", h.renameProfile)

@@ -196,6 +196,15 @@ Bugün kalemler fişin JSONB alanında `{name, amount, category_id}` olarak duru
 - [ ] Yaklaşan bitişler listesi ve hatırlatma bildirimleri (tekrarlayan gider hatırlatma altyapısı `planReminders` yeniden kullanılır)
 - [ ] Fiş fotoğrafı garanti belgesi olarak kolay erişim (fiş detayında "garanti" filtresi)
 
+### Faz 15: Çok kanallı dijital fiş, akıllı birleştirme ve e-posta aktarımı (uygulandı)
+Dijital fiş yalnızca PDF değildi; Yemeksepeti/Trendyol/Google Play/Spotify gibi platformlar HTML e-posta gövdesinde sipariş özeti, günler sonra e-Arşiv PDF'i yollar.
+- [x] HTML → temiz metin (Go `internal/digital` otorite, Dart ikizi), "İlet" önsözü temizliği, `.eml`/MIME ayrıştırma (PDF > HTML > düz metin; zip içi PDF), ortak altın vektörler (`testdata/`)
+- [x] `order_id` + türetilmiş `has_official_invoice` (`document_no`'dan); mükerrer reddi (409 `duplicate_order`), ön özet + resmi fatura birleştirme (`DecideMerge`: sunucuda `POST /expenses`, `/expenses/bulk`, webhook; cihazda aynı karar), aynı gün iki sipariş asla birleşmez
+- [x] Kullanıcıya özel yönlendirme adresi + `POST /webhooks/inbound-email` (`X-Webhook-Secret`), Gmail onay kodu yakalama (fiş değildir), alias başına limit, hesap silme temizliği
+- [x] Android/iOS paylaşım hedefleri: PDF + `.eml` + HTML; offline-first cihaz içi işleme
+- [x] Hibrit onboarding: ilk açılışta opsiyonel e-posta adımı (yalnızca senkron açık + sunucuda yapılandırılmışsa); Ayarlar'da iki bağımsız rehber (Uygulama Rehberi / E-Posta Kurulum Sihirbazı) + "Yeni" rozeti + ana sayfa kartı
+- [ ] Gerçek bir GİB e-Arşiv PDF'iyle sunucu PDF okuma doğrulaması (CID/ToUnicode fontlar), gerçek MTA/Cloudflare Email Worker ve gerçek Gmail onay maili ile uçtan uca deneme, cihazda `.eml` paylaşım teslimi
+
 ### Diğer açık işler
 - [ ] iOS ana ekran widget hedefi (Xcode, App Group, gece yarısı timeline yenilemesi; kaynak `ios/FissioWidget/` hazır)
 - [ ] Release derlemesinin https üzerinden gerçek cihazda doğrulanması (Caddy + güvenilir sertifika, `--dart-define=API_BASE=https://...`)

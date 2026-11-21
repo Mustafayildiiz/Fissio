@@ -24,6 +24,15 @@ Future<bool> Function(Uri uri) mailLauncher = (uri) async {
   }
 };
 
+/// Harici bir bağlantıyı (ör. Gmail yönlendirme onayı) tarayıcıda açar; açılamazsa false. Testlerde değiştirilebilir.
+Future<bool> Function(Uri uri) externalLinkLauncher = (uri) async {
+  try {
+    return await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    return false;
+  }
+};
+
 Future<void> Function(String text) clipboardWriter =
     (text) => Clipboard.setData(ClipboardData(text: text));
 
