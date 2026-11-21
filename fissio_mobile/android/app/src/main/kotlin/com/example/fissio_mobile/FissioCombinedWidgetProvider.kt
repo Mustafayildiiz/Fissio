@@ -16,9 +16,9 @@ class FissioCombinedWidgetProvider : HomeWidgetProvider() {
         appWidgetIds.forEach { id ->
             val views = try {
                 RemoteViews(context.packageName, R.layout.widget_combined).apply {
-                    WidgetTheming.applyBackground(this, R.id.widget_root, style)
-                    WidgetTheming.applyButton(this, R.id.widget_scan, R.id.widget_scan_icon, R.id.widget_scan_label, style)
-                    WidgetTheming.applyButton(this, R.id.widget_digital, R.id.widget_digital_icon, R.id.widget_digital_label, style)
+                    WidgetTheming.applyBackground(context, this, R.id.widget_root, style)
+                    WidgetTheming.applyButton(context, this, R.id.widget_scan, R.id.widget_scan_icon, R.id.widget_scan_label, style)
+                    WidgetTheming.applyButton(context, this, R.id.widget_digital, R.id.widget_digital_icon, R.id.widget_digital_label, style)
                     setOnClickPendingIntent(R.id.widget_root, WidgetTheming.launchIntent(context, null, 20))
                     setOnClickPendingIntent(R.id.widget_scan, WidgetTheming.launchIntent(context, WidgetTheming.SCAN_URI, 21))
                     setOnClickPendingIntent(R.id.widget_digital, WidgetTheming.launchIntent(context, WidgetTheming.IMPORT_URI, 22))

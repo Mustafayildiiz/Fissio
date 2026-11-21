@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
@@ -20,15 +21,40 @@ import android.appwidget.AppWidgetManager
  *
  *  - system: layout'taki `@color/widget_*` renkleri (values / values-night) aynen; telefonun açık/koyu teması izlenir.
  *  - light / dark: sabit açık / koyu zemin ve yazı rengi.
- *  - brand: zemin = marka rengi (API 31+ `setBackgroundTintList`; daha eskide sabit kırmızı yedek), yazı beyaz, düğme
- *    beyaz zeminde marka renkli.
+ *  - brand: marka rengine göre AÇIK ve KOYU palet (Dart yazar: `fissio_widget_brand_day` / `fissio_widget_brand_night`,
+ *    `#bg|#ink|#mute|#btnBg|#btnFg`). Açık palet: zemin = marka rengi; koyu palet: koyu yüzey + marka renkli düğme.
+ *    Gün/gece API 31+'da ana ekran (host) tarafından ÇİZİM anında çözülür (`setColorInt` / `setColorStateList` gün/gece
+ *    çifti): uygulama kapalıyken telefon temayı değiştirse bile widget doğru renge geçer. API 31 altında palet bu
+ *    çizimde `uiMode`'a göre seçilir (bir sonraki güncellemede yenilenir; zemin köşesi kare olur: eski sürümlerde
+ *    RemoteViews tint desteği yok).
  */
 object WidgetTheming {
     enum class Theme { SYSTEM, LIGHT, DARK, BRAND }
 
-    class Style(val theme: Theme, val accent: Int)
+    /** Marka paleti: zemin, yazı, soluk yazı, düğme zemini, düğme yazı/ikon rengi. */
+    class Palette(val bg: Int, val ink: Int, val mute: Int, val btnBg: Int, val btnFg: Int)
+
+    class Style(val theme: Theme, val accent: Int, val day: Palette, val night: Palette) {
+        /** API 31 altında: bu çizimde geçerli palet (telefonun gece modu). */
+        fun current(context: Context): Palette {
+            val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+            return if (night) this.night else day
+        }
+    }
 
     private const val DEFAULT_ACCENT = "#FFEC3013"
+
+    /** `#bg|#ink|#mute|#btnBg|#btnFg`; eksik/bozuksa null. */
+    private fun parsePalette(raw: String?): Palette? {
+        if (raw == null) return null
+        return try {
+            val p = raw.split("|").map { Color.parseColor(it.trim()) }
+            if (p.size == 5) Palette(p[0], p[1], p[2], p[3], p[4]) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     fun read(prefs: SharedPreferences): Style {
         val theme = when (prefs.getString("fissio_widget_theme", null)) {
@@ -42,11 +68,19 @@ object WidgetTheming {
         } catch (e: Exception) {
             Color.parseColor(DEFAULT_ACCENT)
         }
-        return Style(theme, accent)
+        // Dart paleti yazmadıysa (eski sürüm verisi) marka rengi + varsayılan koyu yüzeyle türetilir.
+        val day = parsePalette(prefs.getString("fissio_widget_brand_day", null))
+            ?: Palette(accent, Color.WHITE, Color.parseColor("#CCFFFFFF"), Color.WHITE, accent)
+        val night = parsePalette(prefs.getString("fissio_widget_brand_night", null))
+            ?: Palette(
+                Color.parseColor("#FF1F1D1C"), Color.parseColor("#FFF3F2F2"), Color.parseColor("#FF9B9797"),
+                accent, Color.WHITE,
+            )
+        return Style(theme, accent, day, night)
     }
 
     /** Widget zemini (köşeleri yuvarlak). */
-    fun applyBackground(views: RemoteViews, rootId: Int, style: Style) {
+    fun applyBackground(context: Context, views: RemoteViews, rootId: Int, style: Style) {
         when (style.theme) {
             Theme.SYSTEM -> views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg)
             Theme.LIGHT -> views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_light)
@@ -54,9 +88,15 @@ object WidgetTheming {
             Theme.BRAND -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_tint)
-                    views.setColorStateList(rootId, "setBackgroundTintList", ColorStateList.valueOf(style.accent))
+                    // Gün/gece çifti: host çizim anında telefonun gece moduna göre seçer.
+                    views.setColorStateList(
+                        rootId,
+                        "setBackgroundTintList",
+                        ColorStateList.valueOf(style.day.bg),
+                        ColorStateList.valueOf(style.night.bg),
+                    )
                 } else {
-                    views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_brand)
+                    views.setInt(rootId, "setBackgroundColor", style.current(context).bg)
                 }
             }
         }
@@ -68,17 +108,43 @@ object WidgetTheming {
             Theme.SYSTEM -> return
             Theme.LIGHT -> if (mute) R.color.widget_light_mute else R.color.widget_light_ink
             Theme.DARK -> if (mute) R.color.widget_dark_mute else R.color.widget_dark_ink
-            Theme.BRAND -> if (mute) R.color.widget_brand_mute else R.color.widget_brand_ink
+            Theme.BRAND -> {
+                val day = if (mute) style.day.mute else style.day.ink
+                val night = if (mute) style.night.mute else style.night.ink
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    views.setColorInt(textId, "setTextColor", day, night)
+                } else {
+                    val p = style.current(context)
+                    views.setTextColor(textId, if (mute) p.mute else p.ink)
+                }
+                return
+            }
         }
         views.setTextColor(textId, context.getColor(res))
     }
 
-    /** Eylem düğmesi: system/light/dark'ta marka renkli (layout varsayılanı), brand'de beyaz zeminde marka renkli yazı. */
-    fun applyButton(views: RemoteViews, buttonId: Int, iconId: Int, labelId: Int, style: Style) {
+    /**
+     * Eylem düğmesi: system/light/dark'ta marka renkli (layout varsayılanı). brand'de palete göre: açık palet = açık
+     * zemin + marka renkli yazı/ikon; koyu palet = marka renkli zemin + beyaz (ya da koyu) yazı/ikon.
+     */
+    fun applyButton(context: Context, views: RemoteViews, buttonId: Int, iconId: Int, labelId: Int, style: Style) {
         if (style.theme != Theme.BRAND) return
         views.setInt(buttonId, "setBackgroundResource", R.drawable.widget_btn_inverse)
-        views.setTextColor(labelId, style.accent)
-        views.setInt(iconId, "setColorFilter", style.accent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            views.setColorStateList(
+                buttonId,
+                "setBackgroundTintList",
+                ColorStateList.valueOf(style.day.btnBg),
+                ColorStateList.valueOf(style.night.btnBg),
+            )
+            views.setColorInt(labelId, "setTextColor", style.day.btnFg, style.night.btnFg)
+            views.setColorInt(iconId, "setColorFilter", style.day.btnFg, style.night.btnFg)
+        } else {
+            val p = style.current(context)
+            views.setInt(buttonId, "setBackgroundColor", p.btnBg)
+            views.setTextColor(labelId, p.btnFg)
+            views.setInt(iconId, "setColorFilter", p.btnFg)
+        }
     }
 
     /**

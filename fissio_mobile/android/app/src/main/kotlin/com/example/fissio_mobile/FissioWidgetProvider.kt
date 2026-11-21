@@ -68,12 +68,12 @@ class FissioWidgetProvider : HomeWidgetProvider() {
         val style = WidgetTheming.read(widgetData)
 
         return RemoteViews(context.packageName, R.layout.fissio_widget).apply {
-            WidgetTheming.applyBackground(this, R.id.widget_root, style)
+            WidgetTheming.applyBackground(context, this, R.id.widget_root, style)
             WidgetTheming.applyText(context, this, R.id.widget_title, style, mute = true)
             WidgetTheming.applyText(context, this, R.id.widget_total, style, mute = false)
             WidgetTheming.applyText(context, this, R.id.widget_subtitle, style, mute = true)
-            WidgetTheming.applyButton(this, R.id.widget_scan, R.id.widget_scan_icon, R.id.widget_scan_label, style)
-            WidgetTheming.applyButton(this, R.id.widget_digital, R.id.widget_digital_icon, R.id.widget_digital_label, style)
+            WidgetTheming.applyButton(context, this, R.id.widget_scan, R.id.widget_scan_icon, R.id.widget_scan_label, style)
+            WidgetTheming.applyButton(context, this, R.id.widget_digital, R.id.widget_digital_icon, R.id.widget_digital_label, style)
             when {
                 !hasData -> {
                     setTextViewText(R.id.widget_total, context.getString(R.string.widget_empty_total))

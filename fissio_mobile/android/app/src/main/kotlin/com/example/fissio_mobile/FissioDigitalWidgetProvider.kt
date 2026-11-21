@@ -16,8 +16,8 @@ class FissioDigitalWidgetProvider : HomeWidgetProvider() {
         appWidgetIds.forEach { id ->
             val views = try {
                 RemoteViews(context.packageName, R.layout.widget_digital).apply {
-                    WidgetTheming.applyBackground(this, R.id.widget_root, style)
-                    WidgetTheming.applyButton(this, R.id.widget_action, R.id.widget_action_icon, R.id.widget_action_label, style)
+                    WidgetTheming.applyBackground(context, this, R.id.widget_root, style)
+                    WidgetTheming.applyButton(context, this, R.id.widget_action, R.id.widget_action_icon, R.id.widget_action_label, style)
                     val open = WidgetTheming.launchIntent(context, WidgetTheming.IMPORT_URI, 12)
                     setOnClickPendingIntent(R.id.widget_root, open)
                     setOnClickPendingIntent(R.id.widget_action, open)

@@ -106,8 +106,8 @@ components:
         enabled: { type: boolean, description: 'false = sunucuda e-posta aktarımı yapılandırılmamış (INBOUND_EMAIL_DOMAIN boş); diğer alanlar yok' }
         address: { type: string, example: 'k3j9x2m4q7p1w8zt@fis.fissio.app', description: Kullanıcıya özel, tahmin edilemez yönlendirme adresi }
         profile_id: { type: integer, format: int64, description: 'Aktarılan fişlerin düşeceği profil; yoksa en eski/varsayılan profil' }
-        last_received_at: { type: string, format: date-time, description: Son başarılı aktarım (fiş oluştu/birleşti/mükerrer) }
-        last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden>' }
+        last_received_at: { type: string, format: date-time, description: 'Alias geçerli olan SON mailin zamanı (fiş oluşsun, yok sayılsın, mükerrer çıksın ya da hata alsın); Gmail yönlendirme onay maili sayılmaz' }
+        last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden> (paused, rate_limited, unknown_category, gmail_confirmation_unreadable, …) | failed:<kod> (ör. failed:internal; ayrıntı geçmişteki reason alanında)' }
         paused: { type: boolean, description: 'true = aktarım duraklatıldı; gelen mailler fişe dönüşmez (alan yoksa false)' }
     Item:
       type: object
@@ -893,7 +893,7 @@ paths:
         (INBOUND_WEBHOOK_SECRET) ile korunur. Gövde: JSON (`to|recipient|envelope.to`, `from`, `subject`, `text`, `html`,
         `raw` / `raw_base64` (MIME), `attachments[{filename, content_type, content_base64}]`), multipart/form-data
         (Mailgun `recipient`, `body-mime`, `body-html`, `body-plain`; SendGrid `email`, `envelope`) ya da ham
-        `message/rfc822` (`?rcpt=`). Alias, ZARF alıcısından çözülür (otomatik yönlendirmede `To:` kullanıcının kendi
+        `message/rfc822` (`?rcpt=`; büyük ekli mailler için önerilen yol — hazır Cloudflare Worker: docs/cloudflare-email-worker.js). Alias, ZARF alıcısından çözülür (otomatik yönlendirmede `To:` kullanıcının kendi
         adresidir), sonra `Delivered-To`/`X-Original-To`/`To`/`Cc`. Kaynak önceliği: UBL-TR `.xml` eki (e-Fatura/e-Arşiv;
         zip içindeki dahil; satıcı, tarih, ödenecek tutar ve kalemler yapılandırılmış okunur) > PDF eki (metin katmanı) >
         HTML gövde (platform sipariş tablolarından ad/adet/tutar kalemleri dahil) > düz metin; mail tek fiş olarak

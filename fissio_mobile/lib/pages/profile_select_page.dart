@@ -9,6 +9,7 @@ import '../profile_avatar.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'avatar_picker.dart';
+import 'profile_edit_page.dart';
 import 'shell_page.dart';
 
 /// "Profil seçin": 2'li kare kartlar ve kesikli çerçeveli "Yeni profil" kartı.
@@ -65,22 +66,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
     }
   }
 
-  Future<void> _renameDialog(Profile p) async {
-    final name = await showTextPrompt(
-      context,
-      title: 'Profili yeniden adlandır',
-      hint: 'Örn: Ev, İş, Kişisel',
-      initial: p.name,
-      confirmLabel: 'Kaydet',
-    );
-    if (name != null && name.isNotEmpty) {
-      try {
-        await appState.renameProfile(p.id, name);
-      } on ApiException catch (e) {
-        if (mounted) showError(context, e.message);
-      }
-    }
-  }
+  Future<void> _renameDialog(Profile p) => renameProfileWithDialog(context, p);
 
   Future<void> _deleteProfile(Profile p) async {
     final ok = await showConfirmDialog(

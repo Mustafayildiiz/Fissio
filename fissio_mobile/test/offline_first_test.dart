@@ -55,6 +55,7 @@ Future<Harness> _reopenOffline(Harness h) async {
   final h2 = Harness(backend: h.backend, prefs: h.prefs, local: h.local, clock: () => _now);
   h.backend.offline = true;
   expect(await h2.app.restoreSession(), isTrue);
+  await h2.app.restoreSettled;
   return h2;
 }
 
@@ -137,6 +138,7 @@ void main() {
     // Uygulama yine çevrimdışı yeniden açılır: bekleyen değişiklikler diskten gelir.
     final h3 = Harness(backend: h.backend, prefs: h.prefs, local: h.local, clock: () => _now);
     expect(await h3.app.restoreSession(), isTrue);
+    await h3.app.restoreSettled;
     expectMergedView(h3);
 
     // Bağlantı geldi: hepsi buluta gider, kuyruk boşalır.

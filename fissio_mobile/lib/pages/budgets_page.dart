@@ -12,7 +12,12 @@ import 'budget_widgets.dart';
 /// Aktif profil için kategori bazlı aylık bütçe limitleri: bir kategoriye dokunup limit gir (boş bırakmak
 /// limiti kaldırır). Harcama limitin %80'ine ulaşınca çubuk sarı, aşınca kırmızı olur ve bildirim gelir.
 class BudgetsPage extends StatelessWidget {
-  const BudgetsPage({super.key});
+  const BudgetsPage({super.key, this.app});
+
+  /// Testlerde enjekte edilir; varsayılan global [appState].
+  final AppState? app;
+
+  AppState get _app => app ?? appState;
 
   Future<void> _edit(BuildContext context, int categoryId, String name, double? current) async {
     final raw = await showTextPrompt(
@@ -26,7 +31,7 @@ class BudgetsPage extends StatelessWidget {
     if (raw == null || !context.mounted) return;
     try {
       if (raw.isEmpty) {
-        await appState.removeBudget(categoryId);
+        await _app.removeBudget(categoryId);
         return;
       }
       final v = parseMoneyInput(raw);
@@ -34,10 +39,25 @@ class BudgetsPage extends StatelessWidget {
         showMessage(context, 'Geçerli bir tutar girin.');
         return;
       }
-      final first = appState.budgets.isEmpty;
-      await appState.setBudget(categoryId, (v * 100).round() / 100);
+      final first = _app.budgets.isEmpty;
+      final limit = (v * 100).round() / 100;
+      try {
+        await _app.setBudget(categoryId, limit);
+      } on BudgetLimitException catch (e) {
+        // Kategori limitleri toplam bütçeyi aşıyor: toplamı eşitlemeyi öner; toplamı düşürmek ise doğrudan reddedilir.
+        if (e.check.issue != BudgetLimitIssue.categoriesExceedTotal) rethrow;
+        if (!context.mounted) return;
+        final raise = await showConfirmDialog(
+          context,
+          title: 'Toplam bütçe yetersiz',
+          message: '${e.message}\n\nToplam aylık bütçeyi ${fmtMoney(e.check.suggestedTotal)} olarak yükseltelim mi?',
+          confirmLabel: 'Toplamı yükselt',
+        );
+        if (!raise || !context.mounted) return;
+        await _app.setBudget(categoryId, limit, raiseTotal: true);
+      }
       // İlk limitte bildirim izni istenir (eşik uyarıları için).
-      if (first) await appState.notifier.requestPermission();
+      if (first) await _app.notifier.requestPermission();
     } on ApiException catch (e) {
       if (context.mounted) showError(context, e.message);
     }
@@ -49,9 +69,9 @@ class BudgetsPage extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: appState,
+          listenable: _app,
           builder: (context, _) {
-            final progress = {for (final p in appState.budgetProgress) p.budget.categoryId: p};
+            final progress = {for (final p in _app.budgetProgress) p.budget.categoryId: p};
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -63,7 +83,7 @@ class BudgetsPage extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
                   child: Text(
-                    '${appState.profileName ?? 'Profil'} için her ay geçerli. Harcama limitin %$kBudgetWarnPercent\'ine '
+                    '${_app.profileName ?? 'Profil'} için her ay geçerli. Harcama limitin %$kBudgetWarnPercent\'ine '
                     'ulaşınca çubuk sarı, aşınca kırmızı olur ve bildirim alırsın.',
                     style: FissioText.body(c, size: 14, color: c.mute).copyWith(height: 1.4),
                   ),
@@ -100,7 +120,7 @@ class BudgetsPage extends StatelessWidget {
                       const SizedBox(height: 8),
                       GroupedCard(
                         children: [
-                          for (final cat in appState.categories)
+                          for (final cat in _app.categories)
                             if (progress[cat.id] case final p?)
                               BudgetRow(
                                 key: ValueKey('budget-${cat.id}'),

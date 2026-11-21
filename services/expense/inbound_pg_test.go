@@ -218,6 +218,10 @@ func TestPGInboundPauseResume(t *testing.T) {
 	if rotated.Paused || rotated.Address == addr {
 		t.Fatalf("rotate: %+v", rotated)
 	}
+	// Yeni adres henüz mail almadı: mobil sihirbaz "bağlı" saymasın, kurulum rehberi yeniden açılsın.
+	if rotated.LastReceivedAt != nil || rotated.LastStatus != nil {
+		t.Fatalf("rotate son aktarım durumunu sıfırlamalı: %+v", rotated)
+	}
 	if n := len(e.list(alice, "")); n != 2 {
 		t.Fatalf("fişler korunmalı: %d", n)
 	}

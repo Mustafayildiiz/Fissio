@@ -95,4 +95,48 @@ void main() {
       expect(t.scaffoldBackgroundColor, c.bg);
     }
   });
+
+  group('ana sayfa kartları', () {
+    test('varsayılan: tüm kartlar görünür, varsayılan sırada', () async {
+      final c = ThemeController(store: _MemStore());
+      await c.load();
+      expect(c.homeCardOrder, HomeCard.values);
+      expect(c.hiddenHomeCards, isEmpty);
+      expect(c.visibleHomeCards, HomeCard.values);
+    });
+
+    test('sıra ve gizleme kaydedilir, yeniden yüklenir; gizli kart görünür listeden çıkar', () async {
+      final store = _MemStore();
+      final a = ThemeController(store: store);
+      await a.setHomeCardOrder([HomeCard.topReceipt, HomeCard.budgets, HomeCard.categories, HomeCard.fixed]);
+      await a.setHomeCardHidden(HomeCard.budgets, true);
+      expect(a.visibleHomeCards, [HomeCard.topReceipt, HomeCard.categories, HomeCard.fixed]);
+
+      final b = ThemeController(store: store);
+      await b.load();
+      expect(b.homeCardOrder, [HomeCard.topReceipt, HomeCard.budgets, HomeCard.categories, HomeCard.fixed]);
+      expect(b.hiddenHomeCards, {HomeCard.budgets});
+      await b.setHomeCardHidden(HomeCard.budgets, false);
+      expect(b.hiddenHomeCards, isEmpty);
+      await b.resetHomeCards();
+      expect(b.homeCardOrder, HomeCard.values);
+    });
+
+    test('bozuk/eksik kayıt: bilinmeyen kimlik atılır, tekrar elenir, eksik kart sona eklenir', () async {
+      final store = _MemStore()
+        ..map[ThemeController.homeCardsKey] = 'fixed,uzay,fixed,topReceipt'
+        ..map[ThemeController.homeHiddenKey] = 'uzay,categories';
+      final c = ThemeController(store: store);
+      await c.load();
+      expect(c.homeCardOrder, [HomeCard.fixed, HomeCard.topReceipt, HomeCard.categories, HomeCard.budgets]);
+      expect(c.hiddenHomeCards, {HomeCard.categories});
+    });
+
+    test('depolama bozukken varsayılanlarla devam eder', () async {
+      final c = ThemeController(store: _BrokenStore());
+      await c.load();
+      await c.setHomeCardHidden(HomeCard.fixed, true); // yazma hatası yutulur
+      expect(c.hiddenHomeCards, {HomeCard.fixed});
+    });
+  });
 }

@@ -79,6 +79,7 @@ void main() {
       'Yabancı para birimli (USD/EUR) veya desteklenmeyen faturalar.',
       'Adresim spam listesine düştü ya da gereksiz reklam mailleri geliyor.',
       'E-posta aktarımını tamamen kapatmak istiyorum.',
+      'Gönderim 5.7.1 / "teslim edilemedi" hatası aldım.',
     ];
     for (final t in titles) {
       await tester.ensureVisible(find.text(t));
@@ -97,6 +98,7 @@ void main() {
     await open(titles[3], 'yalnızca TL');
     await open(titles[4], 'Aktarımı duraklat');
     await open(titles[5], 'Yönlendirme ve POP/IMAP');
+    await open(titles[6], 'güvenlik politikası');
   });
 
   testWidgets('Hakkımızda/Gizlilik bölümleri çizilir', (tester) async {

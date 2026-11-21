@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../stats.dart';
 import '../theme.dart';
+import '../theme_controller.dart';
 import '../widgets.dart';
 import 'budget_widgets.dart';
 import 'email_import_card.dart';
+import 'home_layout_page.dart';
 import 'receipt_detail_page.dart';
 import 'settings_page.dart';
 
@@ -35,13 +37,58 @@ class _HomePageState extends State<HomePage> {
     unawaited(appState.loadInbound());
   }
 
+  /// Bir özet kartının satırları (kartlar arası boşluğu çağıran ekler: gizlenen kart boşluk bırakmaz).
+  List<Widget> _cardWidgets(BuildContext context, HomeCard card, HomeStats stats) {
+    final c = context.c;
+    switch (card) {
+      case HomeCard.categories:
+        return [
+          SectionLabel(
+            'Kategoriler',
+            trailing: widget.onOpenAll == null
+                ? null
+                : GestureDetector(
+                    onTap: widget.onOpenAll,
+                    child: Text(
+                      'Tümü',
+                      style: FissioText.body(c, size: 14, weight: FontWeight.w600, color: c.accentInk),
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          _CategoriesCard(stats: stats, onOpenCategory: widget.onOpenCategory),
+        ];
+      case HomeCard.budgets:
+        return const [BudgetsSection()];
+      case HomeCard.fixed:
+        return const [FixedExpensesSection()];
+      case HomeCard.topReceipt:
+        return [
+          const SectionLabel('En yüksek fiş'),
+          const SizedBox(height: 8),
+          if (stats.highest == null)
+            const _EmptyCard()
+          else
+            ReceiptTile(
+              card: true,
+              expense: stats.highest!,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: stats.highest!.id)),
+              ),
+            ),
+        ];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    // Kart sırası/gizleme [themeController]'da: `const` çocuk tuzağı yüzünden ikisi birlikte dinlenir.
     return ListenableBuilder(
-      listenable: appState,
+      listenable: Listenable.merge([appState, themeController]),
       builder: (context, _) {
         final stats = computeHomeStats(appState.expenses, _period);
+        final cards = themeController.visibleHomeCards;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -73,48 +120,26 @@ class _HomePageState extends State<HomePage> {
                     ],
                     const EmailImportCard(),
                     _TotalBlock(stats: stats, period: _period),
-                    const Rule2(margin: EdgeInsets.symmetric(vertical: 20)),
-                    SectionLabel(
-                      'Kategoriler',
-                      trailing: widget.onOpenAll == null
-                          ? null
-                          : GestureDetector(
-                              onTap: widget.onOpenAll,
-                              child: Text(
-                                'Tümü',
-                                style: FissioText.body(
-                                  c,
-                                  size: 14,
-                                  weight: FontWeight.w600,
-                                  color: c.accentInk,
-                                ),
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 8),
-                    _CategoriesCard(
-                      stats: stats,
-                      onOpenCategory: widget.onOpenCategory,
-                    ),
-                    const SizedBox(height: 22),
-                    const BudgetsSection(),
-                    const SizedBox(height: 22),
-                    const FixedExpensesSection(),
-                    const SizedBox(height: 22),
-                    const SectionLabel('En yüksek fiş'),
-                    const SizedBox(height: 8),
-                    if (stats.highest == null)
-                      const _EmptyCard()
-                    else
-                      ReceiptTile(
-                        card: true,
-                        expense: stats.highest!,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ReceiptDetailPage(id: stats.highest!.id),
+                    if (cards.isNotEmpty) const Rule2(margin: EdgeInsets.symmetric(vertical: 20)),
+                    for (var i = 0; i < cards.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 22),
+                      ..._cardWidgets(context, cards[i], stats),
+                    ],
+                    if (themeController.hiddenHomeCards.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      Center(
+                        child: TextButton(
+                          key: const ValueKey('home-hidden-cards'),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const HomeLayoutPage()),
+                          ),
+                          child: Text(
+                            'Gizlenen kartları yönet (${themeController.hiddenHomeCards.length})',
+                            style: FissioText.body(c, size: 13, weight: FontWeight.w600, color: c.mute),
                           ),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),

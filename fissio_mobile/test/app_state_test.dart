@@ -105,6 +105,7 @@ void main() {
       final offlineApp = Harness(backend: h.backend, prefs: h.prefs, local: h.local);
       h.backend.offline = true;
       expect(await offlineApp.app.restoreSession(), isTrue);
+      await offlineApp.app.restoreSettled;
       expect(offlineApp.app.email, 'ali@x.co');
       expect(offlineApp.app.profiles.map((p) => p.name), containsAll(['Kişisel', 'Ev']), reason: 'önbellekten');
 
@@ -112,8 +113,14 @@ void main() {
       h.backend.offline = false;
       h.backend.revokeSession(h.app.api.token!);
       final revoked = Harness(backend: h.backend, prefs: h.prefs, local: h.local);
-      expect(await revoked.app.restoreSession(), isFalse);
+      var expired = 0;
+      revoked.app.onSessionExpired = () => expired++;
+      // Önbellek varken açılış doğrulamayı beklemez (hemen true); iptal arka planda anlaşılır ve giriş ekranına dönülür.
+      expect(await revoked.app.restoreSession(), isTrue, reason: 'önbellekli veri hemen gösterilir');
+      await revoked.app.restoreSettled;
+      await Future<void>.delayed(Duration.zero);
       expect(revoked.app.loggedIn, isFalse);
+      expect(expired, 1, reason: 'oturum düşünce giriş ekranına dönüş bildirilir');
       expect(h.prefs.data.containsKey('auth_tokens'), isFalse);
     });
 

@@ -48,6 +48,14 @@ String brandKeyOf(Color color) {
 /// koyu temada açık bir dolguya çevrilir.
 const double _kDarkAccentLuminance = .08;
 
+/// Neredeyse siyah renk (Mürekkep/Grafit): koyu zeminde göze batmaz, ayrıca açılaştırılır.
+bool isNearBlack(Color c) => c.computeLuminance() < _kDarkAccentLuminance;
+
+/// Uygulama içi logo karesinin koyu temada gösterilen rengi: neredeyse siyah marka renkleri koyu zeminde kaybolur,
+/// bu yüzden hafifçe açılır (fişin beyaz çizimi bozulmaz). Diğer renkler ve açık tema aynen.
+Color logoTileColorFor(Color c, Brightness brightness) =>
+    brightness == Brightness.dark && isNearBlack(c) ? Color.lerp(c, Colors.white, .22)! : c;
+
 /// Silme / hata için sabit kırmızı (vurgu rengine bağlı değildir).
 const kDanger = Color(0xFFD92D20);
 const kDangerDark = Color(0xFFFF6B5E);
@@ -304,13 +312,6 @@ ThemeData buildTheme({
         borderRadius: BorderRadius.vertical(top: Radius.circular(kRadius + 6)),
       ),
     ),
-    snackBarTheme: SnackBarThemeData(
-      backgroundColor: c.ink,
-      contentTextStyle: TextStyle(fontFamily: fontFamily, color: c.bg),
-      actionTextColor: c.accentInk,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSm)),
-    ),
     inputDecorationTheme: InputDecorationTheme(
       hintStyle: TextStyle(color: c.mute),
       border: InputBorder.none,
@@ -360,6 +361,19 @@ String fmtDate(DateTime d) =>
 
 String isoDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// Tarih seçicilerin `lastDate` değeri: cihazın YEREL gününün başlangıcı (gelecek tarih seçilemez; yarının fişi
+/// özet dönemlerinden düşüp bütçe/widget ay toplamında kalıyordu).
+DateTime pickableToday([DateTime? now]) {
+  final n = now ?? DateTime.now();
+  return DateTime(n.year, n.month, n.day);
+}
+
+/// `showDatePicker`, `initialDate > lastDate` ise assert eder (OCR tarihi now+2 güne kadar izin verir): içeri çeker.
+DateTime clampPickerDate(DateTime d, DateTime last) {
+  final day = DateTime(d.year, d.month, d.day);
+  return day.isAfter(last) ? last : day;
+}
 
 const kMonthNames = [
   'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',

@@ -10,7 +10,7 @@ import '../theme.dart';
 import '../widgets.dart';
 import '../profile_avatar.dart';
 import 'account_widgets.dart';
-import 'avatar_picker.dart';
+import 'profile_edit_page.dart';
 import 'auth_page.dart';
 import 'data_management_page.dart';
 import 'email_import_card.dart' show EmailImportSettingsRow;
@@ -92,6 +92,53 @@ class SettingsPage extends StatelessWidget {
 
   void _push(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  /// Profil kartına dokununca: tek akış — profil değiştir ya da aktif profilin adını/avatarını düzenle.
+  void _profileActions(BuildContext context) {
+    final c = context.c;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(appState.displayName, style: FissioText.title(c, size: 22)),
+              const SizedBox(height: 12),
+              GroupedCard(
+                children: [
+                  ListRow(
+                    key: const ValueKey('profile-switch'),
+                    leading: IconTile(LucideIcons.repeat, size: 30, radius: 8),
+                    title: 'Profil değiştir',
+                    chevron: true,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _push(context, const ProfileSelectPage());
+                    },
+                  ),
+                  if (appState.activeProfile != null)
+                    ListRow(
+                      key: const ValueKey('profile-edit'),
+                      leading: IconTile(LucideIcons.pencil, size: 30, radius: 8),
+                      title: 'Profili düzenle',
+                      subtitle: 'Ad ve profil fotoğrafı',
+                      chevron: true,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _push(context, const ProfileEditPage());
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _toAuth(BuildContext context) {
@@ -186,7 +233,8 @@ class SettingsPage extends StatelessWidget {
                     GroupedCard(
                       children: [
                         InkWell(
-                          onTap: () => _push(context, const ProfileSelectPage()),
+                          key: const ValueKey('settings-profile-card'),
+                          onTap: () => _profileActions(context),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             child: Row(
@@ -220,20 +268,6 @@ class SettingsPage extends StatelessWidget {
                               ],
                             ),
                           ),
-                        ),
-                        if (appState.activeProfile != null)
-                          ListRow(
-                            key: const ValueKey('change-avatar'),
-                            leading: Icon(LucideIcons.camera, size: 20, color: c.accentInk),
-                            title: 'Profil fotoğrafını değiştir',
-                            titleColor: c.accentInk,
-                            onTap: () => changeProfileAvatar(context, appState.activeProfile!),
-                          ),
-                        ListRow(
-                          leading: Icon(LucideIcons.repeat, size: 20, color: c.accentInk),
-                          title: 'Profil değiştir',
-                          titleColor: c.accentInk,
-                          onTap: () => _push(context, const ProfileSelectPage()),
                         ),
                       ],
                     ),

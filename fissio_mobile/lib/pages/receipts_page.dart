@@ -112,7 +112,7 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
     final r = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2000),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
+      lastDate: pickableToday(),
       initialDateRange: _range,
     );
     if (r != null) setState(() => _range = r);
@@ -269,10 +269,9 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
 
     return RefreshIndicator(
       onRefresh: appState.refresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
-        children: [
+      // Lazy: yalnızca görünen satırlar kurulur (binlerce fişte sekme geçişi/yeniden çizim takılmasın).
+      child: Builder(builder: (context) {
+        final rows = <Widget>[
           if (appState.error != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -290,8 +289,14 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
               ),
             ),
           ...children,
-        ],
-      ),
+        ];
+        return ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
+          itemCount: rows.length,
+          itemBuilder: (context, i) => rows[i],
+        );
+      }),
     );
   }
 }

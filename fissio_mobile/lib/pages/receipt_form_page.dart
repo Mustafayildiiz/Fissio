@@ -154,11 +154,12 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   }
 
   Future<void> _pickDate() async {
+    final last = pickableToday();
     final d = await showDatePicker(
       context: context,
-      initialDate: _draft.date,
+      initialDate: clampPickerDate(_draft.date, last),
       firstDate: DateTime(2000),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
+      lastDate: last,
     );
     if (d != null) setState(() => _draft.date = d);
   }

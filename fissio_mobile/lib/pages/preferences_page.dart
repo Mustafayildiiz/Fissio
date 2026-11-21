@@ -7,8 +7,9 @@ import '../ocr/ocr_engine.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets.dart';
+import 'home_layout_page.dart';
 
-/// Tercihler: tema modu, vurgu rengi ve fiş detayı görünümü. Değişiklikler anında uygulanır.
+/// Tercihler: üç grupta — Görünüm ve Tema, Tarama ve OCR Motoru, Bildirimler ve Genel. Değişiklikler anında uygulanır.
 class PreferencesPage extends StatelessWidget {
   const PreferencesPage({super.key});
 
@@ -32,6 +33,7 @@ class PreferencesPage extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
                   children: [
+                    const _GroupHeader('Görünüm ve Tema', first: true),
                     const SectionLabel('Tema'),
                     const SizedBox(height: 8),
                     SegmentedControl<ThemeMode>(
@@ -115,7 +117,7 @@ class PreferencesPage extends StatelessWidget {
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const _GroupHeader('Tarama ve OCR Motoru'),
                     const SectionLabel('Fiş okuma'),
                     const SizedBox(height: 8),
                     SegmentedControl<OcrMode>(
@@ -192,6 +194,36 @@ class PreferencesPage extends StatelessWidget {
                           ],
                         ),
                       ],
+                    ),
+                    const _GroupHeader('Bildirimler ve Genel'),
+                    const SectionLabel('Özet ekranı'),
+                    const SizedBox(height: 8),
+                    GroupedCard(
+                      children: [
+                        ListRow(
+                          key: const ValueKey('home-layout-row'),
+                          leading: IconTile(LucideIcons.layoutDashboard, size: 30, radius: 8),
+                          title: 'Özet Görünümünü Özelleştir',
+                          subtitle: themeController.hiddenHomeCards.isEmpty
+                              ? 'Kartları aç/kapat ve sırala'
+                              : '${themeController.hiddenHomeCards.length} kart gizli',
+                          chevron: true,
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const HomeLayoutPage()),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Bildirimler'),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        'Bütçe uyarıları (%80 / %100) ve sabit gider hatırlatıcıları yerel bildirim olarak gelir. '
+                        'Bildirim iznini telefonun uygulama ayarlarından yönetebilirsin.',
+                        key: const ValueKey('prefs-notifications-note'),
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
                     ),
                   ],
                 ),
@@ -342,6 +374,33 @@ class _Swatch extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Tercihler'in üç ana grubunun belirgin başlığı (altındaki `SectionLabel`'lardan büyük, ince çizgi + üst boşluk).
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader(this.title, {this.first = false});
+  final String title;
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(4, first ? 0 : 34, 4, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            key: ValueKey('prefs-group-$title'),
+            style: FissioText.title(c).copyWith(fontSize: 19),
+          ),
+          const SizedBox(height: 6),
+          Container(height: 2, width: 28, color: c.accent),
+        ],
       ),
     );
   }

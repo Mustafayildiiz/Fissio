@@ -24,7 +24,7 @@ class _ShellPageState extends State<ShellPage> {
   @override
   void initState() {
     super.initState();
-    appState.refresh();
+    appState.refreshIfStale(); // oturum açma/açılış yenilemesinin hemen ardından yinelenmez
     // Ana ekran widget'ından gelen "hızlı tara" (fissio://scan): soğuk açılışta bekleyen istek ilk karede,
     // sıcak açılışta (arka plandan) geldiği anda tüketilir.
     deepLinks.addListener(_maybeOpenDeepLink);

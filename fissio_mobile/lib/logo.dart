@@ -116,19 +116,21 @@ class FissioLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (color != null) return _build(color!);
+    if (color != null) return _build(context, color!);
     final ctrl = controller ?? themeController;
-    return ListenableBuilder(listenable: ctrl, builder: (context, _) => _build(ctrl.logoColor));
+    return ListenableBuilder(listenable: ctrl, builder: (context, _) => _build(context, ctrl.logoColor));
   }
 
-  Widget _build(Color c) => Semantics(
+  /// Karenin rengi aktif tema parlaklığına göre uyarlanır ([logoTileColorFor]); seçilen marka rengi değişince ve
+  /// açık/koyu geçişinde logo anında güncellenir.
+  Widget _build(BuildContext context, Color c) => Semantics(
     label: 'Fissio logosu',
     image: true,
     child: SizedBox(
       key: const ValueKey('fissio-logo'),
       width: size,
       height: size,
-      child: CustomPaint(painter: FissioLogoPainter(color: c)),
+      child: CustomPaint(painter: FissioLogoPainter(color: logoTileColorFor(c, Theme.of(context).brightness))),
     ),
   );
 }

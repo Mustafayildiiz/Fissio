@@ -83,6 +83,15 @@ const _emailFaqs = <_Faq>[
         '2) Gmail\'de Ayarlar → Tüm ayarlar → Yönlendirme ve POP/IMAP bölümünde Fissio adresini kaldır ve Filtreler ve engellenen '
         'adresler sekmesinden Fissio\'ya ileten filtreyi sil. Daha önce kaydedilen fişlerin korunur.',
   ),
+  _Faq(
+    'Gönderim 5.7.1 / "teslim edilemedi" hatası aldım.',
+    'Bu bildirim Gmail/Outlook\'un maili Fissio adresine iletemediğini söyler. Sık nedenler: 1) Mail ya da ekleri çok büyük '
+        '(yaklaşık 15 MB üstü) — ek boyutunu küçült ya da PDF\'i mail uygulamasından "Paylaş → Fissio ile ekle" ile cihazda işle. '
+        '2) Adres yenilendi ya da yazım hatası var — E-Posta ile Otomatik Fiş Aktarımı ekranındaki güncel adresi kopyalayıp '
+        'yönlendirmeyi yeniden ekle. 3) Mail sağlayıcın güvenlik politikası nedeniyle dış adrese iletmeyi engelliyor '
+        '(kurumsal hesaplarda sık) — kişisel bir hesaptan ilet. Büyük mail kaydedilmez ama kendi kutunda durur; '
+        'fişini yine Paylaş → Fissio ile ekleyebilirsin.',
+  ),
 ];
 
 /// Destek ekranı: tek dokunuşla e-posta, SSS ve sürüm bilgisi.

@@ -288,11 +288,20 @@ class AppState extends ChangeNotifier {
 
   /// Kayıtlı oturumu yükler. Ağ yoksa son bilinen hesapla çevrimdışı devam eder; sunucu oturumu geçersiz
   /// sayarsa (iptal/silinmiş hesap) yerel oturum temizlenir.
+  ///
+  /// Hız: yalıtılmış okumalar paralel yapılır. Cihazda önceki oturumdan profil + kategori önbelleği varsa oturum
+  /// doğrulaması ([ApiClient.me]) ve yenileme beklenmeden `true` döner (önbellekli veri hemen görünür); doğrulama arka
+  /// planda sürer ve oturum geçersizse [onSessionExpired] ile giriş ekranına döner. İlk kurulumda (önbellek yok)
+  /// profil listesi boş kalmasın diye doğrulama + yenileme eskisi gibi beklenir.
   Future<bool> restoreSession() async {
-    await _wipeLegacy();
     try {
-      final rawTokens = await _read(_tokensKey);
-      final rawUser = await _read(_userKey);
+      final r = await Future.wait<String?>([
+        _read(_tokensKey),
+        _read(_userKey),
+        _wipeLegacy().then<String?>((_) => null),
+      ]);
+      final rawTokens = r[0];
+      final rawUser = r[1];
       if (rawTokens == null || rawUser == null) return false;
       final t = jsonDecode(rawTokens) as Map<String, dynamic>;
       user = AuthUser.fromJson(jsonDecode(rawUser) as Map<String, dynamic>);
@@ -309,6 +318,11 @@ class AppState extends ChangeNotifier {
       return false;
     }
     await _loadAccountState();
+    if (_snap.profiles.isNotEmpty && _snap.categories.isNotEmpty) {
+      _startBackground();
+      restoreSettled = _verifySessionThenRefresh();
+      return true;
+    }
     try {
       user = await api.me();
       await _write(_userKey, jsonEncode(user!.toJson()));
@@ -327,6 +341,32 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  /// Önbellekle açılan oturumun arka plan işi (doğrulama + ilk yenileme) bitince tamamlanır; uygulama akışı beklemez,
+  /// testler ve "yenilenmiş veriyi bekle" ihtiyacı için vardır. Önbelleksiz açılışta zaten tamamlanmış durumdadır.
+  Future<void> restoreSettled = Future.value();
+
+  /// Önbellekle açılan oturumun arka plan doğrulaması + ilk yenileme + kuyruk boşaltma.
+  Future<void> _verifySessionThenRefresh() async {
+    final uid = user?.id;
+    try {
+      final u = await api.me();
+      if (user?.id != uid) return;
+      user = u;
+      await _write(_userKey, jsonEncode(u.toJson()));
+    } on ApiException catch (e) {
+      if (!e.network) {
+        // Oturum sunucuca geçersiz: yerel oturum temizlenir ve giriş ekranına dönülür (api zaten başlatmış olabilir:
+        // tek seferlik).
+        _handleUnauthorized();
+        return;
+      }
+      // çevrimdışı: yerel veriyle devam
+    }
+    if (!loggedIn) return;
+    await refresh();
+    unawaited(flushNow());
+  }
+
   /// Hesap açıldı/giriş yapıldı: önceki hesabın tüm bellek durumu sıfırlanır.
   Future<void> _signIn(AuthSession s) async {
     _resetMemory();
@@ -342,15 +382,24 @@ class AppState extends ChangeNotifier {
 
   Future<void> _loadAccountState() async {
     final id = user!.id;
-    _snap = await _local.load(id);
+    // Birbirinden bağımsız disk/depolama okumaları paralel.
+    final r = await Future.wait<Object?>([
+      _local.load(id),
+      _read(_syncKey(id)),
+      _read(_emailCardKey(id)),
+      _read(_emailSeenKey(id)),
+      _read(_activeKey(id)),
+      _read(_alertsKey(id)).then<String?>((v) => v, onError: (_) => null),
+    ]);
+    _snap = r[0] as LocalSnapshot;
     categories = List.of(_snap.categories);
-    _syncEnabled = (await _read(_syncKey(id))) != '0';
-    _emailCardDismissed = (await _read(_emailCardKey(id))) == '1';
-    _emailImportSeen = (await _read(_emailSeenKey(id))) == '1';
-    activeProfileId = await _read(_activeKey(id));
+    _syncEnabled = r[1] != '0';
+    _emailCardDismissed = r[2] == '1';
+    _emailImportSeen = r[3] == '1';
+    activeProfileId = r[4] as String?;
     _alertsSent = {};
     try {
-      final raw = await _read(_alertsKey(id));
+      final raw = r[5] as String?;
       if (raw != null) _alertsSent = {...(jsonDecode(raw) as List).cast<String>()};
     } catch (_) {}
   }
@@ -456,9 +505,15 @@ class AppState extends ChangeNotifier {
     _needsRefresh = false;
   }
 
+  bool _expiring = false;
+
   void _handleUnauthorized() {
-    if (user == null) return;
-    _localSignOut().then((_) => onSessionExpired?.call());
+    if (user == null || _expiring) return;
+    _expiring = true;
+    _localSignOut().then((_) {
+      _expiring = false;
+      onSessionExpired?.call();
+    });
   }
 
   // --- Arka plan: token ön yenileme + çevrimdışı kuyruk ---
@@ -622,8 +677,11 @@ class AppState extends ChangeNotifier {
     try {
       final info = await api.inboundAddress();
       if (user == null) return _inbound;
-      _inbound = info;
-      notifyListeners();
+      // Değişmediyse bildirme: sihirbaz her 5 sn'de yoklar, Özet/Ayarlar gereksiz yeniden çizilmesin.
+      if (_inbound != info) {
+        _inbound = info;
+        notifyListeners();
+      }
     } on ApiException {
       // Çevrimdışı / sunucu hatası: son bilinen değer kalır.
     }
@@ -721,7 +779,45 @@ class AppState extends ChangeNotifier {
 
   // --- Veri yükleme ---
 
-  Future<void> refresh() => _exclusive(_refreshNow);
+  /// Bekleyen (henüz başlamamış) yenileme: ardışık istekler tek yenilemede birleşir. Çalışmakta olan bir yenileme
+  /// birleştirilmez (kayıt/değişiklikten sonra istenen yenileme, değişiklikten ÖNCE başlamış bir yanıta dayanmasın).
+  Future<void>? _refreshPending;
+  Future<void>? _refreshLatest;
+  DateTime? _lastRefreshOkAt;
+
+  Future<void> refresh() {
+    final pending = _refreshPending;
+    if (pending != null) return pending;
+    var started = false;
+    late final Future<void> f;
+    f = _exclusive(() {
+      started = true;
+      _refreshPending = null;
+      return _refreshNow();
+    });
+    if (!started) _refreshPending = f;
+    _refreshLatest = f;
+    f.then<void>(
+      (_) {
+        if (identical(_refreshLatest, f)) _refreshLatest = null;
+      },
+      onError: (Object _) {
+        if (identical(_refreshLatest, f)) _refreshLatest = null;
+      },
+    );
+    return f;
+  }
+
+  /// Kabuk açılışı için: yenileme çalışıyor/bekliyorsa onu bekler, yakın zamanda (varsayılan 20 sn) başarıyla
+  /// tamamlandıysa hiçbir şey yapmaz, aksi halde yeniler. Açılış/oturum açma akışının hemen ardından gelen yinelenen
+  /// tam yenilemeyi (kategori + profil + fiş + bütçe) önler.
+  Future<void> refreshIfStale({Duration maxAge = const Duration(seconds: 20)}) {
+    final active = _refreshLatest;
+    if (active != null) return active;
+    final at = _lastRefreshOkAt;
+    if (at != null && DateTime.now().difference(at) < maxAge) return Future.value();
+    return refresh();
+  }
 
   Future<void> _refreshNow() async {
     if (!loggedIn) return;
@@ -731,9 +827,11 @@ class AppState extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final cats = await api.categories();
-      final ps = await api.profiles();
-      final ex = await _fetchCloudExpenses();
+      // Üç istek birbirinden bağımsız: paralel (artımlı fiş çekiminin kendi içindeki sıra korunur).
+      final res = await Future.wait<Object?>([api.categories(), api.profiles(), _fetchCloudExpenses()]);
+      final cats = res[0] as List<Category>;
+      final ps = res[1] as List<Profile>;
+      final ex = res[2] as ({List<Expense> list, String? syncedAt});
       // Yanıtlar beklenirken hesap değiştiyse (çıkış / başka hesapla giriş) bu veri yeni hesaba yazılmaz.
       if (user?.id != uid) return;
       categories = cats;
@@ -751,6 +849,7 @@ class AppState extends ChangeNotifier {
       await _refreshBudgets(ps);
       await _persistSnapshot();
       offline = false;
+      _lastRefreshOkAt = DateTime.now();
     } on ApiException catch (e) {
       if (e.network) {
         // Bağlantı yok: hata değil, cihazdaki son veriyle çalışma modu (okuma-geçişli önbellek).
@@ -1177,9 +1276,19 @@ class AppState extends ChangeNotifier {
   /// Aktif profil için kategori limitini koyar/günceller. Senkron açık + çevrimiçiyse sunucuya; bağlantı yoksa
   /// (ya da profil henüz sunucuda değilse) cihaz kuyruğuna ([SyncState.pending]); senkron kapalıysa yalnızca
   /// cihaza ([SyncState.localOnly]). Senkron kapalıyken bulutta kayıtlı limit değiştirilemez.
-  Future<void> setBudget(int categoryId, double limit) async {
+  ///
+  /// Tutarlılık kuralı ([checkBudgetLimit]): toplam bütçe kategori toplamından küçük olamaz. Ağdan ÖNCE yerel
+  /// durumda (bekleyen kuyruk dahil) denetlenir, böylece çevrimdışı/yerel yollar da kapsanır; ihlalde
+  /// [BudgetLimitException] atılır. [raiseTotal] true ise kategori limiti için toplam bütçe önce kategori
+  /// toplamına yükseltilir.
+  Future<void> setBudget(int categoryId, double limit, {bool raiseTotal = false}) async {
     final p = activeProfile;
     if (p == null || limit <= 0) return;
+    final check = checkBudgetLimit(budgets: _snap.budgets, profileUid: p.id, categoryId: categoryId, newLimit: limit);
+    if (!check.ok) {
+      if (!raiseTotal || check.issue != BudgetLimitIssue.categoriesExceedTotal) throw BudgetLimitException(check);
+      await setBudget(kTotalBudgetCategoryId, check.suggestedTotal);
+    }
     final name = categoryId == kTotalBudgetCategoryId ? kTotalBudgetName : (_categoryName(categoryId) ?? '');
     final existing = _budgetOf(p.id, categoryId);
     Budget make(SyncState state, {int? serverId, double? lim}) => Budget(

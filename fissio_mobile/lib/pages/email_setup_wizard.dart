@@ -42,6 +42,9 @@ String? emailLastStatusMessage(String? status) => _EmailSetupWizardPageState.las
 /// Onay kodu yoklama aralığı (sihirbaz açıkken); testlerde kısaltılır.
 const kConfirmationPollInterval = Duration(seconds: 5);
 
+/// Bağlantı kurulduktan (en az bir mail işlendikten) sonra yoklama aralığı.
+const kConnectedPollInterval = Duration(seconds: 30);
+
 /// İnteraktif "E-Posta ile Otomatik Fiş Aktarımı" sihirbazı (Ayarlar, ilk açılış onboarding'i "Şimdi Kur" ve ana sayfa kartı).
 ///
 /// Sekme 1 — Tam otomatik: (1) kullanıcıya özel yönlendirme adresi (tek tıkla kopyala), (2) Gmail/Outlook yönlendirme rehberi +
@@ -66,6 +69,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
   int _tab = 0;
   ForwardingConfirmation? _confirmation;
   Timer? _timer;
+  Duration? _rate;
   List<InboundHistoryItem> _history = const [];
   String? _historyStamp;
 
@@ -96,15 +100,23 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
       unawaited(_alignProfile());
       unawaited(_refreshHistory());
       _poll();
-      _timer = Timer.periodic(widget.pollInterval, (_) => _poll());
+      _setPollRate(widget.pollInterval);
     }
+  }
+
+  /// Yoklama aralığı: bağlantı kurulduktan sonra (varsayılan aralıkta) seyrek yoklanır; enjekte edilen test aralığı aynen kalır.
+  void _setPollRate(Duration d) {
+    if (_rate == d && _timer != null) return;
+    _rate = d;
+    _timer?.cancel();
+    _timer = Timer.periodic(d, (_) => _poll());
   }
 
   /// Geçmişi çeker; üst karttaki son aktarım zamanı/durumu da AYNI anda tazelenir (kart `AppState.inbound`'dan okur):
   /// geçmişte görünen bir mail üst kartta eski tarihle kalmasın.
-  Future<void> _refreshHistory() async {
+  Future<void> _refreshHistory({bool reloadInfo = true}) async {
     final list = await _app.loadInboundHistory();
-    await _app.loadInbound();
+    if (reloadInfo) await _app.loadInbound();
     if (!mounted || list == null) return;
     final info = _app.inbound;
     setState(() {
@@ -146,11 +158,18 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     // Aktarım başladıysa (ilk e-posta işlendi) durum satırı da güncellensin.
     await _app.loadInbound();
     if (!mounted) return;
-    setState(() => _confirmation = conf ?? _confirmation);
+    // Yalnız onay kartı değiştiyse yeniden çiz (her yoklamada tüm listeyi kurma).
+    if (conf != null && !_sameConfirmation(conf, _confirmation)) setState(() => _confirmation = conf);
     // Geçmiş yalnız yeni bir aktarım olduğunda (son durum/zaman değişince) yeniden çekilir.
     final info = _app.inbound;
-    if ('${info?.lastReceivedAt?.toIso8601String()}|${info?.lastStatus}' != _historyStamp) await _refreshHistory();
+    if (widget.pollInterval == kConfirmationPollInterval && (info?.active ?? false)) _setPollRate(kConnectedPollInterval);
+    if ('${info?.lastReceivedAt?.toIso8601String()}|${info?.lastStatus}' != _historyStamp) {
+      await _refreshHistory(reloadInfo: false);
+    }
   }
+
+  static bool _sameConfirmation(ForwardingConfirmation a, ForwardingConfirmation? b) =>
+      b != null && a.code == b.code && a.link == b.link && a.receivedAt == b.receivedAt;
 
   Future<void> _copy(String text, String done) async {
     await clipboardWriter(text);
@@ -177,7 +196,9 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     try {
       await _app.rotateInbound();
       if (mounted) {
+        // Yeni adres henüz mail almadı (sunucu son aktarımı sıfırlar): rehber kendiliğinden yeniden açılır; hızlı yoklamaya dön.
         setState(() => _confirmation = null);
+        if (widget.pollInterval == kConfirmationPollInterval) _setPollRate(kConfirmationPollInterval);
         showMessage(context, 'Yeni adres oluşturuldu. Eski adres artık geçersiz.', kind: ToastKind.success);
       }
     } on ApiException catch (e) {
@@ -270,20 +291,45 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
         retry: info == null,
       );
     }
+    // Bağlandıysa (en az bir mail işlendi) uzun kurulum rehberi katlanır; adres kopyalama kısayolu görünür kalır.
+    // Adres yenilenince sunucu son aktarımı sıfırlar → `active` false olur ve rehber yeniden açık gelir.
+    final connected = info.active;
+    final guide = <Widget>[
+      SegmentedControl<int>(
+        key: const ValueKey('wiz-tabs'),
+        items: const [SegmentItem(0, 'Tam Otomatik (Önerilen)'), SegmentItem(1, 'Kurulumsuz Hızlı Kullanım')],
+        value: _tab,
+        onChanged: (v) => setState(() => _tab = v),
+        fontSize: 13,
+      ),
+      const SizedBox(height: 16),
+      if (_tab == 0) ..._autoTab(c, info) else ..._manualTab(c, info),
+    ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
       children: [
         _statusLine(c, info),
         const SizedBox(height: 14),
-        SegmentedControl<int>(
-          key: const ValueKey('wiz-tabs'),
-          items: const [SegmentItem(0, 'Tam Otomatik (Önerilen)'), SegmentItem(1, 'Kurulumsuz Hızlı Kullanım')],
-          value: _tab,
-          onChanged: (v) => setState(() => _tab = v),
-          fontSize: 13,
-        ),
-        const SizedBox(height: 16),
-        if (_tab == 0) ..._autoTab(c, info) else ..._manualTab(c, info),
+        if (connected) ...[
+          _copyBox(c, info.address,
+              copyKey: const ValueKey('wiz-copy-address-compact'),
+              textKey: const ValueKey('wiz-address-compact'),
+              done: 'Adres kopyalandı.'),
+          const SizedBox(height: 10),
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              key: const ValueKey('wiz-guide'),
+              tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+              childrenPadding: const EdgeInsets.only(top: 8),
+              title: Text('Kurulum Rehberi', style: FissioText.body(c, size: 16, weight: FontWeight.w700)),
+              subtitle: Text('Yönlendirme zaten kurulu. Yeniden kurman gerekirse aç.',
+                  style: FissioText.body(c, size: 13, color: c.mute)),
+              children: guide,
+            ),
+          ),
+        ] else
+          ...guide,
         _testCard(c, info),
         _historySection(c),
         const SizedBox(height: 12),

@@ -41,6 +41,37 @@ enum ReceiptStyle { paper, list }
 /// marka rengi (logo/vurgu rengi arka plan olur). Yerel taraf `fissio_widget_theme` değerini adıyla okur.
 enum WidgetTheme { system, light, dark, brand }
 
+/// Özet (ana) ekranın özelleştirilebilir kartları. Toplam bloğu ve e-posta aktarım kartı (kendi yaşam döngüsü var)
+/// listede değildir, her zaman yerinde kalır. Sıra = varsayılan sıra.
+enum HomeCard {
+  categories('Kategoriler'),
+  budgets('Bütçeler'),
+  fixed('Sabit giderler'),
+  topReceipt('En yüksek fiş');
+
+  const HomeCard(this.label);
+  final String label;
+}
+
+/// Kayıtlı sırayı okur: bilinmeyen kimlikleri atar, tekrarları eler, eksik kartları varsayılan sırayla sona ekler.
+List<HomeCard> parseHomeCardOrder(String? raw) {
+  final out = <HomeCard>[];
+  for (final part in (raw ?? '').split(',')) {
+    final c = HomeCard.values.where((e) => e.name == part.trim()).firstOrNull;
+    if (c != null && !out.contains(c)) out.add(c);
+  }
+  for (final c in HomeCard.values) {
+    if (!out.contains(c)) out.add(c);
+  }
+  return out;
+}
+
+/// Gizli kart kümesi (bilinmeyen kimlikler atılır).
+Set<HomeCard> parseHiddenHomeCards(String? raw) => {
+  for (final part in (raw ?? '').split(','))
+    ...HomeCard.values.where((e) => e.name == part.trim()),
+};
+
 /// Kullanıcının görünüm tercihleri: vurgu rengi, tema modu, fiş detay görünümü, uygulama logosu.
 class ThemeController extends ChangeNotifier {
   ThemeController({PrefsStore? store, LauncherIcon? launcherIcon})
@@ -59,6 +90,8 @@ class ThemeController extends ChangeNotifier {
   static const launcherKey = 'pref_launcher_icon';
   static const showOcrEngineKey = 'pref_show_ocr_engine';
   static const widgetThemeKey = 'pref_widget_theme';
+  static const homeCardsKey = 'pref_home_cards';
+  static const homeHiddenKey = 'pref_home_hidden';
 
   /// Sunucu OCR motoru (`OcrEngineFactory` anahtarı); tarama ekranı bunu kullanır.
   String ocrEngine = 'paddleocr';
@@ -68,6 +101,13 @@ class ThemeController extends ChangeNotifier {
 
   /// Ana ekran widget'larının renk teması (tüm widget'lar aynı temayı kullanır).
   WidgetTheme widgetTheme = WidgetTheme.system;
+  /// Özet ekranındaki kartların sırası ve gizli olanlar (yalnızca bu cihazda saklanır).
+  List<HomeCard> homeCardOrder = List.of(HomeCard.values);
+  Set<HomeCard> hiddenHomeCards = {};
+
+  /// Sıralı ve gizlenmemiş kartlar.
+  List<HomeCard> get visibleHomeCards => [for (final c in homeCardOrder) if (!hiddenHomeCards.contains(c)) c];
+
   Color accent = kDefaultAccent;
   ThemeMode themeMode = ThemeMode.system;
   ReceiptStyle receiptStyle = ReceiptStyle.paper;
@@ -114,6 +154,8 @@ class ThemeController extends ChangeNotifier {
       showOcrEngine = (await _store.read(showOcrEngineKey)) != 'false';
       final wt = await _store.read(widgetThemeKey);
       widgetTheme = WidgetTheme.values.firstWhere((x) => x.name == wt, orElse: () => WidgetTheme.system);
+      homeCardOrder = parseHomeCardOrder(await _store.read(homeCardsKey));
+      hiddenHomeCards = parseHiddenHomeCards(await _store.read(homeHiddenKey));
     } catch (_) {
       // Depolama yoksa (test/ilk açılış) varsayılanlar geçerli.
     }
@@ -205,6 +247,28 @@ class ThemeController extends ChangeNotifier {
     widgetTheme = t;
     notifyListeners();
     await _save(widgetThemeKey, t.name);
+  }
+
+  Future<void> setHomeCardOrder(List<HomeCard> order) async {
+    homeCardOrder = parseHomeCardOrder(order.map((c) => c.name).join(','));
+    notifyListeners();
+    await _save(homeCardsKey, homeCardOrder.map((c) => c.name).join(','));
+  }
+
+  Future<void> setHomeCardHidden(HomeCard card, bool hidden) async {
+    hiddenHomeCards = {...hiddenHomeCards}..remove(card);
+    if (hidden) hiddenHomeCards.add(card);
+    notifyListeners();
+    await _save(homeHiddenKey, hiddenHomeCards.map((c) => c.name).join(','));
+  }
+
+  /// Sıra ve gizlemeyi varsayılana döndürür.
+  Future<void> resetHomeCards() async {
+    homeCardOrder = List.of(HomeCard.values);
+    hiddenHomeCards = {};
+    notifyListeners();
+    await _save(homeCardsKey, '');
+    await _save(homeHiddenKey, '');
   }
 
   Future<void> _save(String key, String value) async {

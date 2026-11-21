@@ -143,6 +143,20 @@ class InboundAddress {
   /// Aktarım çalışıyor mu: en az bir e-posta işlenmiş.
   bool get active => enabled && lastReceivedAt != null;
 
+  /// Değer eşitliği: sihirbazın 5 sn'lik yoklaması değişmemiş durumda uygulamayı yeniden çizdirmesin.
+  @override
+  bool operator ==(Object other) =>
+      other is InboundAddress &&
+      other.enabled == enabled &&
+      other.address == address &&
+      other.profileId == profileId &&
+      other.lastReceivedAt == lastReceivedAt &&
+      other.lastStatus == lastStatus &&
+      other.paused == paused;
+
+  @override
+  int get hashCode => Object.hash(enabled, address, profileId, lastReceivedAt, lastStatus, paused);
+
   factory InboundAddress.fromJson(Map<String, dynamic> j) => InboundAddress(
     enabled: (j['enabled'] as bool?) ?? false,
     address: (j['address'] as String?) ?? '',
