@@ -250,7 +250,10 @@ func (h *handler) getForwardingConfirmation(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	out := gin.H{"code": code, "received_at": formatUpdatedAt(at)}
+	out := gin.H{"received_at": formatUpdatedAt(at)}
+	if code != "" { // kodsuz onayda yalnızca link döner
+		out["code"] = code
+	}
 	if link.Valid && link.String != "" {
 		out["link"] = link.String
 	}
@@ -493,8 +496,23 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	}
 
 	// Gmail yönlendirme onayı: fiş DEĞİLDİR; kod/bağlantı saklanır, mobil istemci çeker.
+	// Tutar/fiş ayrıştırmasından ÖNCE çalışır. Ham MIME (kodlu hâliyle) ve konu da kaynak olarak taranır.
 	htmlText := digital.HTMLToText(msg.HTML)
-	if conf, ok := digital.DetectGmailConfirmation(msg.From, msg.Text, htmlText, msg.HTML); ok {
+	extra := []string{msg.Subject, p.Raw}
+	if p.RawBase64 != "" {
+		if b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.RawBase64)); err == nil {
+			extra = append(extra, string(b))
+		}
+	}
+	if conf, ok := digital.DetectGmailConfirmation(msg.From, msg.Text, htmlText, msg.HTML, extra...); ok {
+		if conf.Code == "" && conf.Link == "" {
+			// Google'ın onay göndericisi ama kod/bağlantı okunamadı: fiş olarak denenmez, sessizce atlanır.
+			log.Printf("inbound: user %d: gmail confirmation without readable code/link", userID)
+			h.setInboundStatus(userID, "ignored:gmail_confirmation_unreadable", false)
+			ignored("gmail_confirmation_unreadable")
+			return
+		}
+		log.Printf("inbound: user %d: gmail forwarding confirmation captured (code=%t link=%t)", userID, conf.Code != "", conf.Link != "")
 		if err := h.saveConfirmation(userID, conf); err != nil {
 			serverError(c)
 			return

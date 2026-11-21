@@ -338,8 +338,8 @@ func TestPGInboundGmailConfirmationIsNotAReceipt(t *testing.T) {
 	if c.Code != "123456789" || c.Link != "https://mail-settings.google.com/mail/vf-%5BANGjdJ%5D-abc" {
 		t.Fatalf("onay: %s", b)
 	}
-	// Başka gönderen aynı metni yollarsa onay sayılmaz (sahte onay).
-	st, out = e.mail(u, map[string]any{"from": "evil@example.com", "text": body})
+	// Başka gönderen, Google bağlantısı OLMAYAN sahte "onay" yollarsa onay sayılmaz.
+	st, out = e.mail(u, map[string]any{"from": "evil@example.com", "text": "Onay kodu: 123456789\nhttps://evil.io/mail/vf-abc\nToplam 1,00"})
 	if st != 200 || out["status"] == "confirmation" {
 		t.Fatalf("sahte onay: %d %v", st, out)
 	}
@@ -362,6 +362,57 @@ func TestPGInboundGmailConfirmationIsNotAReceipt(t *testing.T) {
 	}
 	code, b = e.as(u, "GET", "/inbound-address/confirmation", nil)
 	e.want(code, 204, b, "süresi dolmuş onay")
+}
+
+// Türkçe Gmail onay maili ham MIME (quoted-printable, bölünmüş URL) olarak gelir: fiş değil, kod+link saklanır.
+const trGmailConfirmationMIME = "From: =?UTF-8?Q?Gmail_Ekibi?= <forwarding-noreply@google.com>\r\n" +
+	"Subject: =?UTF-8?Q?(#123456789)_Gmail_Y=C3=B6nlendirme_Onay=C4=B1?=\r\n" +
+	"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" +
+	"Onay kodu: 123456789\r\nBa=C4=9Flant=C4=B1: https://mail-settings.google.com/mail/vf-%5BANGjdJBqL1zXh0p9YkE-aBc=\r\n" +
+	"DeFgHi%5D-AbCdEf\r\nToplam 1,00\r\n"
+
+func TestPGInboundGmailConfirmationRawMIME(t *testing.T) {
+	e := newXEnv(t)
+	e.enableInbound()
+	const u = int64(1)
+	const wantLink = "https://mail-settings.google.com/mail/vf-%5BANGjdJBqL1zXh0p9YkE-aBcDeFgHi%5D-AbCdEf"
+	conf := func() (int, map[string]any) {
+		code, b := e.as(u, "GET", "/inbound-address/confirmation", nil)
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		return code, m
+	}
+	if code, _ := conf(); code != 204 {
+		t.Fatalf("başlangıçta 204 beklenir: %d", code)
+	}
+	st, out := e.mail(u, map[string]any{"from": "", "subject": "", "raw": trGmailConfirmationMIME})
+	if st != 200 || out["status"] != "confirmation" {
+		t.Fatalf("%d %v", st, out)
+	}
+	if n := len(e.list(u, "")); n != 0 {
+		t.Fatalf("onay maili fiş olmamalı: %d", n)
+	}
+	if code, m := conf(); code != 200 || m["code"] != "123456789" || m["link"] != wantLink {
+		t.Fatalf("onay: %d %v", code, m)
+	}
+
+	// Kodsuz onay: yalnızca link döner (code alanı yok).
+	linkOnly := "From: forwarding-noreply@google.com\r\nContent-Type: text/plain\r\n\r\nOnaylamak için: https://mail-settings.google.com/mail/vf-%5BA%5D-only\r\n"
+	st, out = e.mail(u, map[string]any{"raw": linkOnly})
+	if st != 200 || out["status"] != "confirmation" {
+		t.Fatalf("%d %v", st, out)
+	}
+	if code, m := conf(); code != 200 || m["link"] != "https://mail-settings.google.com/mail/vf-%5BA%5D-only" {
+		t.Fatalf("kodsuz onay: %d %v", code, m)
+	} else if _, has := m["code"]; has {
+		t.Fatalf("kodsuz onayda code alanı olmamalı: %v", m)
+	}
+
+	// Google göndericisi ama okunamayan içerik: fiş olarak denenmez ("no_amount" değil).
+	st, out = e.mail(u, map[string]any{"from": "forwarding-noreply@google.com", "text": "merhaba"})
+	if st != 200 || out["reason"] != "gmail_confirmation_unreadable" {
+		t.Fatalf("%d %v", st, out)
+	}
 }
 
 func TestPGInboundPDFAttachment(t *testing.T) {

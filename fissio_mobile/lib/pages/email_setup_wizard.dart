@@ -394,28 +394,46 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Onay Kodu Geldi: ${conf.code}',
-                      key: const ValueKey('wiz-confirm-code'), style: FissioText.body(c, size: 17, weight: FontWeight.w800, color: c.accentInk)),
+                  // Kod ve bağlantı ayrı ayrı isteğe bağlıdır (sunucu kodsuz onayda yalnızca link yollar).
+                  if (conf.hasCode)
+                    Text('Onay Kodu Geldi: ${conf.code}',
+                        key: const ValueKey('wiz-confirm-code'), style: FissioText.body(c, size: 17, weight: FontWeight.w800, color: c.accentInk))
+                  else
+                    Text('Gmail Onayı Geldi',
+                        key: const ValueKey('wiz-confirm-title'), style: FissioText.body(c, size: 17, weight: FontWeight.w800, color: c.accentInk)),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      OutlinedButton.icon(
-                        key: const ValueKey('wiz-copy-code'),
-                        onPressed: () => _copy(conf.code, 'Kod kopyalandı.'),
-                        icon: const Icon(LucideIcons.copy, size: 16),
-                        label: const Text('Kodu kopyala'),
-                      ),
-                      if (conf.link != null)
-                        OutlinedButton.icon(
-                          key: const ValueKey('wiz-open-link'),
-                          onPressed: () => _openLink(conf.link!),
-                          icon: const Icon(LucideIcons.externalLink, size: 16),
-                          label: const Text('Onay Bağlantısını Aç'),
-                        ),
-                    ],
-                  ),
+                  if (!conf.hasCode && !conf.hasLink)
+                    Text('Onay maili alındı ancak kod/bağlantı okunamadı. Gmail\'de kodu elle gir ya da yönlendirmeyi yeniden ekle.',
+                        key: const ValueKey('wiz-confirm-empty'), style: FissioText.body(c, size: 14, color: c.mute))
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        if (conf.hasCode)
+                          OutlinedButton.icon(
+                            key: const ValueKey('wiz-copy-code'),
+                            onPressed: () => _copy(conf.code!, 'Kod kopyalandı.'),
+                            icon: const Icon(LucideIcons.copy, size: 16),
+                            label: const Text('Kodu kopyala'),
+                          ),
+                        if (conf.hasLink && conf.hasCode)
+                          OutlinedButton.icon(
+                            key: const ValueKey('wiz-open-link'),
+                            onPressed: () => _openLink(conf.link!),
+                            icon: const Icon(LucideIcons.externalLink, size: 16),
+                            label: const Text('Gmail Yönlendirmesini Onayla'),
+                          )
+                        else if (conf.hasLink)
+                          // Kod yoksa onay yalnızca bu bağlantıyla yapılır: belirgin, doldurulmuş buton.
+                          FilledButton.icon(
+                            key: const ValueKey('wiz-open-link'),
+                            onPressed: () => _openLink(conf.link!),
+                            icon: const Icon(LucideIcons.externalLink, size: 16),
+                            label: const Text('Gmail Yönlendirmesini Onayla'),
+                          ),
+                      ],
+                    ),
                 ],
               ),
             ),

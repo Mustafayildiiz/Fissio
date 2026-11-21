@@ -273,6 +273,43 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    for (final entry in <String, Map<String, dynamic>>{
+      'code alanı yok': {'link': 'https://mail-settings.google.com/mail/vf-%5BA%5D-only', 'received_at': '2026-11-20T20:00:00Z'},
+      'code null': {'code': null, 'link': 'https://mail-settings.google.com/mail/vf-%5BA%5D-only', 'received_at': '2026-11-20T20:00:00Z'},
+      'code boş string': {'code': '', 'link': 'https://mail-settings.google.com/mail/vf-%5BA%5D-only', 'received_at': '2026-11-20T20:00:00Z'},
+    }.entries) {
+      testWidgets('kodsuz onay (${entry.key}) + link: çökmez, "Gmail Yönlendirmesini Onayla" tıklanır', (tester) async {
+        _tall(tester);
+        final h = await _signedIn(tester);
+        h.backend.user(_email).confirmation = entry.value;
+        await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
+        await _flush(tester, h);
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const ValueKey('wiz-confirm-card')), findsOneWidget);
+        expect(find.byKey(const ValueKey('wiz-confirm-code')), findsNothing);
+        expect(find.byKey(const ValueKey('wiz-copy-code')), findsNothing);
+        expect(find.textContaining('Onay Kodu Geldi'), findsNothing);
+        expect(find.text('Gmail Yönlendirmesini Onayla'), findsOneWidget);
+        await tester.ensureVisible(find.byKey(const ValueKey('wiz-open-link')));
+        await tester.tap(find.byKey(const ValueKey('wiz-open-link')));
+        await tester.pump();
+        expect(opened.single.toString(), 'https://mail-settings.google.com/mail/vf-%5BA%5D-only');
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('ne kod ne link: kart çökmeden açıklama gösterir', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      h.backend.user(_email).confirmation = {'received_at': '2026-11-20T20:00:00Z'};
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
+      await _flush(tester, h);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('wiz-confirm-empty')), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-open-link')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('Kurulumsuz sekmesi: İlet (Forward) ve Paylaş → Fissio adımları', (tester) async {
       _tall(tester);
       final h = await _signedIn(tester);

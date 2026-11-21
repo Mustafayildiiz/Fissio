@@ -142,12 +142,23 @@ class InboundAddress {
   );
 }
 
-/// Gmail yönlendirme onayı (`GET /inbound-address/confirmation`): kod ve (varsa, yalnızca Google'a ait) onay bağlantısı.
+/// Gmail yönlendirme onayı (`GET /inbound-address/confirmation`): kod ve/veya (yalnızca Google'a ait) onay bağlantısı.
+/// İkisi de isteğe bağlıdır: sunucu kodsuz onayda `code` alanını hiç göndermez; boş/null değerler `null` sayılır.
 class ForwardingConfirmation {
-  final String code;
+  final String? code;
   final String? link;
   final DateTime? receivedAt;
-  const ForwardingConfirmation(this.code, this.link, this.receivedAt);
+  ForwardingConfirmation(String? code, String? link, this.receivedAt)
+      : code = _blankToNull(code),
+        link = _blankToNull(link);
+
+  bool get hasCode => code != null;
+  bool get hasLink => link != null;
+
+  static String? _blankToNull(String? s) {
+    final t = s?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
 }
 
 class BulkResponse {
@@ -638,10 +649,13 @@ class ApiClient {
   Future<ForwardingConfirmation?> forwardingConfirmation() async {
     final j = await _send('GET', _expense, '/inbound-address/confirmation');
     if (j is! Map<String, dynamic>) return null;
+    final code = j['code'];
+    final link = j['link'];
+    final at = j['received_at'];
     return ForwardingConfirmation(
-      (j['code'] as String?) ?? '',
-      j['link'] as String?,
-      j['received_at'] == null ? null : DateTime.tryParse(j['received_at'] as String)?.toLocal(),
+      code is String ? code : null,
+      link is String ? link : null,
+      at is String ? DateTime.tryParse(at)?.toLocal() : null,
     );
   }
 

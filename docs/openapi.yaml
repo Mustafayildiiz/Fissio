@@ -828,7 +828,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  code: { type: string, example: '123456789' }
+                  code: { type: string, example: '123456789', description: Onay kodu (mailde kod yoksa alan yok) }
                   link: { type: string, description: Doğrulanmış Google onay bağlantısı (yoksa alan yok) }
                   received_at: { type: string, format: date-time }
         '204': { description: Bekleyen onay yok }
