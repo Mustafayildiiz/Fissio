@@ -54,16 +54,30 @@ class ProfileAvatar extends StatelessWidget {
 }
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, this.onboarding});
+  const SettingsPage({super.key, this.onboarding, this.inboundApp});
 
   /// Verilmezse global [onboardingController] (testlerde sahte depolu denetleyici verilir).
   final OnboardingController? onboarding;
 
+  /// Rehberin e-posta adımı kararı (ve adımdaki adres/sihirbaz) için kullanılan durum; verilmezse global [appState].
+  final AppState? inboundApp;
+
   /// Tanıtımı açar; bitince/kapatınca Ayarlar'a döner, satır görünür kalır.
-  void _openOnboarding(BuildContext context, OnboardingController ctrl) {
-    Navigator.of(context).push(
+  ///
+  /// E-posta ile otomatik aktarım kullanılabilirse (bulut senkronu açık + sunucuda yapılandırılmış) rehber 4. adım olarak
+  /// onu da anlatır. Karar sayfa AÇILMADAN verilir (adım sayacı akış boyunca sabit kalır; bkz. `AccountReadyPage`).
+  Future<void> _openOnboarding(BuildContext context, OnboardingController ctrl) async {
+    final a = inboundApp ?? appState;
+    await a.loadInbound();
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => OnboardingPage(controller: ctrl, signUp: false),
+        builder: (_) => OnboardingPage(
+          controller: ctrl,
+          signUp: false,
+          includeEmailStep: a.emailImportAvailable,
+          app: inboundApp,
+        ),
       ),
     );
   }
@@ -228,6 +242,8 @@ class SettingsPage extends StatelessWidget {
                       children: [
                         _row(context, LucideIcons.slidersHorizontal, 'Tercihler',
                             () => _push(context, const PreferencesPage())),
+                        // Bağımsız interaktif rehber: e-posta kurulum sihirbazı. "Yeni" rozeti sihirbaz/kart açılınca kaybolur.
+                        const EmailImportSettingsRow(),
                         _row(context, LucideIcons.database, 'Veri Yönetimi',
                             () => _push(context, const DataManagementPage())),
                       ],
@@ -237,8 +253,6 @@ class SettingsPage extends StatelessWidget {
                       children: [
                         _row(context, LucideIcons.bookOpen, 'Uygulama Rehberi / Tanıtımı',
                             () => _openOnboarding(context, onb)),
-                        // İkinci, bağımsız rehber: interaktif e-posta kurulum sihirbazı. "Yeni" rozeti sihirbaz/kart açılınca kaybolur.
-                        const EmailImportSettingsRow(),
                         _row(context, LucideIcons.lifeBuoy, 'Destek',
                             () => _push(context, const SupportPage())),
                         _row(context, LucideIcons.info, 'Hakkımızda',

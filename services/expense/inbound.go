@@ -403,6 +403,11 @@ func buildMessage(p inboundPayload) *digital.Message {
 			m.PDFs = append(m.PDFs, digital.Attachment{Name: a.Filename, Data: data})
 		case strings.Contains(ct, "zip") || strings.HasSuffix(name, ".zip"):
 			m.PDFs = append(m.PDFs, digital.ExtractZipPDFs(data, 5)...)
+			m.XMLs = append(m.XMLs, digital.ExtractZipXMLs(data, 5)...)
+		case strings.Contains(ct, "xml") || strings.HasSuffix(name, ".xml"):
+			if len(m.XMLs) < 5 && len(data) <= 5<<20 {
+				m.XMLs = append(m.XMLs, digital.Attachment{Name: a.Filename, Data: data})
+			}
 		}
 	}
 	return m
@@ -488,10 +493,19 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		serverError(c)
 		return
 	}
+	// Aktarım geçmişi: alias çözüldükten sonraki her çıkış tek satır kaydeder (gövde/ek saklanmaz).
+	skip := func(reason string, expenseID int64) {
+		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, reason, expenseID)
+		ignored(reason)
+	}
+	fail := func(reason string) {
+		h.recordInboundHistory(userID, msg.From, msg.Subject, historyFailed, reason, 0)
+		serverError(c)
+	}
 	if !inboundLimiter.allow(alias, time.Now()) {
 		log.Printf("inbound: alias rate limited (user %d)", userID)
 		h.setInboundStatus(userID, "ignored:rate_limited", false)
-		ignored("rate_limited")
+		skip("rate_limited", 0)
 		return
 	}
 
@@ -509,37 +523,48 @@ func (h *handler) inboundEmail(c *gin.Context) {
 			// Google'ın onay göndericisi ama kod/bağlantı okunamadı: fiş olarak denenmez, sessizce atlanır.
 			log.Printf("inbound: user %d: gmail confirmation without readable code/link", userID)
 			h.setInboundStatus(userID, "ignored:gmail_confirmation_unreadable", false)
-			ignored("gmail_confirmation_unreadable")
+			skip("gmail_confirmation_unreadable", 0)
 			return
 		}
 		log.Printf("inbound: user %d: gmail forwarding confirmation captured (code=%t link=%t)", userID, conf.Code != "", conf.Link != "")
 		if err := h.saveConfirmation(userID, conf); err != nil {
-			serverError(c)
+			fail("confirmation_save")
 			return
 		}
 		h.setInboundStatus(userID, "gmail_confirmation", false)
+		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, "gmail_confirmation", 0)
 		c.JSON(http.StatusOK, gin.H{"status": "confirmation"})
 		return
 	}
 
-	pdfFn := h.inbound.PDFText
-	text, source := digital.ReceiptText(msg, pdfFn)
-	if strings.TrimSpace(text) == "" {
-		log.Printf("inbound: user %d: no usable receipt text (%s)", userID, source)
-		h.setInboundStatus(userID, "ignored:"+source, false)
-		ignored(source)
-		return
+	// Kaynak önceliği: UBL-TR XML eki > PDF metin katmanı > HTML gövde > düz metin. Mail tek fiş olarak kaydedilir;
+	// XML okunamazsa sıradaki kaynağa düşülür.
+	var (
+		in     expenseInput
+		ok     bool
+		reason string
+	)
+	if inv := firstInvoice(msg); inv != nil {
+		in, ok, reason, err = h.expenseFromInvoice(userID, inv, msg)
+	} else {
+		pdfFn := h.inbound.PDFText
+		text, source := digital.ReceiptText(msg, pdfFn)
+		if strings.TrimSpace(text) == "" {
+			log.Printf("inbound: user %d: no usable receipt text (%s)", userID, source)
+			h.setInboundStatus(userID, "ignored:"+source, false)
+			skip(source, 0)
+			return
+		}
+		in, ok, reason, err = h.expenseFromEmail(userID, text, source, msg)
 	}
-
-	in, ok, reason, err := h.expenseFromEmail(userID, text, source, msg)
 	if err != nil {
-		serverError(c)
+		fail("parse_error")
 		return
 	}
 	if !ok {
 		log.Printf("inbound: user %d: not saved (%s)", userID, reason)
 		h.setInboundStatus(userID, "ignored:"+reason, false)
-		ignored(reason)
+		skip(reason, 0)
 		return
 	}
 
@@ -552,14 +577,14 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		pid, found, err = h.resolveProfile(userID, 0)
 	}
 	if err != nil || !found {
-		serverError(c)
+		fail("profile_error")
 		return
 	}
 	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
 	d, _ := time.Parse(dateLayout, in.Date)
 	tx, err := h.db.Begin()
 	if err != nil {
-		serverError(c)
+		fail("db_error")
 		return
 	}
 	defer tx.Rollback()
@@ -567,36 +592,43 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	if dup != "" {
 		// Mükerrer: hata fırlatmadan logla ve kullanıcıya durum olarak yansıt.
 		log.Printf("inbound: user %d: %s (existing expense %d)", userID, dup, id)
+		// Geçmiş satırı mevcut fişe FK ile bağlanır: tx hâlâ o satırı kilitliyorsa (FOR UPDATE) ayrı bağlantıdaki
+		// INSERT bekler ve kendi kendimizi kilitleriz. Önce işlemi bırak.
+		_ = tx.Rollback()
 		h.setInboundStatus(userID, dup, true)
+		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, dup, id)
 		c.JSON(http.StatusOK, gin.H{"status": "duplicate", "reason": dup, "id": id})
 		return
 	}
 	if err != nil {
+		_ = tx.Rollback()
 		if isFKViolation(err) {
 			h.setInboundStatus(userID, "ignored:unknown_category", false)
-			ignored("unknown_category")
+			skip("unknown_category", 0)
 			return
 		}
-		serverError(c)
+		fail("db_error")
 		return
 	}
 	if outcome == writeCreated {
 		if err := saveRules(tx, userID, collectRuleUpdates(in)); err != nil {
-			serverError(c)
+			fail("db_error")
 			return
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		serverError(c)
+		fail("db_error")
 		return
 	}
 	if outcome == writeSkipped {
 		// Ayni icerik (onsozu atilmis ayni metin) daha once ice aktarilmis: ayni client_uid -> mukerrer.
 		h.setInboundStatus(userID, "duplicate", true)
+		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, "already_imported", id)
 		c.JSON(http.StatusOK, gin.H{"status": "duplicate", "reason": "already_imported", "id": id})
 		return
 	}
 	h.setInboundStatus(userID, outcome, true)
+	h.recordInboundHistory(userID, msg.From, msg.Subject, historySaved, outcome, id)
 	c.JSON(http.StatusOK, gin.H{"status": outcome, "id": id})
 }
 
@@ -626,6 +658,18 @@ func (h *handler) expenseFromEmail(userID int64, text, source string, msg *digit
 	parsed := receiptparse.ParseWith(text, cats, time.Now(), receiptparse.ParseOptions{Rules: rules})
 	if parsed.Amount == nil || *parsed.Amount <= 0 {
 		return expenseInput{}, false, "no_amount", nil
+	}
+	// Platform sipariş özetleri (Yemeksepeti, Getir, Trendyol Yemek…): HTML tablosundaki ad/adet/satır tutarı genel
+	// metin ayrıştırmasından daha doğruysa (kalem bulunamadı ya da toplam tutmuyor) tablo kalemleri kullanılır.
+	if source == digital.SourceHTML {
+		if tbl := digital.HTMLTableItems(msg.HTML); preferTableItems(parsed.Items, tbl, *parsed.Amount) {
+			items := make([]receiptparse.Item, 0, len(tbl))
+			for _, it := range tbl {
+				items = append(items, receiptparse.Item{Name: it.DisplayName(), Amount: float64(it.AmountCents) / 100})
+			}
+			parsed.Items = receiptparse.CategorizeStructured(parsed.Merchant, *parsed.Amount, items, parsed.Date, cats,
+				receiptparse.ParseOptions{Rules: rules}).Items
+		}
 	}
 	date := time.Now().UTC().Format(dateLayout)
 	switch {

@@ -161,6 +161,45 @@ class ForwardingConfirmation {
   }
 }
 
+/// `GET /inbound-address/history` satırı: webhook'a gelen bir e-postanın akıbeti. Gövde/ek saklanmaz; yalnız gönderici,
+/// konu, durum ([status]: saved | ignored | failed), neden ve (varsa) ilgili fiş.
+class InboundHistoryItem {
+  final int id;
+  final String source;
+  final String from;
+  final String subject;
+  final DateTime? receivedAt;
+  final String status;
+  final String? reason;
+  final int? expenseId;
+  const InboundHistoryItem({
+    required this.id,
+    this.source = 'email',
+    this.from = '',
+    this.subject = '',
+    this.receivedAt,
+    required this.status,
+    this.reason,
+    this.expenseId,
+  });
+
+  bool get saved => status == 'saved';
+
+  /// Dokununca fişe gidilebilir mi (kaydedildi ya da mükerrer olarak mevcut bir fişe işaret ediyor).
+  bool get hasExpense => expenseId != null && expenseId! > 0;
+
+  factory InboundHistoryItem.fromJson(Map<String, dynamic> j) => InboundHistoryItem(
+    id: (j['id'] as num?)?.toInt() ?? 0,
+    source: (j['source'] as String?) ?? 'email',
+    from: (j['from'] as String?) ?? '',
+    subject: (j['subject'] as String?) ?? '',
+    receivedAt: j['received_at'] is String ? DateTime.tryParse(j['received_at'] as String)?.toLocal() : null,
+    status: (j['status'] as String?) ?? 'ignored',
+    reason: j['reason'] as String?,
+    expenseId: (j['expense_id'] as num?)?.toInt(),
+  );
+}
+
 class BulkResponse {
   final int created;
   final int skipped;
@@ -657,6 +696,18 @@ class ApiClient {
       link is String ? link : null,
       at is String ? DateTime.tryParse(at)?.toLocal() : null,
     );
+  }
+
+  /// Son aktarılan e-postalar (yeniden eskiye; sunucu en çok 50 tutar). Özellik kapalıysa boş liste.
+  Future<List<InboundHistoryItem>> inboundHistory({int limit = 20}) async {
+    final j = await _send('GET', _expense, '/inbound-address/history?limit=$limit');
+    if (j is! Map<String, dynamic>) return const [];
+    final items = j['items'];
+    if (items is! List) return const [];
+    return [
+      for (final e in items)
+        if (e is Map<String, dynamic>) InboundHistoryItem.fromJson(e),
+    ];
   }
 
   // --- Fiş fotoğrafları (hesaba bağlı, sunucuda saklanır) ---

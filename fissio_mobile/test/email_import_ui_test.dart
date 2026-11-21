@@ -1,9 +1,13 @@
+import 'package:fissio_mobile/api.dart';
 import 'package:fissio_mobile/app_info.dart';
+import 'package:fissio_mobile/models.dart';
+import 'package:fissio_mobile/ocr/ocr_engine.dart' show ocrEngineDisplayName;
 import 'package:fissio_mobile/onboarding_controller.dart';
 import 'package:fissio_mobile/pages/account_ready_page.dart';
 import 'package:fissio_mobile/pages/email_import_card.dart';
 import 'package:fissio_mobile/pages/email_setup_wizard.dart';
 import 'package:fissio_mobile/pages/onboarding_page.dart';
+import 'package:fissio_mobile/pages/receipt_detail_page.dart';
 import 'package:fissio_mobile/pages/settings_page.dart';
 import 'package:fissio_mobile/theme.dart';
 import 'package:fissio_mobile/theme_controller.dart' show PrefsStore;
@@ -200,8 +204,14 @@ void main() {
       await tester.ensureVisible(find.byKey(const ValueKey('wiz-copy-filter')));
       await tester.tap(find.byKey(const ValueKey('wiz-copy-filter')));
       await tester.pump();
-      expect(copied.last, 'subject:(fatura OR "e-arşiv" OR "e-fatura" OR "sipariş özeti" OR makbuz)');
+      expect(
+        copied.last,
+        '(fatura OR "e-arşiv" OR "e-fatura" OR "e-arsiv" OR fiş OR sipariş OR makbuz OR ödeme OR bilet) -bülten -kampanya -indirim',
+      );
       expect(copied.last, kGmailFilterQuery);
+      for (var i = 1; i <= 5; i++) {
+        expect(find.byKey(ValueKey('wiz-filter-step-$i')), findsOneWidget, reason: 'adım adım Gmail filtre rehberi');
+      }
 
       // Google onay maili düştü: bir sonraki yoklamada "Onay Kodu Geldi" kartı canlı görünür.
       h.backend.user(_email).confirmation = {
@@ -380,6 +390,99 @@ void main() {
     });
   });
 
+  group('aktarım geçmişi: Son Aktarılan E-Postalar', () {
+    Map<String, dynamic> row(int id, String status, {String? reason, int? expenseId, String subject = 'Konu'}) => {
+          'id': id,
+          'source': 'email',
+          'from': 'ABLUKA <earsiv@abluka.example>',
+          'subject': '$subject $id',
+          'received_at': '2026-11-20T20:0$id:00Z',
+          'status': status,
+          'reason': ?reason,
+          'expense_id': ?expenseId,
+        };
+
+    testWidgets('boş durum, rozetler (Kaydedildi / Tutar Bulunamadı / Hata / Zaten Kayıtlı) ve konu/tarih görünür', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-history')));
+      expect(find.text('SON AKTARILAN E-POSTALAR'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-history-empty')), findsOneWidget);
+
+      h.backend.user(_email).inboundHistory = [
+        row(4, 'failed', reason: 'db_error'),
+        row(3, 'ignored', reason: 'no_amount'),
+        row(2, 'ignored', reason: 'duplicate_order', expenseId: 7),
+        row(1, 'saved', reason: 'created', expenseId: 7),
+      ];
+      h.backend.user(_email).lastReceivedAt = '2026-11-20T20:05:00Z'; // yoklama yeni aktarımı fark edip geçmişi yeniler
+      await tester.pump(const Duration(seconds: 31)); // 30 sn'lik yoklama: son aktarım zamanı değişti → geçmiş yeniden çekilir
+      await _flush(tester, h);
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('wiz-history-empty')), findsNothing);
+      for (final t in ['Kaydedildi', 'Tutar Bulunamadı', 'Hata', 'Zaten Kayıtlı']) {
+        expect(find.text(t), findsOneWidget, reason: t);
+      }
+      expect(find.text('Konu 1'), findsOneWidget);
+      expect(find.textContaining('20.11.2026'), findsWidgets);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('kaydedilen satıra dokununca ilgili fişin detay sayfası açılır; hatalı satır dokunulamaz', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      late int expenseId;
+      await tester.runAsync(() async {
+        await h.app.saveDraft(ReceiptDraft(merchant: 'ABLUKA Teknoloji', categoryId: 1, items: [ExpenseItem('Bulut Depolama', 10, categoryId: 1)]));
+        expenseId = h.app.expenses.first.id;
+      });
+      h.backend.user(_email).inboundHistory = [
+        row(2, 'ignored', reason: 'no_amount'),
+        row(1, 'saved', reason: 'created', expenseId: expenseId),
+      ];
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-history-1')));
+      // Not: sihirbaz açıkken pumpAndSettle KULLANILMAZ (onay bekleme göstergesi sonsuz animasyon).
+      await tester.tap(find.byKey(const ValueKey('wiz-history-2')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(ReceiptDetailPage), findsNothing, reason: 'fişi olmayan satır gezinmez');
+
+      await tester.tap(find.byKey(const ValueKey('wiz-history-1')));
+      await tester.pump(const Duration(milliseconds: 100));
+      await _flush(tester, h);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.byType(ReceiptDetailPage), findsOneWidget);
+      expect(find.text('ABLUKA Teknoloji'), findsWidgets);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    test('emailHistoryBadge eşlemesi', () {
+      InboundHistoryItem it(String s, [String? r]) => InboundHistoryItem(id: 1, status: s, reason: r);
+      expect(emailHistoryBadge(it('saved', 'merged')).label, 'Kaydedildi');
+      expect(emailHistoryBadge(it('failed', 'db_error')).error, isTrue);
+      expect(emailHistoryBadge(it('ignored', 'pdf_unreadable')).label, 'PDF Okunamadı');
+      expect(emailHistoryBadge(it('ignored', 'rate_limited')).warn, isTrue);
+      expect(emailHistoryBadge(it('ignored', 'unknown_category')).label, 'Atlandı');
+      expect(ocrEngineDisplayName('xml'), 'e-Fatura XML (UBL-TR)', reason: 'sunucunun yazdığı xml motoru detayda etiketli');
+      expect(InboundHistoryItem.fromJson({'id': 3, 'status': 'saved', 'expense_id': 9}).hasExpense, isTrue);
+      expect(InboundHistoryItem.fromJson({'id': 3, 'status': 'ignored'}).hasExpense, isFalse);
+    });
+
+    testWidgets('senkron kapalıyken geçmiş istenmez (sunucuya istek yok)', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester, sync: false);
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      expect(h.backend.historyPolls, 0);
+      expect(find.byKey(const ValueKey('wiz-history')), findsNothing);
+    });
+  });
+
   group('Ayarlar: iki bağımsız rehber girişi', () {
     testWidgets('"Uygulama Rehberi / Tanıtımı" 3 adımlı genel rehberi, e-posta satırı sihirbazı açar', (tester) async {
       _tall(tester);
@@ -391,7 +494,7 @@ void main() {
 
       await tester.tap(find.text('Uygulama Rehberi / Tanıtımı'));
       await tester.pumpAndSettle();
-      expect(find.text('1 / 3'), findsOneWidget, reason: 'genel rehber e-posta adımını içermez');
+      expect(find.text('1 / 3'), findsOneWidget, reason: 'giriş yapılmamış / özellik kullanılamıyor: e-posta adımı yok');
       await tester.tap(find.byKey(const ValueKey('onb-skip')));
       await tester.pumpAndSettle();
 
@@ -399,6 +502,42 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(EmailSetupWizardPage), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('e-posta aktarımı kullanılabilirken Ayarlar rehberi 4 adımdır ve 4. adım e-posta özelliğini anlatır', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      final ctrl = OnboardingController(store: _MemStore());
+      await tester.pumpWidget(_app(SettingsPage(onboarding: ctrl, inboundApp: h.app)));
+      await tester.pump();
+
+      await tester.tap(find.text('Uygulama Rehberi / Tanıtımı'));
+      await _flush(tester, h);
+      await tester.pumpAndSettle();
+      expect(find.text('1 / 4'), findsOneWidget);
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.byKey(const ValueKey('onb-primary')));
+        await tester.pumpAndSettle();
+      }
+      expect(find.byKey(const ValueKey('onb-title-email')), findsOneWidget);
+      expect(find.text('E-Faturaların Otomatik Gelsin mi?'), findsOneWidget);
+      expect(find.byKey(const ValueKey('onb-email-address')), findsOneWidget);
+
+      // "Daha Sonra Ayarlardan Kur": rehber doğrudan Ayarlar'a döner.
+      await tester.tap(find.byKey(const ValueKey('onb-email-later')));
+      await tester.pumpAndSettle();
+      expect(find.byType(OnboardingPage), findsNothing);
+      expect(find.byType(SettingsPage), findsOneWidget);
+    });
+
+    testWidgets('sıralama: E-Posta ile Fiş Aktarımı satırı Tercihler ile Veri Yönetimi arasındadır', (tester) async {
+      _tall(tester);
+      await tester.pumpWidget(_app(const SettingsPage()));
+      await tester.pump();
+      double y(String t) => tester.getTopLeft(find.text(t)).dy;
+      expect(y('Tercihler'), lessThan(y('E-Posta ile Otomatik Fiş Aktarımı')));
+      expect(y('E-Posta ile Otomatik Fiş Aktarımı'), lessThan(y('Veri Yönetimi')));
+      expect(y('Veri Yönetimi'), lessThan(y('Uygulama Rehberi / Tanıtımı')));
     });
 
     testWidgets('"Yeni" rozeti: kullanılabilirken görünür, sihirbaz açılınca kaybolur', (tester) async {

@@ -648,6 +648,17 @@ class AppState extends ChangeNotifier {
     return info;
   }
 
+  /// "Son Aktarılan E-Postalar": yalnız özellik kullanılabilirken çekilir; senkron kapalı/çevrimdışı/hata → null (liste
+  /// gizlenmez, sihirbaz son bilinen listeyi korur).
+  Future<List<InboundHistoryItem>?> loadInboundHistory({int limit = 20}) async {
+    if (user == null || !emailImportAvailable) return null;
+    try {
+      return await api.inboundHistory(limit: limit);
+    } on ApiException {
+      return null;
+    }
+  }
+
   /// Gmail yönlendirme onayını yoklar (sihirbaz açıkken); bekleyen yoksa ya da hata varsa null.
   Future<ForwardingConfirmation?> pollForwardingConfirmation() async {
     if (user == null || !_syncEnabled) return null;

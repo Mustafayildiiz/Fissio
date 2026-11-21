@@ -71,4 +71,19 @@ void main() {
     await tester.pumpWidget(_app(InfoPage(title: 'Hakkımızda', sections: InfoTexts.about)));
     expect(find.text('Bulut ve çevrimdışı kullanım', skipOffstage: false), findsOneWidget);
   });
+
+  testWidgets('yasal metinler e-posta ile fiş aktarımını kapsar (@fissio.dev, amaç sınırı, saklananlar)', (tester) async {
+    String all(List<InfoSection> s) => s.map((e) => '${e.heading}\n${e.body}').join('\n');
+    final privacy = all(InfoTexts.privacy);
+    expect(InfoTexts.privacy.map((s) => s.heading), contains('E-posta ile fiş aktarımı'));
+    expect(privacy, contains('@fissio.dev'));
+    expect(privacy, contains('YALNIZCA fiş/fatura'));
+    expect(privacy, contains('Son Aktarılan E-Postalar'));
+    expect(InfoTexts.terms.map((s) => s.heading), contains('E-posta yönlendirme'));
+    expect(InfoTexts.about.map((s) => s.heading), contains('E-posta ile otomatik fiş aktarımı'));
+    expect(all(InfoTexts.about), contains('UBL-TR'));
+    _tall(tester);
+    await tester.pumpWidget(_app(InfoPage(title: 'Gizlilik Politikası', sections: InfoTexts.privacy)));
+    expect(find.text('E-posta ile fiş aktarımı', skipOffstage: false), findsOneWidget);
+  });
 }

@@ -79,6 +79,11 @@ func TestPGPurgeUserRemovesOnlyThatUsersData(t *testing.T) {
 		if _, err := e.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, code, link) VALUES ($1, '123456789', NULL)`, uid); err != nil {
 			t.Fatal(err)
 		}
+		// Aktarim gecmisi: fise bagli satir (expense_id FK) hesap silinirken fislerden once temizlenmeli.
+		if _, err := e.db.Exec(`INSERT INTO expense.inbound_history (user_id, from_addr, subject, status, reason, expense_id)
+			VALUES ($1, 'a@b.c', 'Fatura', 'saved', 'created', $2)`, uid, ex.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	seed(alice)
 	seed(bob)

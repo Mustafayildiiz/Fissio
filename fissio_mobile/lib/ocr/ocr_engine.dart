@@ -148,6 +148,9 @@ const kStoredPdf = 'pdf';
 /// E-posta (HTML gövde / .eml / yönlendirilen mail) kaynaklı dijital fişin `ocrEngine` kimliği (sunucu webhook'uyla aynı).
 const kStoredEmail = 'email';
 
+/// E-postanın UBL-TR XML (e-Fatura / e-Arşiv) ekinden okunan fişin `ocrEngine` kimliği; yalnızca sunucu webhook'u yazar.
+const kStoredXml = 'xml';
+
 /// Tarama sonucundaki motor adını ([OcrResult.engine]) fişe yazılacak kimliğe çevirir
 /// (`ondevice` → `mlkit`, `paddleocr`/`custom` aynen); bilinmeyen/`unknown` null döner.
 String? storedOcrEngineId(String? engine) {
@@ -173,6 +176,7 @@ String? ocrEngineDisplayName(String? stored) => switch (stored) {
   kStoredMlKit => 'Google ML Kit',
   kStoredPdf => 'PDF / E-Fatura Ayrıştırıcı',
   kStoredEmail => 'E-posta Ayrıştırıcı',
+  kStoredXml => 'e-Fatura XML (UBL-TR)',
   _ => null,
 };
 

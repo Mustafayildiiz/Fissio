@@ -176,8 +176,9 @@ CREATE INDEX IF NOT EXISTS idx_expenses_user_updated ON expense.expenses (user_i
 //   - inbound_aliases: kullanici basina tek, tahmin edilemez yonlendirme takma adi (<alias>@INBOUND_EMAIL_DOMAIN);
 //     profile_id = fislerin dusecegi profil (NULL = en eski/varsayilan profil), last_* = son aktarim durumu.
 //   - forwarding_confirmations: Gmail yonlendirme onay kodu/baglantisi (fis degildir; mobil istemci ceker).
+//   - inbound_history: her gelen mailin akibeti (saved/ignored/failed + neden + fis kimligi); icerik saklanmaz.
 //
-// Her ikisi de user_id tasir: hesap silinince internal.go userOwnedTables ile temizlenir.
+// Hepsi user_id tasir: hesap silinince internal.go userOwnedTables ile temizlenir.
 func migrateInbound(db *sql.DB) error {
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS expense.inbound_aliases (
@@ -195,7 +196,19 @@ CREATE TABLE IF NOT EXISTS expense.forwarding_confirmations (
 	link        TEXT,
 	received_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_forwarding_conf_user ON expense.forwarding_confirmations (user_id, received_at DESC);`)
+CREATE INDEX IF NOT EXISTS idx_forwarding_conf_user ON expense.forwarding_confirmations (user_id, received_at DESC);
+CREATE TABLE IF NOT EXISTS expense.inbound_history (
+	id          BIGSERIAL PRIMARY KEY,
+	user_id     BIGINT NOT NULL,
+	received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	source      TEXT NOT NULL DEFAULT 'email',
+	from_addr   TEXT,
+	subject     TEXT,
+	status      TEXT NOT NULL CHECK (status IN ('saved', 'ignored', 'failed')),
+	reason      TEXT,
+	expense_id  BIGINT REFERENCES expense.expenses(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_history_user ON expense.inbound_history (user_id, received_at DESC);`)
 	return err
 }
 

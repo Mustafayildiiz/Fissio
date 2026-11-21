@@ -9,9 +9,12 @@ import '../app_state.dart';
 import '../dialogs.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'receipt_detail_page.dart';
 
-/// Gmail'de "Filtre oluştur" kutusuna yapıştırılacak hazır arama sorgusu (e-fatura / sipariş özeti / makbuz mailleri).
-const kGmailFilterQuery = 'subject:(fatura OR "e-arşiv" OR "e-fatura" OR "sipariş özeti" OR makbuz)';
+/// Gmail'de "Filtre oluştur" > "Şu kelimeleri içerir" alanına yapıştırılacak hazır arama sorgusu: fatura / fiş / sipariş /
+/// makbuz / ödeme / bilet mailleri; bülten, kampanya ve indirim mailleri dışlanır.
+const kGmailFilterQuery =
+    '(fatura OR "e-arşiv" OR "e-fatura" OR "e-arsiv" OR fiş OR sipariş OR makbuz OR ödeme OR bilet) -bülten -kampanya -indirim';
 
 String _two(int v) => v.toString().padLeft(2, '0');
 
@@ -20,6 +23,20 @@ String _fmtWhen(DateTime d) => '${d.day}.${_two(d.month)}.${d.year} ${_two(d.hou
 
 /// Sunucudaki son webhook sonucunu (`InboundAddress.lastStatus`) kullanıcıya Türkçe, eyleme dönük bir satıra çevirir; bilinmiyorsa null.
 String? emailLastStatusMessage(String? status) => _EmailSetupWizardPageState.lastStatusMessage(status);
+
+/// Aktarım geçmişi satırındaki durum rozeti: (etiket, uyarı mı). Sunucu `status` (saved|ignored|failed) + `reason`.
+({String label, bool warn, bool error}) emailHistoryBadge(InboundHistoryItem it) {
+  if (it.saved) return (label: 'Kaydedildi', warn: false, error: false);
+  if (it.status == 'failed') return (label: 'Hata', warn: false, error: true);
+  return switch (it.reason) {
+    'no_amount' => (label: 'Tutar Bulunamadı', warn: true, error: false),
+    'pdf_unreadable' => (label: 'PDF Okunamadı', warn: true, error: false),
+    'duplicate_document' || 'duplicate_order' || 'already_imported' => (label: 'Zaten Kayıtlı', warn: false, error: false),
+    'gmail_confirmation' || 'gmail_confirmation_unreadable' => (label: 'Gmail Onayı', warn: false, error: false),
+    'rate_limited' => (label: 'Sınır Aşıldı', warn: true, error: false),
+    _ => (label: 'Atlandı', warn: true, error: false),
+  };
+}
 
 /// Onay kodu yoklama aralığı (sihirbaz açıkken); testlerde kısaltılır.
 const kConfirmationPollInterval = Duration(seconds: 5);
@@ -48,6 +65,8 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
   int _tab = 0;
   ForwardingConfirmation? _confirmation;
   Timer? _timer;
+  List<InboundHistoryItem> _history = const [];
+  String? _historyStamp;
 
   @override
   void initState() {
@@ -74,9 +93,35 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     setState(() => _loading = false);
     if (_app.emailImportAvailable) {
       unawaited(_alignProfile());
+      unawaited(_refreshHistory());
       _poll();
       _timer = Timer.periodic(widget.pollInterval, (_) => _poll());
     }
+  }
+
+  Future<void> _refreshHistory() async {
+    final list = await _app.loadInboundHistory();
+    if (!mounted || list == null) return;
+    final info = _app.inbound;
+    setState(() {
+      _history = list;
+      _historyStamp = '${info?.lastReceivedAt?.toIso8601String()}|${info?.lastStatus}';
+    });
+  }
+
+  /// "Fişe git": fiş bellekte yoksa (henüz çekilmemiş) önce liste yenilenir; yine yoksa bilgi verilir.
+  Future<void> _openReceipt(InboundHistoryItem it) async {
+    final id = it.expenseId;
+    if (id == null) return;
+    if (!_app.expenses.any((x) => x.id == id)) {
+      await _app.refresh();
+      if (!mounted) return;
+    }
+    if (!_app.expenses.any((x) => x.id == id)) {
+      showMessage(context, 'Fiş bulunamadı; silinmiş ya da henüz eşitlenmemiş olabilir.');
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: id, app: widget.app)));
   }
 
   /// Aktarılan fişler aktif profile düşsün (sunucu "aktif profil"i bilmez): seçili değilse sessizce ayarlanır.
@@ -98,6 +143,9 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     await _app.loadInbound();
     if (!mounted) return;
     setState(() => _confirmation = conf ?? _confirmation);
+    // Geçmiş yalnız yeni bir aktarım olduğunda (son durum/zaman değişince) yeniden çekilir.
+    final info = _app.inbound;
+    if ('${info?.lastReceivedAt?.toIso8601String()}|${info?.lastStatus}' != _historyStamp) await _refreshHistory();
   }
 
   Future<void> _copy(String text, String done) async {
@@ -194,6 +242,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
         ),
         const SizedBox(height: 16),
         if (_tab == 0) ..._autoTab(c, info) else ..._manualTab(c, info),
+        _historySection(c),
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerLeft,
@@ -446,16 +495,118 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
         key: const ValueKey('wiz-step-3'),
         children: [
           Text(
-            'Gmail\'de arama kutusundaki ayar simgesine dokun, bu sorguyu "Konu" ya da arama alanına yapıştır → "Filtre oluştur" → '
-            '"Şuna ilet" ile yukarıdaki adresi seç. Böylece e-fatura ve sipariş özetleri otomatik gelir.',
+            'Bu filtre yalnızca fatura, fiş, sipariş, makbuz, ödeme ve bilet maillerini yakalar; bülten, kampanya ve indirim '
+            'maillerini dışarıda bırakır. Sorguyu kopyala:',
             style: body,
           ),
           const SizedBox(height: 10),
           _copyBox(c, kGmailFilterQuery,
               copyKey: const ValueKey('wiz-copy-filter'), textKey: const ValueKey('wiz-filter'), done: 'Filtre sorgusu kopyalandı.'),
+          const SizedBox(height: 14),
+          for (final (i, s) in _filterSteps.indexed) _stepRow(c, i + 1, s),
         ],
       ),
     ];
+  }
+
+  static const _filterSteps = [
+    'Gmail\'i bilgisayarda aç, arama kutusunun sağındaki ayar (filtre) simgesine dokun.',
+    'Kopyaladığın sorguyu "Şu kelimeleri içerir" alanına yapıştır.',
+    '"Filtre oluştur"a bas.',
+    '"Şu adrese ilet" kutusunu işaretle ve yukarıdaki Fissio adresini seç (Adım 2\'de eklediğin için listede görünür).',
+    '"Filtre oluştur" ile bitir. Bundan sonra eşleşen mailler kendiliğinden Fissio\'ya gelir.',
+  ];
+
+  Widget _stepRow(FissioColors c, int n, String text) {
+    return Padding(
+      key: ValueKey('wiz-filter-step-$n'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: c.accent.withValues(alpha: .14), shape: BoxShape.circle),
+            child: Text('$n', style: FissioText.body(c, size: 12, weight: FontWeight.w800, color: c.accentInk)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: FissioText.body(c, size: 14, color: c.mute).copyWith(height: 1.4))),
+        ],
+      ),
+    );
+  }
+
+  /// "Son Aktarılan E-Postalar": webhook'a gelen maillerin akıbeti (rozet + konu + tarih); kaydedilenler fişe gider.
+  Widget _historySection(FissioColors c) {
+    return Padding(
+      key: const ValueKey('wiz-history'),
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+            child: Text('SON AKTARILAN E-POSTALAR', style: FissioText.label(c)),
+          ),
+          if (_history.isEmpty)
+            Container(
+              key: const ValueKey('wiz-history-empty'),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
+              child: Text('Henüz aktarılan e-posta yok.', style: FissioText.body(c, size: 14, color: c.mute)),
+            )
+          else
+            Material(
+              color: c.surf,
+              borderRadius: BorderRadius.circular(kRadius),
+              clipBehavior: Clip.antiAlias,
+              child: Column(children: [for (final it in _history) _historyRow(c, it)]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _historyRow(FissioColors c, InboundHistoryItem it) {
+    final b = emailHistoryBadge(it);
+    final tone = b.error ? c.danger : (b.warn ? c.warn : c.accentInk);
+    final subject = it.subject.trim().isEmpty ? '(Konusuz e-posta)' : it.subject.trim();
+    return InkWell(
+      key: ValueKey('wiz-history-${it.id}'),
+      onTap: it.hasExpense ? () => _openReceipt(it) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(subject, maxLines: 2, overflow: TextOverflow.ellipsis, style: FissioText.body(c, size: 15, weight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(
+                    it.receivedAt == null ? '' : _fmtWhen(it.receivedAt!),
+                    style: FissioText.body(c, size: 12, color: c.mute),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(color: tone.withValues(alpha: .14), borderRadius: BorderRadius.circular(999)),
+              child: Text(b.label, style: FissioText.body(c, size: 12, weight: FontWeight.w700, color: tone)),
+            ),
+            if (it.hasExpense) ...[
+              const SizedBox(width: 6),
+              Icon(LucideIcons.chevronRight, size: 16, color: c.mute),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   List<Widget> _manualTab(FissioColors c, InboundAddress info) {

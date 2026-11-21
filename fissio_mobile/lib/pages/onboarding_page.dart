@@ -21,10 +21,11 @@ const _kBodies = [
   'Haftalık harcama ve kategori dağılımı, tek ekranlık bir özette.',
 ];
 
-/// Opsiyonel 4. adım (yalnızca ilk kayıtta, bulut senkronu açık ve sunucuda e-posta aktarımı yapılandırılmışsa).
+/// Opsiyonel 4. adım (bulut senkronu açık ve sunucuda e-posta aktarımı yapılandırılmışsa; ilk kayıtta ve Ayarlar'daki rehberde).
 const _kEmailTitle = 'E-Faturaların Otomatik Gelsin mi?';
 const _kEmailBody =
-    'Sana özel bir adres veriyoruz: e-fatura ve sipariş özeti maillerini bu adrese yönlendir, fişlerin kendiliğinden eklensin.';
+    'Sana özel bir adres veriyoruz: e-fatura, e-arşiv ve sipariş özeti maillerini bu adrese yönlendir; ekteki XML/PDF faturalar '
+    'dahil fişlerin kalemleriyle kendiliğinden eklensin.';
 
 /// 3 adımlı tanıtım (+ opsiyonel e-posta adımı). İlk kayıttan sonra (`signUp: true`) Profil seçiminden önce açılır;
 /// Ayarlar'dan (`signUp: false`) açıldığında bitince yalnızca kapanır.
@@ -53,7 +54,8 @@ class OnboardingPage extends StatefulWidget {
   final VoidCallback? onDone;
 
   /// Sonuna "E-Faturaların Otomatik Gelsin mi?" adımı eklenir. Adımın varlığı sayfa AÇILMADAN belirlenir (bkz.
-  /// `AccountReadyPage`): "1 / N" sayacı akış sırasında değişmez. Ayarlar'daki genel rehber bu adımı içermez.
+  /// `AccountReadyPage` ve Ayarlar'daki rehber): "1 / N" sayacı akış sırasında değişmez. Özellik kullanılamıyorsa
+  /// (senkron kapalı / sunucuda kapalı) adım hiç eklenmez.
   final bool includeEmailStep;
 
   /// Verilmezse global [appState] (e-posta adımındaki adres ve sihirbaz için).

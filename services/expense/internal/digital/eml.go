@@ -44,6 +44,8 @@ type Message struct {
 	Text       string // text/plain gövde(ler)
 	HTML       string // text/html gövde(ler) (ham)
 	PDFs       []Attachment
+	// XMLs: .xml ekleri (UBL-TR e-Fatura/e-Arşiv; zip içinden gelenler dahil). Ayrıştırma ParseUBL'dedir.
+	XMLs []Attachment
 }
 
 var wordDecoder = &mime.WordDecoder{CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
@@ -195,6 +197,9 @@ func (m *Message) walk(h textproto.MIMEHeader, body io.Reader, depth int) {
 			return
 		}
 		m.PDFs = append(m.PDFs, ExtractZipPDFs(data, maxPDFsPerMail-len(m.PDFs))...)
+		m.XMLs = append(m.XMLs, ExtractZipXMLs(data, maxXMLsPerMail-len(m.XMLs))...)
+	case mt == "application/xml" || mt == "text/xml" || strings.HasSuffix(strings.ToLower(name), ".xml"):
+		m.addXML(name, h, body)
 	case mt == "text/plain" || mt == "text/html":
 		if strings.EqualFold(disp, "attachment") && name != "" {
 			return
@@ -221,6 +226,47 @@ func (m *Message) addPDF(name string, h textproto.MIMEHeader, body io.Reader) {
 		return
 	}
 	m.PDFs = append(m.PDFs, Attachment{Name: name, Data: data})
+}
+
+func (m *Message) addXML(name string, h textproto.MIMEHeader, body io.Reader) {
+	if len(m.XMLs) >= maxXMLsPerMail {
+		return
+	}
+	data, err := decodeBody(h, body)
+	if err != nil || len(data) == 0 || len(data) > maxXMLBytes {
+		return
+	}
+	m.XMLs = append(m.XMLs, Attachment{Name: name, Data: data})
+}
+
+// ExtractZipXMLs zip arşivindeki .xml dosyalarını (en çok max adet, her biri ≤5 MB) çıkarır; bozuk arşivde boş döner.
+func ExtractZipXMLs(data []byte, max int) []Attachment {
+	if max <= 0 || len(data) == 0 || len(data) > maxAttachmentBytes {
+		return nil
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil
+	}
+	var out []Attachment
+	for _, f := range zr.File {
+		if len(out) >= max {
+			break
+		}
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".xml") || f.UncompressedSize64 > maxXMLBytes {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		b, err := io.ReadAll(io.LimitReader(rc, maxXMLBytes))
+		rc.Close()
+		if err == nil && len(b) > 0 {
+			out = append(out, Attachment{Name: path.Base(f.Name), Data: b})
+		}
+	}
+	return out
 }
 
 func firstNonEmpty(a, b string) string {

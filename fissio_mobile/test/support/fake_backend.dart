@@ -24,6 +24,7 @@ class FakeBackend {
 
   /// `GET /inbound-address/confirmation` kaç kez yoklandı.
   int confirmationPolls = 0;
+  int historyPolls = 0;
 
   /// Her istekten sonra çağrılır (ağın ortada kesilmesini simüle etmek için).
   void Function(String method, String path)? afterRequest;
@@ -467,6 +468,10 @@ class FakeBackend {
       confirmationPolls++;
       return u.confirmation == null ? _json(204, null) : _json(200, u.confirmation);
     }
+    if (path == '/inbound-address/history' && m == 'GET') {
+      historyPolls++;
+      return _json(200, {'enabled': inboundEnabled, 'items': inboundEnabled ? u.inboundHistory : <Map<String, dynamic>>[]});
+    }
     return _err(404, 'not_found', 'no route $m $path');
   }
 
@@ -574,6 +579,9 @@ class FakeUser {
   String? lastReceivedAt;
   String? lastStatus;
   Map<String, dynamic>? confirmation;
+
+  /// `GET /inbound-address/history` satırları (yeniden eskiye): {id, source, from, subject, received_at, status, reason, expense_id}.
+  List<Map<String, dynamic>> inboundHistory = [];
 }
 
 class MemPrefs implements DeletablePrefsStore {
