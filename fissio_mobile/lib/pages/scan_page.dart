@@ -277,7 +277,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
         MaterialPageRoute(builder: (_) => ReceiptFormPage(initialDraft: draft)),
       );
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) {
         setState(() {

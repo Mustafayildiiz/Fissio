@@ -5,6 +5,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'models.dart';
 import 'theme.dart';
+import 'toast.dart';
+
+export 'toast.dart' show ToastKind, showToast;
 
 // ─── Başlıklar ve çizgiler ─────────────────────────────────────────────────
 
@@ -908,11 +911,11 @@ class ErrorBanner extends StatelessWidget {
   }
 }
 
-void showMessage(BuildContext context, String msg) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(msg)));
-}
+/// Uygulama içi bildirim: ekranın ÜSTÜNDE beliren toast (bkz. `toast.dart`); alt gezinmeyi kapatmaz.
+void showMessage(BuildContext context, String msg, {ToastKind kind = ToastKind.info}) => showToast(context, msg, kind: kind);
+
+/// Hata bildirimi (ör. `ApiException.message`): üst toast, hata renginde.
+void showError(BuildContext context, String msg) => showToast(context, msg, kind: ToastKind.error);
 
 /// Otomatik atanan fiş kategorisi güvenilir değilse ("Diğer"e düşüldü ya da düşük güven) uyarır ve
 /// aday kategorileri tek dokunuşla seçtirir. [candidates] (id, ad) çiftleridir.

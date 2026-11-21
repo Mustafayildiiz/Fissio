@@ -134,7 +134,7 @@ class ReceiptDetailPage extends StatelessWidget {
       await _app.deleteExpense(e.id);
       if (context.mounted) Navigator.of(context).pop();
     } on ApiException catch (err) {
-      if (context.mounted) showMessage(context, err.message);
+      if (context.mounted) showError(context, err.message);
     }
   }
 

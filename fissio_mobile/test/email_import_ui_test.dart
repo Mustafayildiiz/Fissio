@@ -61,8 +61,10 @@ void main() {
   final opened = <Uri>[];
   final savedClip = clipboardWriter;
   final savedOpen = externalLinkLauncher;
+  final savedMailLauncher = mailLauncher;
 
   setUp(() {
+    mailLauncher = savedMailLauncher;
     copied.clear();
     opened.clear();
     clipboardWriter = (t) async => copied.add(t);
@@ -366,6 +368,142 @@ void main() {
       expect(h.app.inbound!.address, isNot(old));
       expect(find.text(h.app.inbound!.address), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('duraklat: rozet görünür, sunucuya yazılır; devam ettirince kalkar', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      expect(find.byKey(const ValueKey('wiz-paused-badge')), findsNothing);
+
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-pause-switch')));
+      await tester.tap(find.byKey(const ValueKey('wiz-pause-switch')));
+      await tester.pump();
+      await _flush(tester, h);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(h.backend.user(_email).inboundPaused, isTrue);
+      expect(h.app.inbound!.paused, isTrue);
+      expect(find.byKey(const ValueKey('wiz-paused-badge')), findsOneWidget);
+      expect(find.textContaining('Aktarım duraklatıldı.'), findsOneWidget, reason: 'üst toast');
+
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-pause-switch')));
+      await tester.tap(find.byKey(const ValueKey('wiz-pause-switch')));
+      await tester.pump();
+      await _flush(tester, h);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(h.backend.user(_email).inboundPaused, isFalse);
+      expect(find.byKey(const ValueKey('wiz-paused-badge')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('adres yenilenince duraklatma kalkar', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.runAsync(() => h.app.setInboundPaused(true));
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      expect(find.byKey(const ValueKey('wiz-paused-badge')), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-rotate')));
+      await tester.tap(find.byKey(const ValueKey('wiz-rotate')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('Yenile'));
+      await tester.pump();
+      await _flush(tester, h);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(h.app.inbound!.paused, isFalse);
+      expect(find.byKey(const ValueKey('wiz-paused-badge')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('"Bağlantıyı Test Et": mailto ile adres + konu + gövde açılır', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      final savedMail = mailLauncher;
+      addTearDown(() => mailLauncher = savedMail);
+      final mails = <Uri>[];
+      mailLauncher = (u) async {
+        mails.add(u);
+        return true;
+      };
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-test-connection')));
+      await tester.tap(find.byKey(const ValueKey('wiz-test-connection')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(mails, hasLength(1));
+      final u = mails.single;
+      expect(u.scheme, 'mailto');
+      expect(u.path, h.app.inbound!.address);
+      expect(u.queryParameters['subject'], 'Fissio Test Fişi - Kahve Dünyası');
+      expect(u.queryParameters['body'], contains('1 x Filtre Kahve: 85,00 TL'));
+      expect(copied, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('"Bağlantıyı Test Et": mail açılamazsa üst toast + "Test metnini kopyala"', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      final savedMail = mailLauncher;
+      addTearDown(() => mailLauncher = savedMail);
+      mailLauncher = (u) async => false;
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-test-connection')));
+      await tester.tap(find.byKey(const ValueKey('wiz-test-connection')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('E-posta uygulaması açılamadı'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('app-toast-action')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(copied.single, kTestMailBody);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('"Bağlantıyı Test Et": duraklatılmışken mail açılmaz, bilgi verilir', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.runAsync(() => h.app.setInboundPaused(true));
+      final savedMail = mailLauncher;
+      addTearDown(() => mailLauncher = savedMail);
+      var opened = 0;
+      mailLauncher = (u) async {
+        opened++;
+        return true;
+      };
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-test-connection')));
+      await tester.tap(find.byKey(const ValueKey('wiz-test-connection')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(opened, 0);
+      expect(find.textContaining('test e-postası fişe dönüşmez'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    test('testMailUri: Türkçe karakterler ve satır sonları doğru kodlanır', () {
+      final u = testMailUri('abc123@fissio.dev');
+      expect(u.toString(), startsWith('mailto:abc123@fissio.dev?subject='));
+      expect(u.toString(), isNot(contains(' ')));
+      expect(u.toString(), isNot(contains('\n')));
+      expect(u.toString(), contains('%C3%BC'), reason: 'ü UTF-8 yüzde-kodlu');
+      expect(u.queryParameters['subject'], 'Fissio Test Fişi - Kahve Dünyası');
+      expect(
+        u.queryParameters['body'],
+        'Fissio e-posta aktarımı bağlantı testi.\n\nTarih: Bugün\nMağaza: Kahve Dünyası\n1 x Filtre Kahve: 85,00 TL\nToplam: 85,00 TL',
+      );
+    });
+
+    testWidgets('geçmiş: "paused" nedeni Duraklatıldı rozeti olarak görünür', (tester) async {
+      final item = InboundHistoryItem(
+        id: 1, source: 'email', from: 'a@b.c', subject: 's', receivedAt: null, status: 'ignored', reason: 'paused', expenseId: null,
+      );
+      expect(emailHistoryBadge(item).label, 'Duraklatıldı');
+      expect(emailLastStatusMessage('ignored:paused'), contains('duraklatıldı'));
     });
 
     testWidgets('senkron KAPALI: açıklama + Paylaş adımı; adres/onay yok', (tester) async {

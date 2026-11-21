@@ -39,7 +39,7 @@ class BudgetsPage extends StatelessWidget {
       // İlk limitte bildirim izni istenir (eşik uyarıları için).
       if (first) await appState.notifier.requestPermission();
     } on ApiException catch (e) {
-      if (context.mounted) showMessage(context, e.message);
+      if (context.mounted) showError(context, e.message);
     }
   }
 

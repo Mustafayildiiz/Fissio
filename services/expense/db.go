@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS expense.inbound_aliases (
 	last_received_at TIMESTAMPTZ,
 	last_status      TEXT
 );
+ALTER TABLE expense.inbound_aliases ADD COLUMN IF NOT EXISTS paused BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS expense.forwarding_confirmations (
 	id          BIGSERIAL PRIMARY KEY,
 	user_id     BIGINT NOT NULL,

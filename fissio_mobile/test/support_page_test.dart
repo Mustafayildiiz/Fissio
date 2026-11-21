@@ -31,7 +31,7 @@ void main() {
     await tester.pumpWidget(_app(const SupportPage()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Fissio · Sürüm 2.3.4 (7)'), findsOneWidget);
+    expect(find.text('Fissio · Sürüm 2.3.4 (7)', skipOffstage: false), findsOneWidget);
     expect(find.text(supportEmail), findsOneWidget);
     expect(find.text('İnternet yokken fiş ekleyebilir miyim?'), findsOneWidget);
     await tester.tap(find.text('İnternet yokken fiş ekleyebilir miyim?'));
@@ -62,6 +62,41 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('support-mail')));
     await tester.pumpAndSettle();
     expect(copied, supportEmail);
+  });
+
+  testWidgets('SSS e-posta aktarımının olumsuz senaryolarını ve çözümlerini içerir', (tester) async {
+    tester.view.physicalSize = const Size(900, 7000); // tüm SSS gövdeleri (tembel ListView) çizilsin
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(_app(const SupportPage()));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('support-email-faqs'), skipOffstage: false), findsOneWidget);
+    const titles = [
+      'Gmail yönlendirme onay maili gelmedi / kod görünmüyor.',
+      'Mail gönderildi ama "Tutar Bulunamadı" göründü.',
+      'Aynı fatura iki kez gelirse ne olur?',
+      'Yabancı para birimli (USD/EUR) veya desteklenmeyen faturalar.',
+      'Adresim spam listesine düştü ya da gereksiz reklam mailleri geliyor.',
+      'E-posta aktarımını tamamen kapatmak istiyorum.',
+    ];
+    for (final t in titles) {
+      await tester.ensureVisible(find.text(t));
+      expect(find.text(t), findsOneWidget, reason: t);
+    }
+    Future<void> open(String title, String expectInBody) async {
+      await tester.ensureVisible(find.text(title));
+      await tester.tap(find.text(title));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(expectInBody, skipOffstage: false), findsOneWidget, reason: title);
+    }
+
+    await open(titles[0], 'Adresi Yenile');
+    await open(titles[1], 'Paylaş → Fissio');
+    await open(titles[2], 'Zaten Kayıtlı');
+    await open(titles[3], 'yalnızca TL');
+    await open(titles[4], 'Aktarımı duraklat');
+    await open(titles[5], 'Yönlendirme ve POP/IMAP');
   });
 
   testWidgets('Hakkımızda/Gizlilik bölümleri çizilir', (tester) async {

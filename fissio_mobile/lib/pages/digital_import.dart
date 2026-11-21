@@ -52,7 +52,7 @@ Future<void> runDigitalImport(
   try {
     file ??= await picker();
   } on ApiException catch (e) {
-    if (messenger.mounted) showMessage(messenger, e.message);
+    if (messenger.mounted) showError(messenger, e.message);
     return;
   } catch (_) {
     if (messenger.mounted) showMessage(messenger, 'Dosya seçilemedi. Ayarlardan dosya erişimine izin verin.');

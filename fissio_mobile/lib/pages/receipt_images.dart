@@ -28,7 +28,7 @@ class ReceiptImageStrip extends StatelessWidget {
         b.fillRange(0, b.length, 0);
       }
     } on ApiException catch (e) {
-      if (context.mounted) showMessage(context, e.message);
+      if (context.mounted) showError(context, e.message);
     }
   }
 
@@ -237,7 +237,7 @@ class _ReceiptImageViewerState extends State<ReceiptImageViewer> {
       }
       if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     }
   }
 

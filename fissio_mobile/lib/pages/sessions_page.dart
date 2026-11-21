@@ -63,7 +63,7 @@ class _SessionsPageState extends State<SessionsPage> {
       }
       await _load();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -83,7 +83,7 @@ class _SessionsPageState extends State<SessionsPage> {
       await (widget.onLogoutAll ?? appState.logoutEverywhere)();
       _toAuth();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

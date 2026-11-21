@@ -39,7 +39,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       if (!mounted) return;
       _openShell();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busyId = null);
     }
@@ -59,7 +59,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       if (!mounted) return;
       _openShell();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busyId = null);
     }
@@ -77,7 +77,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       try {
         await appState.renameProfile(p.id, name);
       } on ApiException catch (e) {
-        if (mounted) showMessage(context, e.message);
+        if (mounted) showError(context, e.message);
       }
     }
   }
@@ -94,7 +94,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
     try {
       await appState.deleteProfile(p.id);
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     }
   }
 

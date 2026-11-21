@@ -59,7 +59,7 @@ class _DataManagementPageState extends State<DataManagementPage> {
         );
       }
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     }
   }
 
@@ -95,7 +95,7 @@ class _DataManagementPageState extends State<DataManagementPage> {
       try {
         await _app.resolveEditConflict(x.mine.id, keepMine: keepMine);
       } on ApiException catch (e) {
-        if (mounted) showMessage(context, e.message);
+        if (mounted) showError(context, e.message);
         return;
       }
     }
@@ -224,7 +224,7 @@ class _DataManagementPageState extends State<DataManagementPage> {
         ),
       );
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

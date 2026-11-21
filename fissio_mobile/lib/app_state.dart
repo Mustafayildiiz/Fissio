@@ -648,6 +648,14 @@ class AppState extends ChangeNotifier {
     return info;
   }
 
+  /// Aktarımı duraklatır / sürdürür; hata [ApiException] olarak yukarı çıkar.
+  Future<InboundAddress> setInboundPaused(bool paused) async {
+    final info = await api.setInboundPaused(paused);
+    _inbound = info;
+    notifyListeners();
+    return info;
+  }
+
   /// "Son Aktarılan E-Postalar": yalnız özellik kullanılabilirken çekilir; senkron kapalı/çevrimdışı/hata → null (liste
   /// gizlenmez, sihirbaz son bilinen listeyi korur).
   Future<List<InboundHistoryItem>?> loadInboundHistory({int limit = 20}) async {

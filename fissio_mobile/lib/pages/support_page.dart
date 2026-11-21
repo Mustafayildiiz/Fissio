@@ -45,6 +45,46 @@ const _faqs = <_Faq>[
   ),
 ];
 
+/// E-posta ile fiş aktarımında karşılaşılabilecek olumsuz senaryolar ve çözümleri (Ayarlar > E-Posta ile Otomatik Fiş Aktarımı).
+const _emailFaqs = <_Faq>[
+  _Faq(
+    'Gmail yönlendirme onay maili gelmedi / kod görünmüyor.',
+    'Önce Gmail\'de "Yönlendirme adresi ekle" ile Fissio adresini girdiğinden emin ol. Google\'ın onay maili birkaç dakika '
+        'gecikebilir; Fissio ekranı açıkken her 5 saniyede bir kontrol eder ve kod/onay bağlantısı kendiliğinden görünür '
+        '(24 saat geçerlidir). Hâlâ gelmediyse adresi yazım hatası için kontrol et, Gmail\'de Gönderilmiş/Spam klasörüne bak '
+        've gerekirse Fissio\'da "Adresi Yenile" ile yeni adres üretip yönlendirmeyi yeni adresle yeniden ekle.',
+  ),
+  _Faq(
+    'Mail gönderildi ama "Tutar Bulunamadı" göründü.',
+    'Fissio e-postadaki METNİ okur. Yalnızca görsel içeren mailler ya da taranmış (resim) PDF\'ler metne dönüştürülemediği için '
+        'tutar bulunamaz ve sunucuda OCR\'a gönderilmez. Çözüm: e-Arşiv XML ya da metin katmanlı PDF eki olan faturayı ilet; '
+        'olmuyorsa PDF\'i mail uygulamandan Paylaş → Fissio ile ekle ya da fişi kamerayla tara.',
+  ),
+  _Faq(
+    'Aynı fatura iki kez gelirse ne olur?',
+    'Fissio mükerrer kaydı engeller: ETTN / fatura numarası, sipariş numarası ya da mail içeriği aynıysa ikinci mail yeni fiş '
+        'oluşturmaz; geçmişte "Zaten Kayıtlı" olarak görünür. Siparişin özeti ile resmi faturası ayrı gelirse tek fişte birleşir.',
+  ),
+  _Faq(
+    'Yabancı para birimli (USD/EUR) veya desteklenmeyen faturalar.',
+    'Şu an yalnızca TL (TRY) faturalar işlenir. USD/EUR gibi faturalar otomatik kaydedilmez; bunları Yeni fiş > Manuel ile '
+        'TL karşılığıyla ekleyebilirsin.',
+  ),
+  _Faq(
+    'Adresim spam listesine düştü ya da gereksiz reklam mailleri geliyor.',
+    'Gmail filtresini daralt: Fissio\'daki hazır filtre sorgusu yalnızca fatura, fiş, sipariş, makbuz, ödeme ve bilet '
+        'maillerini yakalar, bülten/kampanya/indirim mailleri dışarıda kalır. Geçici olarak durdurmak için '
+        '"Aktarımı duraklat" anahtarını kullan (adres ve geçmişin korunur). Adres başkalarının eline geçtiyse "Adresi Yenile" '
+        'ile tek dokunuşla yeni bir @fissio.dev adresi üret; eski adres hemen geçersiz olur.',
+  ),
+  _Faq(
+    'E-posta aktarımını tamamen kapatmak istiyorum.',
+    '1) Fissio\'da E-Posta ile Otomatik Fiş Aktarımı ekranından "Aktarımı duraklat"ı aç: gelen mailler fişe dönüşmez. '
+        '2) Gmail\'de Ayarlar → Tüm ayarlar → Yönlendirme ve POP/IMAP bölümünde Fissio adresini kaldır ve Filtreler ve engellenen '
+        'adresler sekmesinden Fissio\'ya ileten filtreyi sil. Daha önce kaydedilen fişlerin korunur.',
+  ),
+];
+
 /// Destek ekranı: tek dokunuşla e-posta, SSS ve sürüm bilgisi.
 class SupportPage extends StatefulWidget {
   const SupportPage({super.key});
@@ -117,6 +157,14 @@ class _SupportPageState extends State<SupportPage> {
                     children: [
                       for (final f in _faqs)
                         _FaqTile(f),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const SectionLabel('E-posta ile fiş aktarımı'),
+                  GroupedCard(
+                    key: const ValueKey('support-email-faqs'),
+                    children: [
+                      for (final f in _emailFaqs) _FaqTile(f),
                     ],
                   ),
                   Padding(

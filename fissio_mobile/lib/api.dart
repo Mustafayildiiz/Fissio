@@ -128,7 +128,17 @@ class InboundAddress {
   /// Son başarılı aktarım (fiş oluştu / birleşti / mükerrer); henüz yoksa null.
   final DateTime? lastReceivedAt;
   final String? lastStatus;
-  const InboundAddress({this.enabled = false, this.address = '', this.profileId, this.lastReceivedAt, this.lastStatus});
+
+  /// Kullanıcı aktarımı duraklattı: gelen mailler fişe dönüşmez (adres ve geçmiş korunur).
+  final bool paused;
+  const InboundAddress({
+    this.enabled = false,
+    this.address = '',
+    this.profileId,
+    this.lastReceivedAt,
+    this.lastStatus,
+    this.paused = false,
+  });
 
   /// Aktarım çalışıyor mu: en az bir e-posta işlenmiş.
   bool get active => enabled && lastReceivedAt != null;
@@ -139,6 +149,7 @@ class InboundAddress {
     profileId: (j['profile_id'] as num?)?.toInt(),
     lastReceivedAt: j['last_received_at'] == null ? null : DateTime.tryParse(j['last_received_at'] as String)?.toLocal(),
     lastStatus: j['last_status'] as String?,
+    paused: (j['paused'] as bool?) ?? false,
   );
 }
 
@@ -683,6 +694,11 @@ class ApiClient {
   /// Adresi yeniler (eski adres hemen geçersiz olur).
   Future<InboundAddress> rotateInboundAddress() async =>
       InboundAddress.fromJson(await _send('POST', _expense, '/inbound-address/rotate') as Map<String, dynamic>);
+
+  /// Aktarımı duraklatır / sürdürür (adres ve geçmiş korunur; idempotent).
+  Future<InboundAddress> setInboundPaused(bool paused) async => InboundAddress.fromJson(
+    await _send('POST', _expense, paused ? '/inbound-address/pause' : '/inbound-address/resume') as Map<String, dynamic>,
+  );
 
   /// Son 24 saatteki Gmail yönlendirme onayı; bekleyen yoksa null.
   Future<ForwardingConfirmation?> forwardingConfirmation() async {

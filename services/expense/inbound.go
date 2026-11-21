@@ -116,6 +116,8 @@ type inboundInfo struct {
 	ProfileID      *int64  `json:"profile_id,omitempty"`
 	LastReceivedAt *string `json:"last_received_at,omitempty"`
 	LastStatus     *string `json:"last_status,omitempty"`
+	// Paused: kullanıcı aktarımı geçici durdurdu; gelen mailler fişe dönüşmez (geçmişe "paused" olarak yazılır).
+	Paused bool `json:"paused,omitempty"`
 }
 
 // ensureAlias kullanıcının takma adını (yoksa üreterek) döndürür.
@@ -137,12 +139,13 @@ func (h *handler) loadInbound(userID int64) (inboundInfo, error) {
 	var profile sql.NullInt64
 	var last sql.NullTime
 	var status sql.NullString
-	err := h.db.QueryRow(`SELECT alias, profile_id, last_received_at, last_status FROM expense.inbound_aliases WHERE user_id = $1`, userID).
-		Scan(&alias, &profile, &last, &status)
+	var paused bool
+	err := h.db.QueryRow(`SELECT alias, profile_id, last_received_at, last_status, paused FROM expense.inbound_aliases WHERE user_id = $1`, userID).
+		Scan(&alias, &profile, &last, &status, &paused)
 	if err != nil {
 		return inboundInfo{}, err
 	}
-	info := inboundInfo{Enabled: true, Address: h.inbound.address(alias)}
+	info := inboundInfo{Enabled: true, Address: h.inbound.address(alias), Paused: paused}
 	if profile.Valid {
 		info.ProfileID = &profile.Int64
 	}
@@ -220,7 +223,7 @@ func (h *handler) rotateInboundAddress(c *gin.Context) {
 		return
 	}
 	for attempt := 0; attempt < 5; attempt++ {
-		_, err := h.db.Exec(`UPDATE expense.inbound_aliases SET alias = $2, last_received_at = NULL, last_status = NULL WHERE user_id = $1`, userID, newAlias())
+		_, err := h.db.Exec(`UPDATE expense.inbound_aliases SET alias = $2, last_received_at = NULL, last_status = NULL, paused = false WHERE user_id = $1`, userID, newAlias())
 		if isUniqueViolation(err) {
 			continue
 		}
@@ -229,6 +232,27 @@ func (h *handler) rotateInboundAddress(c *gin.Context) {
 			return
 		}
 		break
+	}
+	h.getInboundAddress(c)
+}
+
+// POST /inbound-address/pause ve /resume: aktarımı geçici durdurur / sürdürür (idempotent). Adres ve geçmiş korunur.
+func (h *handler) pauseInboundAddress(c *gin.Context)  { h.setInboundPaused(c, true) }
+func (h *handler) resumeInboundAddress(c *gin.Context) { h.setInboundPaused(c, false) }
+
+func (h *handler) setInboundPaused(c *gin.Context, paused bool) {
+	if !h.inbound.enabled() {
+		c.JSON(http.StatusOK, inboundInfo{Enabled: false})
+		return
+	}
+	userID := c.GetInt64("userID")
+	if _, err := h.ensureAlias(userID); err != nil {
+		serverError(c)
+		return
+	}
+	if _, err := h.db.Exec(`UPDATE expense.inbound_aliases SET paused = $2 WHERE user_id = $1`, userID, paused); err != nil {
+		serverError(c)
+		return
 	}
 	h.getInboundAddress(c)
 }
@@ -424,7 +448,7 @@ func recipientCandidates(p inboundPayload, m *digital.Message) []string {
 }
 
 // lookupAlias adaylar arasında INBOUND_EMAIL_DOMAIN'e ait ilk bilinen alias'ı bulur (+tag ve büyük/küçük harf toleranslı).
-func (h *handler) lookupAlias(cands []string) (userID int64, profile sql.NullInt64, alias string, err error) {
+func (h *handler) lookupAlias(cands []string) (userID int64, profile sql.NullInt64, alias string, paused bool, err error) {
 	for _, raw := range cands {
 		for _, piece := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' }) {
 			addr := strings.ToLower(strings.TrimSpace(piece))
@@ -439,14 +463,14 @@ func (h *handler) lookupAlias(cands []string) (userID int64, profile sql.NullInt
 			if i := strings.IndexByte(local, '+'); i >= 0 {
 				local = local[:i]
 			}
-			e := h.db.QueryRow(`SELECT user_id, profile_id FROM expense.inbound_aliases WHERE alias = $1`, local).Scan(&userID, &profile)
+			e := h.db.QueryRow(`SELECT user_id, profile_id, paused FROM expense.inbound_aliases WHERE alias = $1`, local).Scan(&userID, &profile, &paused)
 			if errors.Is(e, sql.ErrNoRows) {
 				continue
 			}
-			return userID, profile, local, e
+			return userID, profile, local, paused, e
 		}
 	}
-	return 0, sql.NullInt64{}, "", sql.ErrNoRows
+	return 0, sql.NullInt64{}, "", false, sql.ErrNoRows
 }
 
 // finishInbound webhook sonucunu iki yere TEK çağrıyla yazar: alias durumu (`last_status`, `bump` ise `last_received_at`
@@ -504,7 +528,7 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	}
 	msg := buildMessage(p)
 
-	userID, profile, alias, err := h.lookupAlias(recipientCandidates(p, msg))
+	userID, profile, alias, paused, err := h.lookupAlias(recipientCandidates(p, msg))
 	if errors.Is(err, sql.ErrNoRows) {
 		ignored("unknown_alias") // alias sızdırmamak için sağlayıcıya her zaman 200
 		return
@@ -528,6 +552,13 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		log.Printf("inbound: user %d: %s: %v", userID, code, cause)
 		finish("failed:"+code, historyFailed, failureReason(code, cause), 0)
 		serverError(c)
+	}
+	// Duraklatılmış adres: hiçbir şey işlenmez (rate limiter ve Gmail onay tespitinden önce). Mail "son aktarım" sayılmaz
+	// (bump=false), ama geçmişte "paused" nedeniyle görünür.
+	if paused {
+		h.finishInbound(userID, msg.From, msg.Subject, "ignored:paused", historyIgnored, "paused", 0, false)
+		ignored("paused")
+		return
 	}
 	if !inboundLimiter.allow(alias, time.Now()) {
 		log.Printf("inbound: alias rate limited (user %d)", userID)

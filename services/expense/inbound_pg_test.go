@@ -137,6 +137,105 @@ func TestPGInboundAddressEndpoints(t *testing.T) {
 	e.want(code, 204, b, "confirmation yok")
 }
 
+// Mobil "Bağlantıyı Test Et" butonunun gönderdiği hazır test maili (fissio_mobile/lib/app_info.dart kTestMailBody).
+const connectionTestMailText = "Fissio e-posta aktarımı bağlantı testi.\n\nTarih: Bugün\nMağaza: Kahve Dünyası\n" +
+	"1 x Filtre Kahve: 85,00 TL\nToplam: 85,00 TL"
+
+func (e *xenv) setPaused(uid int64, path string) inboundInfo {
+	e.t.Helper()
+	code, b := e.as(uid, "POST", path, nil)
+	e.want(code, 200, b, path)
+	var info inboundInfo
+	if err := json.Unmarshal(b, &info); err != nil {
+		e.t.Fatal(err)
+	}
+	return info
+}
+
+func TestPGInboundPauseResume(t *testing.T) {
+	e := newXEnv(t)
+	const alice = int64(1)
+
+	// Özellik kapalıyken pause da 200 {enabled:false}.
+	if info := e.setPaused(alice, "/inbound-address/pause"); info.Enabled || info.Paused {
+		t.Fatalf("kapalı özellik: %+v", info)
+	}
+	e.enableInbound()
+
+	// Duraklatılmamışken test maili fiş olur (buton gerçekten işe yarar).
+	st, out := e.mail(alice, map[string]any{"from": "ali@example.com", "subject": "Fissio Test Fişi - Kahve Dünyası", "text": connectionTestMailText})
+	if st != 200 || out["status"] != "created" {
+		t.Fatalf("test maili fiş olmalı: %d %v", st, out)
+	}
+	if got := e.list(alice, ""); len(got) != 1 || got[0].Amount != 85 {
+		t.Fatalf("test fişi: %+v", got)
+	}
+	addr := e.inboundAddress(alice).Address
+
+	// Duraklat: idempotent, adres aynı kalır, mail fiş açmaz, geçmişe paused yazılır, son aktarım zamanı ilerlemez.
+	before := e.inboundAddress(alice).LastReceivedAt
+	for i := 0; i < 2; i++ {
+		if info := e.setPaused(alice, "/inbound-address/pause"); !info.Paused || info.Address != addr {
+			t.Fatalf("pause: %+v", info)
+		}
+	}
+	st, out = e.mail(alice, map[string]any{"subject": "Paused", "text": connectionTestMailText})
+	if st != 200 || out["status"] != "ignored" || out["reason"] != "paused" {
+		t.Fatalf("duraklatılmış mail: %d %v", st, out)
+	}
+	if n := len(e.list(alice, "")); n != 1 {
+		t.Fatalf("duraklatılmışken fiş açılmamalı: %d", n)
+	}
+	h := e.history(alice, "")
+	if len(h.Items) != 2 || h.Items[0].Status != "ignored" || h.Items[0].Reason != "paused" || h.Items[0].ExpenseID != nil {
+		t.Fatalf("geçmiş: %+v", h.Items)
+	}
+	after := e.inboundAddress(alice)
+	if after.LastStatus == nil || *after.LastStatus != "ignored:paused" || !equalStrPtr(before, after.LastReceivedAt) {
+		t.Fatalf("durum: %+v (önce %v)", after, before)
+	}
+	// Duraklatılmış adrese gelen Gmail onay maili de fiş olmaz ve sızmaz.
+	st, out = e.hook(testWebhookSecret, map[string]any{"to": addr, "from": "forwarding-noreply@google.com", "text": "Onay kodu: 123456789"})
+	if st != 200 || out["reason"] != "paused" {
+		t.Fatalf("gmail onayı duraklatılmışken: %d %v", st, out)
+	}
+
+	// Devam: aynı mail artık işlenir (içerik özeti farklı olsun diye konu/metin değişir).
+	if info := e.setPaused(alice, "/inbound-address/resume"); info.Paused {
+		t.Fatalf("resume: %+v", info)
+	}
+	st, out = e.mail(alice, map[string]any{"subject": "Resumed", "text": strings.Replace(connectionTestMailText, "Kahve Dünyası", "Mado", 1)})
+	if st != 200 || out["status"] != "created" {
+		t.Fatalf("devam sonrası: %d %v", st, out)
+	}
+
+	// Duraklat + yenile: geçmiş ve fişler korunur, eski adres geçersiz, yeni adres aktif (paused sıfırlanır).
+	e.setPaused(alice, "/inbound-address/pause")
+	code, b := e.as(alice, "POST", "/inbound-address/rotate", nil)
+	e.want(code, 200, b, "rotate")
+	var rotated inboundInfo
+	_ = json.Unmarshal(b, &rotated)
+	if rotated.Paused || rotated.Address == addr {
+		t.Fatalf("rotate: %+v", rotated)
+	}
+	if n := len(e.list(alice, "")); n != 2 {
+		t.Fatalf("fişler korunmalı: %d", n)
+	}
+	if h := e.history(alice, ""); len(h.Items) < 4 {
+		t.Fatalf("geçmiş korunmalı: %d", len(h.Items))
+	}
+	if st, out = e.hook(testWebhookSecret, map[string]any{"to": addr, "text": connectionTestMailText}); out["reason"] != "unknown_alias" {
+		t.Fatalf("eski alias: %d %v", st, out)
+	}
+}
+
+func equalStrPtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 func TestPGInboundWebhookAuth(t *testing.T) {
 	e := newXEnv(t)
 	e.enableInbound()

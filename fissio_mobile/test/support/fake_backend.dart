@@ -462,6 +462,11 @@ class FakeBackend {
     if (path == '/inbound-address/rotate' && m == 'POST') {
       u.alias = 'rotated${++_seq}x9k2m4q7p1w8';
       u.lastReceivedAt = null;
+      u.inboundPaused = false;
+      return _json(200, _inbound(u));
+    }
+    if ((path == '/inbound-address/pause' || path == '/inbound-address/resume') && m == 'POST') {
+      u.inboundPaused = path.endsWith('/pause');
       return _json(200, _inbound(u));
     }
     if (path == '/inbound-address/confirmation' && m == 'GET') {
@@ -482,6 +487,7 @@ class FakeBackend {
           if (u.inboundProfileId != null) 'profile_id': u.inboundProfileId,
           if (u.lastReceivedAt != null) 'last_received_at': u.lastReceivedAt,
           if (u.lastStatus != null) 'last_status': u.lastStatus,
+          if (u.inboundPaused) 'paused': true,
         }
       : {'enabled': false};
 
@@ -576,6 +582,7 @@ class FakeUser {
   /// E-posta aktarımı (sunucu `inbound_aliases` / `forwarding_confirmations` karşılığı).
   String alias = 'k3j9x2m4q7p1w8zt';
   int? inboundProfileId;
+  bool inboundPaused = false;
   String? lastReceivedAt;
   String? lastStatus;
   Map<String, dynamic>? confirmation;

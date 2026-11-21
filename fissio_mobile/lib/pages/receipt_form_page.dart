@@ -417,7 +417,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       );
     } on ApiException catch (e) {
       // Ağ dışı hata (doğrulama, yetki): form ekranda kalır. Ağ hatasında fiş zaten cihaz kuyruğuna alınır.
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

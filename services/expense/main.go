@@ -115,6 +115,8 @@ func buildRouterWith(h *handler, v accessVerifier, alive func(sid string, userID
 	api.GET("/inbound-address", h.getInboundAddress)
 	api.PUT("/inbound-address", h.putInboundAddress)
 	api.POST("/inbound-address/rotate", h.rotateInboundAddress)
+	api.POST("/inbound-address/pause", h.pauseInboundAddress)
+	api.POST("/inbound-address/resume", h.resumeInboundAddress)
 	api.GET("/inbound-address/confirmation", h.getForwardingConfirmation)
 	api.GET("/inbound-address/history", h.getInboundHistory)
 	api.GET("/profiles", h.listProfiles)

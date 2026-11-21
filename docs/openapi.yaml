@@ -108,6 +108,7 @@ components:
         profile_id: { type: integer, format: int64, description: 'Aktarılan fişlerin düşeceği profil; yoksa en eski/varsayılan profil' }
         last_received_at: { type: string, format: date-time, description: Son başarılı aktarım (fiş oluştu/birleşti/mükerrer) }
         last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden>' }
+        paused: { type: boolean, description: 'true = aktarım duraklatıldı; gelen mailler fişe dönüşmez (alan yoksa false)' }
     Item:
       type: object
       description: >-
@@ -811,6 +812,23 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '200': { description: Yeni adres, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+  /inbound-address/pause:
+    post:
+      tags: [expense]
+      summary: Aktarımı geçici duraklat (adres ve geçmiş korunur)
+      description: >-
+        Duraklatılmış adrese gelen mailler fişe dönüşmez; `inbound_history`'ye `status=ignored`, `reason=paused` yazılır.
+        İdempotenttir. Yenileme (`rotate`) duraklatmayı kaldırır.
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Güncel durum (`paused: true`), content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+  /inbound-address/resume:
+    post:
+      tags: [expense]
+      summary: Duraklatılmış aktarımı sürdür
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Güncel durum, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
   /inbound-address/confirmation:
     get:
       tags: [expense]
@@ -839,7 +857,7 @@ paths:
       description: >-
         Webhook'a gelen her mailin akıbeti, yeniden eskiye; kullanıcı başına son 50 kayıt tutulur. Mail gövdesi ve ekleri
         saklanmaz; yalnızca gönderici, konu, durum (`saved` | `ignored` | `failed`), neden (`created`, `merged`,
-        `no_amount`, `pdf_unreadable`, `rate_limited`, `gmail_confirmation`, `duplicate_document`, `duplicate_order`,
+        `no_amount`, `pdf_unreadable`, `rate_limited`, `paused`, `gmail_confirmation`, `duplicate_document`, `duplicate_order`,
         `already_imported`…) ve varsa ilgili fiş (`expense_id`). `INBOUND_EMAIL_DOMAIN` boşsa `{ enabled: false, items: [] }`.
       security: [{ bearer: [] }]
       parameters:

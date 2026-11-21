@@ -75,7 +75,7 @@ Future<void> changeProfileAvatar(BuildContext context, Profile profile) async {
       showMessage(context, 'Kamera erişimi reddedildi. Ayarlardan izin verin veya galeriden seçin.');
     }
   } on ApiException catch (e) {
-    if (context.mounted) showMessage(context, e.message);
+    if (context.mounted) showError(context, e.message);
   }
 }
 

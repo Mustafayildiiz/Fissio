@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../api.dart';
-import '../app_info.dart' show clipboardWriter, externalLinkLauncher;
+import '../app_info.dart' show clipboardWriter, externalLinkLauncher, kTestMailBody, mailLauncher, testMailUri;
 import '../app_state.dart';
 import '../dialogs.dart';
 import '../theme.dart';
@@ -34,6 +34,7 @@ String? emailLastStatusMessage(String? status) => _EmailSetupWizardPageState.las
     'duplicate_document' || 'duplicate_order' || 'already_imported' => (label: 'Zaten Kayıtlı', warn: false, error: false),
     'gmail_confirmation' || 'gmail_confirmation_unreadable' => (label: 'Gmail Onayı', warn: false, error: false),
     'rate_limited' => (label: 'Sınır Aşıldı', warn: true, error: false),
+    'paused' => (label: 'Duraklatıldı', warn: true, error: false),
     _ => (label: 'Atlandı', warn: true, error: false),
   };
 }
@@ -177,11 +178,49 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
       await _app.rotateInbound();
       if (mounted) {
         setState(() => _confirmation = null);
-        showMessage(context, 'Yeni adres oluşturuldu.');
+        showMessage(context, 'Yeni adres oluşturuldu. Eski adres artık geçersiz.', kind: ToastKind.success);
       }
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     }
+  }
+
+  Future<void> _setPaused(bool paused) async {
+    try {
+      await _app.setInboundPaused(paused);
+      if (mounted) {
+        showMessage(
+          context,
+          paused ? 'Aktarım duraklatıldı. Gelen e-postalar fişe dönüştürülmeyecek.' : 'Aktarım devam ediyor.',
+          kind: ToastKind.success,
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) showError(context, e.message);
+    }
+  }
+
+  /// "Bağlantıyı Test Et": cihazın mail uygulamasını, Fissio adresine hazır bir test fişi yazılmış olarak açar.
+  Future<void> _testConnection(InboundAddress info) async {
+    if (info.paused) {
+      showMessage(context, 'Aktarım duraklatılmış; test e-postası fişe dönüşmez. Önce "Aktarımı devam ettir".');
+      return;
+    }
+    final ok = await mailLauncher(testMailUri(info.address));
+    if (!mounted) return;
+    if (ok) {
+      showMessage(context, 'Mail uygulaması açıldı. Gönderince fiş birkaç saniye içinde aşağıdaki listede görünür.');
+      return;
+    }
+    showToast(
+      context,
+      'E-posta uygulaması açılamadı. Test metnini kopyalayıp ${info.address} adresine kendin gönderebilirsin.',
+      kind: ToastKind.error,
+      actionLabel: 'Test metnini kopyala',
+      onAction: () async {
+        await clipboardWriter(kTestMailBody);
+      },
+    );
   }
 
   @override
@@ -245,17 +284,88 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
         ),
         const SizedBox(height: 16),
         if (_tab == 0) ..._autoTab(c, info) else ..._manualTab(c, info),
+        _testCard(c, info),
         _historySection(c),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            key: const ValueKey('wiz-rotate'),
-            onPressed: _rotate,
-            child: Text('Adresi yenile', style: FissioText.body(c, size: 14, weight: FontWeight.w600, color: c.mute)),
-          ),
+        const SizedBox(height: 12),
+        _manageCard(c, info),
+      ],
+    );
+  }
+
+  /// "Bağlantıyı Test Et": her iki sekmede de görünür.
+  Widget _testCard(FissioColors c, InboundAddress info) {
+    return _card(
+      c,
+      step: '✓',
+      title: 'Bağlantıyı test et',
+      key: const ValueKey('wiz-test'),
+      children: [
+        Text(
+          'Mail uygulaman, adresin ve hazır bir test fişi ("Kahve Dünyası, 85,00 TL") ile açılır. Gönder; fiş birkaç saniye içinde '
+          'aşağıdaki "Son Aktarılan E-Postalar" listesinde görünür.',
+          style: FissioText.body(c, size: 15, color: c.mute).copyWith(height: 1.4),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          key: const ValueKey('wiz-test-connection'),
+          onPressed: () => _testConnection(info),
+          icon: const Icon(LucideIcons.mailCheck, size: 16),
+          label: const Text('Bağlantıyı Test Et'),
         ),
       ],
+    );
+  }
+
+  /// Aktarımı duraklat / devam ettir (Switch) ve adresi yenile (onay diyaloğuyla).
+  Widget _manageCard(FissioColors c, InboundAddress info) {
+    return Container(
+      key: const ValueKey('wiz-manage'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('ADRES YÖNETİMİ', style: FissioText.label(c)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Aktarımı duraklat', style: FissioText.body(c, size: 15, weight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      info.paused
+                          ? 'Duraklatıldı: gelen e-postalar fişe dönüştürülmüyor.'
+                          : 'Açıkken adrese gelen e-postalar işlenmez; adresin ve geçmişin korunur.',
+                      style: FissioText.body(c, size: 13, color: c.mute).copyWith(height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(key: const ValueKey('wiz-pause-switch'), value: info.paused, onChanged: _setPaused),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Divider(color: c.line, height: 20),
+          Text(
+            'Adres yanlışlıkla paylaşıldıysa ya da gereksiz mail geliyorsa yeni bir adres üretebilirsin; eski adres hemen geçersiz '
+            'olur, geçmişin ve fişlerin korunur.',
+            style: FissioText.body(c, size: 13, color: c.mute).copyWith(height: 1.35),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              key: const ValueKey('wiz-rotate'),
+              onPressed: _rotate,
+              icon: Icon(LucideIcons.refreshCw, size: 16, color: c.danger),
+              label: Text('Adresi Yenile', style: FissioText.body(c, size: 14, weight: FontWeight.w700, color: c.danger)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -301,8 +411,8 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _activeRow(c, active, when),
-        if (last != null)
+        if (info.paused) _pausedRow(c) else _activeRow(c, active, when),
+        if (last != null && !info.paused)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
             child: Text(
@@ -312,6 +422,26 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _pausedRow(FissioColors c) {
+    return Container(
+      key: const ValueKey('wiz-paused-badge'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(color: c.warn.withValues(alpha: .16), borderRadius: BorderRadius.circular(kRadius)),
+      child: Row(
+        children: [
+          Icon(LucideIcons.circlePause, size: 18, color: c.warn),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Duraklatıldı — adrese gelen e-postalar fişe dönüştürülmüyor. Aşağıdan devam ettirebilirsin.',
+              style: FissioText.body(c, size: 14, weight: FontWeight.w700, color: c.warn).copyWith(height: 1.35),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -349,6 +479,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
       'gmail_confirmation' => 'Gmail onay maili alındı.',
       'ignored:pdf_unreadable' => 'Son e-postadaki PDF okunamadı. PDF\'i mail uygulamandan Paylaş → Fissio ile ekleyebilirsin.',
       'ignored:no_amount' => 'Son e-postada tutar bulunamadı; fiş olarak kaydedilmedi. Gerekirse Paylaş → Fissio ile ekle.',
+      'ignored:paused' => 'Aktarım duraklatıldı; gelen e-postalar fişe dönüştürülmüyor.',
       'ignored:rate_limited' => 'Kısa sürede çok fazla e-posta geldi; bir süre sonra tekrar dene.',
       _ when status.startsWith('failed') => 'Son e-posta işlenirken bir hata oluştu. Nedeni aşağıdaki listede; tekrar deneyebilir ya da Paylaş → Fissio ile ekleyebilirsin.',
       _ when status.startsWith('ignored:') => 'Son e-posta fiş olarak okunamadı. Gerekirse Paylaş → Fissio ile ekle.',
