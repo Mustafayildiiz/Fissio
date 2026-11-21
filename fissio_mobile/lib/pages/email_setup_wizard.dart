@@ -99,8 +99,11 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     }
   }
 
+  /// Geçmişi çeker; üst karttaki son aktarım zamanı/durumu da AYNI anda tazelenir (kart `AppState.inbound`'dan okur):
+  /// geçmişte görünen bir mail üst kartta eski tarihle kalmasın.
   Future<void> _refreshHistory() async {
     final list = await _app.loadInboundHistory();
+    await _app.loadInbound();
     if (!mounted || list == null) return;
     final info = _app.inbound;
     setState(() {
@@ -294,7 +297,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     final active = info.active;
     final when = info.lastReceivedAt == null ? '' : _fmtWhen(info.lastReceivedAt!);
     final last = lastStatusMessage(info.lastStatus);
-    final warn = info.lastStatus?.startsWith('ignored:') ?? false;
+    final warn = (info.lastStatus?.startsWith('ignored:') ?? false) || (info.lastStatus?.startsWith('failed') ?? false);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -347,6 +350,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
       'ignored:pdf_unreadable' => 'Son e-postadaki PDF okunamadı. PDF\'i mail uygulamandan Paylaş → Fissio ile ekleyebilirsin.',
       'ignored:no_amount' => 'Son e-postada tutar bulunamadı; fiş olarak kaydedilmedi. Gerekirse Paylaş → Fissio ile ekle.',
       'ignored:rate_limited' => 'Kısa sürede çok fazla e-posta geldi; bir süre sonra tekrar dene.',
+      _ when status.startsWith('failed') => 'Son e-posta işlenirken bir hata oluştu. Nedeni aşağıdaki listede; tekrar deneyebilir ya da Paylaş → Fissio ile ekleyebilirsin.',
       _ when status.startsWith('ignored:') => 'Son e-posta fiş olarak okunamadı. Gerekirse Paylaş → Fissio ile ekle.',
       _ => null,
     };
@@ -590,6 +594,18 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
                     it.receivedAt == null ? '' : _fmtWhen(it.receivedAt!),
                     style: FissioText.body(c, size: 12, color: c.mute),
                   ),
+                  // Hatanın gerçek nedeni (sunucu kısaltılmış yazar): "db_error: …" — destek/teşhis için görünür.
+                  if (it.status == 'failed' && (it.reason ?? '').trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        it.reason!.trim(),
+                        key: ValueKey('wiz-history-reason-${it.id}'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: FissioText.body(c, size: 12, color: c.danger),
+                      ),
+                    ),
                 ],
               ),
             ),

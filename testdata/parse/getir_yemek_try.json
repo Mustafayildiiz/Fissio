@@ -1,0 +1,15 @@
+{
+  "name": "getir_yemek_try",
+  "note": "GetirYemek e-posta ozeti (HTML -> metin): tutarlar ondaliksiz ve para birimi yapisik/bosluklu ('665 TRY', '355TRY'); kampanya indirimi adinda 'indirim' gecmeyen NEGATIF satir ('-310 TRY'); urun satirinda fiyat yok, yalniz '(Adet: 1)'. Toplam 355, ara toplam 665, indirim 310; kalem uydurulmaz.",
+  "text": "GetirYemek\nSiparişiniz teslim edildi\nTavukburger® Menü Alana Tavukburger® Menü Hediye - (Adet: 1)\nSipariş Özeti\nAra Toplam 665 TRY\nTeslimat Ücreti 0 TRY\nTavukburger® Menü Alana Tavukburger® Menü Hediye -310 TRY\nToplam 355TRY",
+  "expect": {
+    "merchant": "GetirYemek",
+    "amount": 355,
+    "date": null,
+    "item_count": 0,
+    "needs_review": false,
+    "discount_total": 310,
+    "items": []
+  },
+  "known_divergence": []
+}

@@ -20,6 +20,10 @@ final RegExp amountRe = RegExp(r'(?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2}\b');
 final RegExp dateRe = RegExp(r'(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$|\d{2}:\d{2})');
 // Tutara yapışık para birimi: "5.00t" (TL simgesi OCR'da t), "24,90TL", "5,00₺" → "5.00" / "24,90".
 final RegExp currencySuffixRe = RegExp(r'(\d[.,]\d{2})(?:TL|tl|[tT₺])\b');
+// Satır SONUNDA ondalıksız tutar + açık para birimi: "355TRY", "665 TRY", "-310 TRY", "1.250 TL" → "355,00" … (dijital
+// fiş/e-posta tabloları; Go `intCurrencyRe` ikizi). Satır sonu şartı "10 TL indirim kuponu" gibi açıklamaları bozmaz.
+// Grup 1 = önceki karakter (rakam/nokta/virgül OLAMAZ), grup 2 = tutar.
+final RegExp intCurrencyRe = RegExp(r'(^|[^\d.,])(-?(?:\d{1,3}(?:\.\d{3})+|\d+))\s?(?:TRY|TL|₺)\s*$', caseSensitive: false);
 // Ürün satırı izi: KDV oranı sütunu (%08, x08) ya da satır sonunda tutar; başlık/işletme adı olamaz.
 final RegExp itemRowRe = RegExp(r'%\s*\d{1,2}|(?:^|\s)[xX]\d{2}\b|\d[.,]\d{2}\s*[*tT₺]?\s*$');
 final RegExp spacedDecimalRe = RegExp(r'(\d[.,])\s(\d{2})\b');
@@ -141,7 +145,10 @@ List<String> splitLines(String text) {
   final out = <String>[];
   for (final l in text.replaceAll('\r', '').split('\n')) {
     final t = fixTurkishGlyphs(
-      l.replaceAllMapped(spacedDecimalRe, (m) => '${m[1]}${m[2]}').replaceAllMapped(currencySuffixRe, (m) => m[1]!),
+      l
+          .replaceAllMapped(spacedDecimalRe, (m) => '${m[1]}${m[2]}')
+          .replaceAllMapped(currencySuffixRe, (m) => m[1]!)
+          .replaceAllMapped(intCurrencyRe, (m) => '${m[1]}${m[2]},00'),
     ).trim();
     if (t.isNotEmpty) out.add(t);
   }

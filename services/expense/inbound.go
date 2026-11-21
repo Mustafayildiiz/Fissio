@@ -449,6 +449,26 @@ func (h *handler) lookupAlias(cands []string) (userID int64, profile sql.NullInt
 	return 0, sql.NullInt64{}, "", sql.ErrNoRows
 }
 
+// finishInbound webhook sonucunu iki yere TEK çağrıyla yazar: alias durumu (`last_status`, `bump` ise `last_received_at`
+// de) ve aktarım geçmişi. Alias geçerli her mail (kaydedildi / yok sayıldı / hata) için bump=true; yalnız Gmail
+// yönlendirme onay maili (fiş aktarımı değil) bump=false kullanır.
+func (h *handler) finishInbound(userID int64, from, subject, lastStatus, histStatus, reason string, expenseID int64, bump bool) {
+	h.setInboundStatus(userID, lastStatus, bump)
+	h.recordInboundHistory(userID, from, subject, histStatus, reason, expenseID)
+}
+
+// failureReason geçmişteki `failed` satırı için "<kod>: <gerçek hata>" metni (≤160 rune; kontrol karakterleri temizlenir).
+func failureReason(code string, cause error) string {
+	if cause == nil {
+		return code
+	}
+	msg := cleanHistoryField(cause.Error())
+	if r := []rune(msg); len(r) > 160 {
+		msg = string(r[:160])
+	}
+	return code + ": " + msg
+}
+
 func (h *handler) setInboundStatus(userID int64, status string, received bool) {
 	q := `UPDATE expense.inbound_aliases SET last_status = $2 WHERE user_id = $1`
 	if received {
@@ -494,18 +514,24 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		return
 	}
 	// Aktarım geçmişi: alias çözüldükten sonraki her çıkış tek satır kaydeder (gövde/ek saklanmaz).
-	skip := func(reason string, expenseID int64) {
-		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, reason, expenseID)
+	// finish: alias geçerliyse sonucu (saved / ignored / failed fark etmez) HEM `inbound_aliases.last_status +
+	// last_received_at` HEM geçmişe tek yerden yazar; ikisi asla ayrışmaz.
+	finish := func(lastStatus, histStatus, reason string, expenseID int64) {
+		h.finishInbound(userID, msg.From, msg.Subject, lastStatus, histStatus, reason, expenseID, true)
+	}
+	skip := func(reason string) {
+		finish("ignored:"+reason, historyIgnored, reason, 0)
 		ignored(reason)
 	}
-	fail := func(reason string) {
-		h.recordInboundHistory(userID, msg.From, msg.Subject, historyFailed, reason, 0)
+	// fail: gerçek hatayı loglar ve (kısaltılmış) geçmiş `reason`ına yazar; last_status yalnız kısa kod taşır.
+	fail := func(code string, cause error) {
+		log.Printf("inbound: user %d: %s: %v", userID, code, cause)
+		finish("failed:"+code, historyFailed, failureReason(code, cause), 0)
 		serverError(c)
 	}
 	if !inboundLimiter.allow(alias, time.Now()) {
 		log.Printf("inbound: alias rate limited (user %d)", userID)
-		h.setInboundStatus(userID, "ignored:rate_limited", false)
-		skip("rate_limited", 0)
+		skip("rate_limited")
 		return
 	}
 
@@ -522,17 +548,18 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		if conf.Code == "" && conf.Link == "" {
 			// Google'ın onay göndericisi ama kod/bağlantı okunamadı: fiş olarak denenmez, sessizce atlanır.
 			log.Printf("inbound: user %d: gmail confirmation without readable code/link", userID)
-			h.setInboundStatus(userID, "ignored:gmail_confirmation_unreadable", false)
-			skip("gmail_confirmation_unreadable", 0)
+			// Gmail onay maili fiş aktarımı DEĞİLDİR: last_received_at ilerlemez (kurulum bitmeden sihirbaz "Aktif" demesin).
+			h.finishInbound(userID, msg.From, msg.Subject, "ignored:gmail_confirmation_unreadable", historyIgnored,
+				"gmail_confirmation_unreadable", 0, false)
+			ignored("gmail_confirmation_unreadable")
 			return
 		}
 		log.Printf("inbound: user %d: gmail forwarding confirmation captured (code=%t link=%t)", userID, conf.Code != "", conf.Link != "")
 		if err := h.saveConfirmation(userID, conf); err != nil {
-			fail("confirmation_save")
+			fail("confirmation_save", err)
 			return
 		}
-		h.setInboundStatus(userID, "gmail_confirmation", false)
-		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, "gmail_confirmation", 0)
+		h.finishInbound(userID, msg.From, msg.Subject, "gmail_confirmation", historyIgnored, "gmail_confirmation", 0, false)
 		c.JSON(http.StatusOK, gin.H{"status": "confirmation"})
 		return
 	}
@@ -551,20 +578,18 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		text, source := digital.ReceiptText(msg, pdfFn)
 		if strings.TrimSpace(text) == "" {
 			log.Printf("inbound: user %d: no usable receipt text (%s)", userID, source)
-			h.setInboundStatus(userID, "ignored:"+source, false)
-			skip(source, 0)
+			skip(source)
 			return
 		}
 		in, ok, reason, err = h.expenseFromEmail(userID, text, source, msg)
 	}
 	if err != nil {
-		fail("parse_error")
+		fail("parse_error", err)
 		return
 	}
 	if !ok {
 		log.Printf("inbound: user %d: not saved (%s)", userID, reason)
-		h.setInboundStatus(userID, "ignored:"+reason, false)
-		skip(reason, 0)
+		skip(reason)
 		return
 	}
 
@@ -577,14 +602,17 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		pid, found, err = h.resolveProfile(userID, 0)
 	}
 	if err != nil || !found {
-		fail("profile_error")
+		if err == nil {
+			err = errors.New("no profile available")
+		}
+		fail("profile_error", err)
 		return
 	}
 	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
 	d, _ := time.Parse(dateLayout, in.Date)
 	tx, err := h.db.Begin()
 	if err != nil {
-		fail("db_error")
+		fail("db_error", err)
 		return
 	}
 	defer tx.Rollback()
@@ -595,40 +623,36 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		// Geçmiş satırı mevcut fişe FK ile bağlanır: tx hâlâ o satırı kilitliyorsa (FOR UPDATE) ayrı bağlantıdaki
 		// INSERT bekler ve kendi kendimizi kilitleriz. Önce işlemi bırak.
 		_ = tx.Rollback()
-		h.setInboundStatus(userID, dup, true)
-		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, dup, id)
+		finish(dup, historyIgnored, dup, id)
 		c.JSON(http.StatusOK, gin.H{"status": "duplicate", "reason": dup, "id": id})
 		return
 	}
 	if err != nil {
 		_ = tx.Rollback()
 		if isFKViolation(err) {
-			h.setInboundStatus(userID, "ignored:unknown_category", false)
-			skip("unknown_category", 0)
+			skip("unknown_category")
 			return
 		}
-		fail("db_error")
+		fail("db_error", err)
 		return
 	}
 	if outcome == writeCreated {
 		if err := saveRules(tx, userID, collectRuleUpdates(in)); err != nil {
-			fail("db_error")
+			fail("db_error", err)
 			return
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		fail("db_error")
+		fail("db_error", err)
 		return
 	}
 	if outcome == writeSkipped {
 		// Ayni icerik (onsozu atilmis ayni metin) daha once ice aktarilmis: ayni client_uid -> mukerrer.
-		h.setInboundStatus(userID, "duplicate", true)
-		h.recordInboundHistory(userID, msg.From, msg.Subject, historyIgnored, "already_imported", id)
+		finish("duplicate", historyIgnored, "already_imported", id)
 		c.JSON(http.StatusOK, gin.H{"status": "duplicate", "reason": "already_imported", "id": id})
 		return
 	}
-	h.setInboundStatus(userID, outcome, true)
-	h.recordInboundHistory(userID, msg.From, msg.Subject, historySaved, outcome, id)
+	finish(outcome, historySaved, outcome, id)
 	c.JSON(http.StatusOK, gin.H{"status": outcome, "id": id})
 }
 
@@ -686,12 +710,21 @@ func (h *handler) expenseFromEmail(userID int64, text, source string, msg *digit
 			}
 		}
 	}
-	merchant := strings.TrimSpace(parsed.Merchant)
-	if merchant == "" {
-		merchant = displayName(msg.From)
+	// Fiyatsız ürün listesi ("Ürün - (Adet: 1)") + yalnız toplam: kalem fiyatı uydurulmaz; kalem bulunamadıysa net
+	// toplam tek kaleme yazılır. Tutar bu adımdan etkilenmez.
+	if len(parsed.Items) == 0 {
+		if lines := digital.ProductLinesWithQty(text); len(lines) > 0 {
+			parsed.Items = []receiptparse.Item{{Name: singleItemName(lines), Amount: *parsed.Amount}}
+		}
 	}
+	// Satıcı: etiketli satır > cümle/sipariş no olmayan ayrıştırıcı sonucu > özgün (iletilen) gönderici > gönderen adı >
+	// gönderen domaini (bkz. digital.ChooseMerchant).
+	merchant := digital.ChooseMerchant(parsed.Merchant, text, msg)
 	if merchant == "" {
 		merchant = "E-posta fişi"
+	}
+	if r := []rune(merchant); len(r) > 60 {
+		merchant = string(r[:60])
 	}
 	engine := "email"
 	if source == digital.SourcePDF {
@@ -719,6 +752,27 @@ func (h *handler) expenseFromEmail(userID int64, text, source string, msg *digit
 		return expenseInput{}, false, "invalid:" + msg, nil
 	}
 	return in, true, "", nil
+}
+
+// singleItemName fiyatsız ürün satırlarından tek kalem adı: tek ürünse "N x Ad" (N>1), çoksa adlar " + " ile (≤80 rune).
+func singleItemName(lines []digital.ProductLine) string {
+	var name string
+	if len(lines) == 1 {
+		name = lines[0].Name
+		if lines[0].Qty > 1 {
+			name = strconv.Itoa(lines[0].Qty) + " x " + name
+		}
+	} else {
+		parts := make([]string, 0, len(lines))
+		for _, l := range lines {
+			parts = append(parts, l.Name)
+		}
+		name = strings.Join(parts, " + ")
+	}
+	if r := []rune(name); len(r) > 80 {
+		name = string(r[:80])
+	}
+	return name
 }
 
 func itemsOrEmpty(items []expenseItem) []expenseItem {

@@ -25,8 +25,11 @@ func (t TableItem) DisplayName() string {
 
 var (
 	moneyCellRe = regexp.MustCompile(`(?i)^(?:₺\s*)?(\d{1,3}(?:\.\d{3})+|\d+)([.,]\d{2})\s*(?:tl|₺|try)?$`)
-	qtyCellRe   = regexp.MustCompile(`(?i)^(?:(\d{1,3})\s*(?:x|×|adet|adt)?|(?:x|×)\s*(\d{1,3}))$`)
-	qtyPrefixRe = regexp.MustCompile(`(?i)^(\d{1,3})\s*(?:x|×|adet)\s+(.+)$|^(\d{1,3})x\s*(.+)$`)
+	// Ondalıksız tutar YALNIZ açık para birimiyle ("665 TRY", "355TRY", "-310 TRY"): çıplak "2" adet hücresidir.
+	// Baştaki eksi (-, −) kampanya/indirim satırıdır.
+	intMoneyCellRe = regexp.MustCompile(`(?i)^([-−])?\s?(\d{1,3}(?:\.\d{3})+|\d+)\s?(?:tl|₺|try)$`)
+	qtyCellRe      = regexp.MustCompile(`(?i)^(?:(\d{1,3})\s*(?:x|×|adet|adt)?|(?:x|×)\s*(\d{1,3}))$`)
+	qtyPrefixRe    = regexp.MustCompile(`(?i)^(\d{1,3})\s*(?:x|×|adet)\s+(.+)$|^(\d{1,3})x\s*(.+)$`)
 )
 
 // Özet satırı etiketleri (katlanmış, tam etiket ya da etiket + boşluk önekiyle eşleşir). "Teslimat Ücreti",
@@ -46,8 +49,20 @@ func isSummaryLabel(name string) bool {
 	return false
 }
 
+// moneyCents para hücresini kuruşa çevirir; eksi işaretli hücre negatif döner (kalem olmaz, bkz. rowItem).
 func moneyCents(s string) (int64, bool) {
-	m := moneyCellRe.FindStringSubmatch(strings.TrimSpace(s))
+	s = strings.TrimSpace(s)
+	if m := intMoneyCellRe.FindStringSubmatch(s); m != nil {
+		w, err := strconv.ParseInt(strings.ReplaceAll(m[2], ".", ""), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		if m[1] != "" {
+			return -w * 100, true
+		}
+		return w * 100, true
+	}
+	m := moneyCellRe.FindStringSubmatch(s)
 	if m == nil {
 		return 0, false
 	}

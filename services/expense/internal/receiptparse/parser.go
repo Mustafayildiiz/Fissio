@@ -84,6 +84,10 @@ var (
 	dateRe = regexp.MustCompile(`(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$|\d{2}:\d{2})`)
 	// Tutara yapisik para birimi: "5.00t" (TL simgesi OCR'da t), "24,90TL", "5,00₺" -> "5.00" / "24,90".
 	currencySuffixRe = regexp.MustCompile(`(\d[.,]\d{2})(?:TL|tl|[tT₺])\b`)
+	// Satir SONUNDA ondaliksiz tutar + acik para birimi: "355TRY", "665 TRY", "-310 TRY", "1.250 TL" -> "355,00" ...
+	// (dijital fis/e-posta tablolari). Satir sonu sarti "10 TL indirim kuponu" gibi aciklamalari bozmaz; ondalikli
+	// bicimler currencySuffixRe'nin isidir. Grup 1 = onceki karakter (rakam/nokta/virgul OLAMAZ), grup 2 = tutar.
+	intCurrencyRe = regexp.MustCompile(`(?i)(^|[^\d.,])(-?(?:\d{1,3}(?:\.\d{3})+|\d+))\s?(?:TRY|TL|₺)\s*$`)
 	// Urun satiri izi: KDV orani sutunu (%08, x08) ya da satir sonunda tutar; baslik/isletme adi olamaz.
 	itemRowRe = regexp.MustCompile(`%\s*\d{1,2}|(?:^|\s)[xX]\d{2}\b|\d[.,]\d{2}\s*[*tT₺]?\s*$`)
 	// OCR ondalik ayiraci sonrasina bosluk koyabilir ("+24, 90" -> "24,90").
@@ -170,7 +174,9 @@ func ParseWith(text string, cats []Category, now time.Time, opts ParseOptions) P
 func splitLines(text string) []string {
 	var out []string
 	for _, l := range strings.Split(strings.ReplaceAll(text, "\r", ""), "\n") {
-		if l = strings.TrimSpace(fixTurkishGlyphs(currencySuffixRe.ReplaceAllString(spacedDecimalRe.ReplaceAllString(l, "$1$2"), "$1"))); l != "" {
+		l = currencySuffixRe.ReplaceAllString(spacedDecimalRe.ReplaceAllString(l, "$1$2"), "$1")
+		l = intCurrencyRe.ReplaceAllString(l, "${1}${2},00")
+		if l = strings.TrimSpace(fixTurkishGlyphs(l)); l != "" {
 			out = append(out, l)
 		}
 	}

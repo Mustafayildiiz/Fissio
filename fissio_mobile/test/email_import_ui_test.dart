@@ -461,6 +461,48 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('yok sayılan mail: üst kart (son aktarım + durum) ve geçmiş AYNI yoklamada güncellenir', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
+      await _flush(tester, h);
+      expect(find.textContaining('Henüz e-posta alınmadı'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-history-empty')), findsOneWidget);
+
+      final u = h.backend.user(_email);
+      u.lastReceivedAt = '2026-11-21T14:30:00Z';
+      u.lastStatus = 'ignored:no_amount';
+      u.inboundHistory = [row(1, 'ignored', reason: 'no_amount')];
+      await tester.pump(const Duration(milliseconds: 150));
+      await _flush(tester, h);
+      await tester.pump();
+
+      expect(find.textContaining('Aktif — Son aktarım:'), findsOneWidget, reason: 'üst kart son aktarım tarihini gösterir');
+      expect(find.byKey(const ValueKey('wiz-last-status')), findsOneWidget);
+      expect(find.textContaining('tutar bulunamadı'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-history-empty')), findsNothing);
+      expect(find.text('Tutar Bulunamadı'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('failed satırı gerçek nedeni gösterir; üst kart hata durumunu söyler', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      final u = h.backend.user(_email);
+      u.lastReceivedAt = '2026-11-21T14:30:00Z';
+      u.lastStatus = 'failed:db_error';
+      u.inboundHistory = [row(7, 'failed', reason: 'db_error: pq: new row violates check constraint "boom"')];
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-history-7')));
+      expect(find.text('Hata'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-history-reason-7')), findsOneWidget);
+      expect(find.textContaining('check constraint "boom"'), findsOneWidget);
+      expect(find.textContaining('işlenirken bir hata oluştu'), findsOneWidget);
+      expect(emailLastStatusMessage('failed:db_error'), isNotNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     test('emailHistoryBadge eşlemesi', () {
       InboundHistoryItem it(String s, [String? r]) => InboundHistoryItem(id: 1, status: s, reason: r);
       expect(emailHistoryBadge(it('saved', 'merged')).label, 'Kaydedildi');

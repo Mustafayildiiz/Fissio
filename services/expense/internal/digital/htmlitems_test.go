@@ -56,6 +56,58 @@ func TestHTMLTableItemsQtyForms(t *testing.T) {
 	}
 }
 
+// GetirYemek sipariş özeti: tutarlar ondalıksız ve para birimi bitişik/boşluklu; kampanya indirimi NEGATİF satırdır.
+// Hiçbiri kalem olmamalı (özet satırları + sıfır teslimat + negatif indirim); ürün satırında fiyat yok.
+func TestHTMLTableItemsGetirOrderSummary(t *testing.T) {
+	src := `<table><tr>
+	<td>Tavukburger® Menü Alana Tavukburger® Menü Hediye - (Adet: 1)</td>
+	<td><table>
+	  <tr><td>Sipariş Özeti</td></tr>
+	  <tr><td>Ara Toplam</td><td>665 TRY</td></tr>
+	  <tr><td>Teslimat Ücreti</td><td>0 TRY</td></tr>
+	  <tr><td>Tavukburger® Menü Alana Tavukburger® Menü Hediye</td><td>-310 TRY</td></tr>
+	  <tr><td><b>Toplam</b></td><td><b>355TRY</b></td></tr>
+	</table></td></tr></table>`
+	if got := HTMLTableItems(src); len(got) != 0 {
+		t.Fatalf("özet/indirim/sıfır teslimat kalem olmamalı: %+v", got)
+	}
+}
+
+func TestMoneyCentsIntegerWithCurrency(t *testing.T) {
+	ok := map[string]int64{
+		"665 TRY": 66500, "355TRY": 35500, "0 TRY": 0, "-310 TRY": -31000, "−310 TRY": -31000, "1.250 TL": 125000,
+		"- 310 TRY": -31000, "12,50 TL": 1250, "185,00 TL": 18500, "₺ 20,00": 2000,
+	}
+	for in, want := range ok {
+		if got, k := moneyCents(in); !k || got != want {
+			t.Errorf("moneyCents(%q) = %d,%v want %d", in, got, k, want)
+		}
+	}
+	for _, in := range []string{"2", "12", "Ayran", "355", "TRY", "-"} {
+		if _, k := moneyCents(in); k {
+			t.Errorf("moneyCents(%q) para sayılmamalı (adet/metin)", in)
+		}
+	}
+}
+
+func TestHTMLTableItemsIntegerPricedRows(t *testing.T) {
+	src := `<table>
+	  <tr><td>Lahmacun</td><td>2</td><td>90 TL</td></tr>
+	  <tr><td>Ayran</td><td>15TRY</td></tr>
+	  <tr><td>Kampanya</td><td>-20 TRY</td></tr>
+	</table>`
+	got := HTMLTableItems(src)
+	want := []TableItem{{"Lahmacun", 2, 9000}, {"Ayran", 1, 1500}}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("item %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestHTMLTableItemsIgnoresHiddenAndNonMoney(t *testing.T) {
 	src := `<table>
 	  <tr style="display:none"><td>Gizli</td><td>5,00 TL</td></tr>
