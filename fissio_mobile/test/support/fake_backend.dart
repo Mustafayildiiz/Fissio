@@ -29,6 +29,10 @@ class FakeBackend {
   /// Her istekten sonra çağrılır (ağın ortada kesilmesini simüle etmek için).
   void Function(String method, String path)? afterRequest;
 
+  /// "METHOD /path" → kapı: istek işlenir (yanıt O ANKİ durumu yansıtır) ama kapı açılana dek istemciye dönmez.
+  /// Yavaş ağda geç dönen yanıtları (yarışları) taklit eder; tek seferliktir.
+  final Map<String, Completer<void>> hold = {};
+
   final List<({String method, String path})> log = [];
 
   /// Tüm isteklerin tam adresleri (sorgu parametreleriyle; ör. `GET /expenses?since=`).
@@ -154,7 +158,10 @@ class FakeBackend {
     try {
       if (offline) throw http.ClientException('offline');
       if (failPaths.contains('$m $path')) return _err(500, 'internal', 'internal error');
-      return await _route(req, m, path, body);
+      final res = await _route(req, m, path, body);
+      final gate = hold.remove('$m $path');
+      if (gate != null) await gate.future;
+      return res;
     } finally {
       afterRequest?.call(m, path);
     }

@@ -369,10 +369,29 @@ DateTime pickableToday([DateTime? now]) {
   return DateTime(n.year, n.month, n.day);
 }
 
-/// `showDatePicker`, `initialDate > lastDate` ise assert eder (OCR tarihi now+2 güne kadar izin verir): içeri çeker.
-DateTime clampPickerDate(DateTime d, DateTime last) {
+/// Tarih seçicilerin `firstDate` değeri. Yedek/CSV içe aktarma 1990'a kadar tarih kabul eder (`data_transfer.dart`);
+/// alt sınır daha yüksek olsaydı o fişlerde seçici `initialDate < firstDate` ile assert ederdi.
+final kPickerFirstDate = DateTime(1990);
+
+/// `showDatePicker`, `initialDate` [first]..[last] dışındaysa assert eder (OCR tarihi now+2 güne kadar izin verir,
+/// içe aktarılan eski fiş alt sınırın altında kalabilir): iki uçtan içeri çeker.
+DateTime clampPickerDate(DateTime d, DateTime last, {DateTime? first}) {
   final day = DateTime(d.year, d.month, d.day);
-  return day.isAfter(last) ? last : day;
+  final lo = first ?? kPickerFirstDate;
+  if (day.isAfter(last)) return last;
+  if (day.isBefore(lo)) return lo;
+  return day;
+}
+
+/// `showDateRangePicker` için başlangıç aralığı: [first]..[last] içine kısılır; kısılınca geçersiz kalırsa null.
+/// (Seçili aralık saklanırken cihaz saati/saat dilimi geri giderse `end > lastDate` assert'i oluşurdu.)
+DateTimeRange? clampPickerRange(DateTimeRange? r, DateTime last, {DateTime? first}) {
+  if (r == null) return null;
+  final lo = first ?? kPickerFirstDate;
+  final start = clampPickerDate(r.start, last, first: lo);
+  final end = clampPickerDate(r.end, last, first: lo);
+  if (end.isBefore(start)) return null;
+  return DateTimeRange(start: start, end: end);
 }
 
 const kMonthNames = [

@@ -84,6 +84,75 @@ void main() {
     expect(find.text('İkinci'), findsNothing);
   });
 
+  testWidgets('kapanma animasyonu sürerken yenisi gelirse eski kapanış tamamlanır, yenisi kalır', (tester) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(_app(onTap: (c) {
+      ctx = c;
+      showMessage(c, 'Eski');
+    }));
+    await _show(tester);
+    await tester.tap(find.text('Eski')); // kapanış animasyonu başlar
+    await tester.pump(const Duration(milliseconds: 50));
+    showMessage(ctx, 'Yeni'); // eski controller animasyon ortasında dispose edilir
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Eski'), findsNothing);
+    expect(find.text('Yeni'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pump(kToastDuration);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Yeni'), findsNothing);
+  });
+
+  testWidgets('kapanmış sayfanın context\'i ile çağrı sessizce yok sayılır', (tester) async {
+    late BuildContext pageCtx;
+    final nav = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: nav,
+      theme: buildTheme(brightness: Brightness.light, accent: kDefaultAccent),
+      home: const Scaffold(body: Text('kök')),
+    ));
+    nav.currentState!.push(MaterialPageRoute<void>(builder: (c) {
+      pageCtx = c;
+      return const Scaffold(body: Text('ikinci'));
+    }));
+    await tester.pumpAndSettle();
+    nav.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(pageCtx.mounted, isFalse);
+    showMessage(pageCtx, 'Geç kalan');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Geç kalan'), findsNothing);
+  });
+
+  testWidgets('gösteren sayfa kapansa da toast yaşar ve süresi dolunca kapanır', (tester) async {
+    final nav = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: nav,
+      theme: buildTheme(brightness: Brightness.light, accent: kDefaultAccent),
+      home: const Scaffold(body: Text('kök')),
+    ));
+    nav.currentState!.push(MaterialPageRoute<void>(builder: (c) => Scaffold(
+          body: ElevatedButton(
+            key: const ValueKey('go2'),
+            onPressed: () {
+              showMessage(c, 'Kaydedildi');
+              Navigator.of(c).pop();
+            },
+            child: const Text('kaydet'),
+          ),
+        )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('go2')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Kaydedildi'), findsOneWidget);
+    await tester.pump(kToastDuration);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Kaydedildi'), findsNothing);
+  });
+
   testWidgets('showError üst toast olarak mesajı gösterir', (tester) async {
     await tester.pumpWidget(_app(onTap: (c) => showError(c, 'Sunucu hatası')));
     await _show(tester);

@@ -35,7 +35,7 @@ class BudgetsPage extends StatelessWidget {
         return;
       }
       final v = parseMoneyInput(raw);
-      if (v == null || v < 0.01 || v >= 1e9) {
+      if (v == null || v < 0.01 || v >= kMaxBudgetLimit) {
         showMessage(context, 'Geçerli bir tutar girin.');
         return;
       }
@@ -72,6 +72,15 @@ class BudgetsPage extends StatelessWidget {
           listenable: _app,
           builder: (context, _) {
             final progress = {for (final p in _app.budgetProgress) p.budget.categoryId: p};
+            // Kategorisi listede olmayan limitler (kategori silindi / kategoriler henüz yüklenmedi): toplam kuralına
+            // sayılırlar, bu yüzden burada da görünmeli ve kaldırılabilmeli; aksi halde görünmeyen bir satır uyarı üretirdi.
+            final known = {for (final cat in _app.categories) cat.id};
+            final orphans = [
+              for (final p in progress.values)
+                if (!p.budget.isTotal && !known.contains(p.budget.categoryId)) p,
+            ];
+            String orphanName(BudgetProgress p) =>
+                p.budget.categoryName.trim().isEmpty ? 'Bilinmeyen kategori' : p.budget.categoryName;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -135,6 +144,13 @@ class BudgetsPage extends StatelessWidget {
                                 chevron: true,
                                 trailing: Text('Limit yok', style: FissioText.body(c, size: 14, color: c.mute)),
                               ),
+                          for (final p in orphans)
+                            BudgetRow(
+                              key: ValueKey('budget-${p.budget.categoryId}'),
+                              progress: p,
+                              title: orphanName(p),
+                              onTap: () => _edit(context, p.budget.categoryId, orphanName(p), p.budget.limit),
+                            ),
                         ],
                       ),
                     ],

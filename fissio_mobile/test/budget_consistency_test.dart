@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:fissio_mobile/api.dart';
 import 'package:fissio_mobile/budgets.dart';
 import 'package:fissio_mobile/models.dart';
 import 'package:fissio_mobile/pages/budgets_page.dart';
@@ -59,6 +62,16 @@ void main() {
       final bs = [_b(0, 0.3), _b(1, 0.1)];
       expect(_check(bs, 2, 0.2).ok, isTrue); // 0.1 + 0.2 == 0.3
     });
+
+    test('gösterilen yüzde kuruşla hesaplanır (57/100 → %57, 0.57*100 = 56.99…)', () {
+      int pct(double spent, double limit) => BudgetProgress(budget: _b(1, limit), spent: spent).percent;
+      expect(pct(57, 100), 57);
+      expect(pct(0.57, 1), 57);
+      expect(pct(79.99, 100), 79);
+      expect(pct(80, 100), 80);
+      expect(pct(250, 100), 250);
+      expect(pct(10, 0), 0);
+    });
   });
 
   group('AppState.setBudget', () {
@@ -100,6 +113,53 @@ void main() {
       h.backend.offline = false;
       await h.app.setSyncEnabled(false);
       await expectLater(h.app.setBudget(3, 500), throwsA(isA<BudgetLimitException>()));
+    });
+
+    test('eşzamanlı iki kayıt sıralanır: ikincisi birincinin sonucuna karşı denetlenir', () async {
+      await h.signIn('ali@x.co');
+      await h.app.setBudget(kTotalBudgetCategoryId, 1000);
+      final gate = Completer<void>();
+      h.backend.hold['PUT /budgets'] = gate; // birinci kayıt ağda "yavaş"
+      final first = h.app.setBudget(1, 600);
+      final second = h.app.setBudget(2, 600);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      gate.complete();
+      await first;
+      await expectLater(second, throwsA(isA<BudgetLimitException>()));
+      final byCat = {for (final b in h.app.budgets) b.categoryId: b.limit};
+      expect(byCat, {0: 1000.0, 1: 600.0}, reason: 'kategoriler toplamı (1200) toplamı (1000) aşamaz');
+    });
+
+    test('raiseTotal: kategori yazımı başarısızsa toplam eski değerine döner', () async {
+      await h.signIn('ali@x.co');
+      await h.app.setBudget(kTotalBudgetCategoryId, 1000);
+      await h.app.setBudget(1, 800);
+      var puts = 0;
+      h.backend.afterRequest = (m, p) {
+        if (m != 'PUT' || p != '/budgets') return;
+        puts++;
+        // 1. PUT (toplam) geçer, 2. PUT (kategori) 500 alır, 3. PUT (geri alma) geçer.
+        if (puts == 1) h.backend.failPaths.add('PUT /budgets');
+        if (puts == 2) h.backend.failPaths.remove('PUT /budgets');
+      };
+      await expectLater(h.app.setBudget(2, 500, raiseTotal: true), throwsA(isA<ApiException>()));
+      h.backend.afterRequest = null;
+      final byCat = {for (final b in h.app.budgets) b.categoryId: b.limit};
+      expect(byCat, {0: 1000.0, 1: 800.0});
+      expect(h.backend.user('ali@x.co').budgets.firstWhere((b) => b['category_id'] == null)['monthly_limit'], 1000);
+    });
+
+    test('raiseTotal: önerilen toplam sunucu üst sınırını aşarsa hiçbir şey yazılmaz', () async {
+      await h.signIn('ali@x.co');
+      await h.app.setBudget(1, 600000000);
+      await h.app.setBudget(kTotalBudgetCategoryId, 600000000);
+      final before = h.backend.writes.length;
+      await expectLater(
+        h.app.setBudget(2, 500000000, raiseTotal: true),
+        throwsA(isA<ApiException>().having((e) => e.message, 'message', contains('en yüksek'))),
+      );
+      expect(h.backend.writes.length, before);
+      expect(h.app.budgets.length, 2);
     });
 
     test('silme her zaman serbest; toplam yoksa kategori sınırsız', () async {
@@ -150,6 +210,33 @@ void main() {
       await tester.pumpAndSettle();
       final byCat = {for (final b in h.app.budgets) b.categoryId: b.limit};
       expect(byCat, {kTotalBudgetCategoryId: 1500.0, catId: 1500.0});
+    });
+
+    testWidgets('kategorisi listede olmayan limit görünür ve silinebilir (aksi halde görünmez bir uyarı kaynağı olurdu)',
+        (tester) async {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final h = Harness();
+      await tester.runAsync(() async {
+        await h.signIn('ali@x.co');
+        await h.app.setSyncEnabled(false); // yalnız cihaz: sunucunun kategori doğrulamasına takılmaz
+        await h.app.setBudget(99, 700); // kategori 99 listede yok (silinmiş)
+      });
+      await tester.pumpWidget(MaterialApp(theme: buildTheme(), home: BudgetsPage(app: h.app)));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('budget-99')), findsOneWidget);
+      expect(find.text('Bilinmeyen kategori'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('budget-99')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '');
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Kaydet'));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(h.app.budgets.where((b) => b.categoryId == 99), isEmpty);
+      expect(find.byKey(const ValueKey('budget-99')), findsNothing);
     });
 
     testWidgets('toplamı kategori toplamının altına düşürmek hata mesajıyla reddedilir (diyalog yok)', (tester) async {

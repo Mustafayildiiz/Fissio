@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -60,8 +61,9 @@ Future<void> runDigitalImport(
   }
   if (file == null || !messenger.mounted) return;
 
-  // Okuma sürerken ikinci dokunuşu engelleyen basit ilerleme penceresi.
-  showDialog<void>(
+  // Okuma sürerken ikinci dokunuşu engelleyen basit ilerleme penceresi. Kendi rotası tutulur ve HER çıkışta tam olarak
+  // o kaldırılır: kör `pop()` araya giren bir sayfayı (ör. fissio://scan) kapatıp kapatılamayan spinner bırakırdı.
+  final progress = DialogRoute<void>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => PopScope(
@@ -69,6 +71,7 @@ Future<void> runDigitalImport(
       child: Center(child: CircularProgressIndicator(color: ctx.c.accent)),
     ),
   );
+  unawaited(nav.push(progress));
   ReceiptDraft? draft;
   String? error;
   try {
@@ -77,9 +80,10 @@ Future<void> runDigitalImport(
     error = e.message;
   } catch (_) {
     error = 'PDF okunamadı. Bilgileri elle girebilirsiniz.';
+  } finally {
+    if (nav.mounted && progress.isActive) nav.removeRoute(progress);
   }
   if (!messenger.mounted) return;
-  nav.pop(); // ilerleme penceresi
   if (draft == null) {
     showMessage(messenger, error ?? 'PDF okunamadı.');
     return;

@@ -125,37 +125,61 @@ class ThemeController extends ChangeNotifier {
   /// `runApp` öncesi çağrılır; depolama okunamazsa varsayılanlarla devam eder.
   Future<void> load() async {
     try {
-      final a = await _store.read(accentKey);
+      // Her okuma bir platform kanalı + (Android'de) şifre çözme turudur; art arda beklemek ilk kareyi ~14 tur geciktirir.
+      // Bağımsız oldukları için hepsi aynı anda istenir. Tek bir anahtarın okunamaması (ör. şifre çözme hatası) yalnız
+      // o tercihi varsayılana düşürür; Future.wait'in ilk hatası diğer 10 tercihi de silmesin.
+      Future<String?> read(String k) async {
+        try {
+          return await _store.read(k);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      final r = await Future.wait<String?>([
+        read(accentKey),
+        read(logoKey),
+        read(launcherKey),
+        read(modeKey),
+        read(styleKey),
+        read(ocrModeKey),
+        read(ocrEngineKey),
+        read(showOcrEngineKey),
+        read(widgetThemeKey),
+        read(homeCardsKey),
+        read(homeHiddenKey),
+      ]);
+      final a = r[0];
       final parsed = a == null ? null : int.tryParse(a);
       if (parsed != null) {
         accent = Color(parsed);
         // Eski varsayılan mor, tasarımdaki mora taşınır (swatch seçili görünsün).
         if (accent.toARGB32() == kLegacyPurple.toARGB32()) accent = kBrandPurple;
       }
-      final lg = await _store.read(logoKey);
+      final lg = r[1];
       final lgParsed = lg == null ? null : int.tryParse(lg);
       logoOverride = lgParsed == null ? null : Color(lgParsed);
-      _appliedLauncher = await _store.read(launcherKey);
-      final m = await _store.read(modeKey);
+      _appliedLauncher = r[2];
+      final m = r[3];
       themeMode = ThemeMode.values.firstWhere(
         (e) => e.name == m,
         orElse: () => ThemeMode.system,
       );
-      final s = await _store.read(styleKey);
+      final s = r[4];
       receiptStyle = ReceiptStyle.values.firstWhere(
         (e) => e.name == s,
         orElse: () => ReceiptStyle.paper,
       );
-      final o = await _store.read(ocrModeKey);
+      final o = r[5];
       ocrMode = OcrMode.values.firstWhere((e) => e.name == o, orElse: () => OcrMode.auto);
-      final e = await _store.read(ocrEngineKey);
+      final e = r[6];
       if (e != null && e.isNotEmpty) ocrEngine = e;
       // Yalnızca açıkça 'false' yazılmışsa kapalı; yoksa/bozuksa varsayılan (açık).
-      showOcrEngine = (await _store.read(showOcrEngineKey)) != 'false';
-      final wt = await _store.read(widgetThemeKey);
+      showOcrEngine = r[7] != 'false';
+      final wt = r[8];
       widgetTheme = WidgetTheme.values.firstWhere((x) => x.name == wt, orElse: () => WidgetTheme.system);
-      homeCardOrder = parseHomeCardOrder(await _store.read(homeCardsKey));
-      hiddenHomeCards = parseHiddenHomeCards(await _store.read(homeHiddenKey));
+      homeCardOrder = parseHomeCardOrder(r[9]);
+      hiddenHomeCards = parseHiddenHomeCards(r[10]);
     } catch (_) {
       // Depolama yoksa (test/ilk açılış) varsayılanlar geçerli.
     }
@@ -193,22 +217,38 @@ class ThemeController extends ChangeNotifier {
     try {
       if (!await _launcher.supported) return;
       final key = brandKeyOf(logoColor);
+      // Bekleyen (başka renge ait) değişiklik HER durumda iptal edilir: A'ya dokunup 1,5 sn içinde uygulanmış renge
+      // geri dönülürse erken dönüş A'nın zamanlayıcısını çalışır bırakır, ikon logoyla uyuşmazdı.
+      _launcherTimer?.cancel();
+      _launcherTimer = null;
       if (key == _appliedLauncher) return;
       Future<void> apply() async {
-        if (await _launcher.set(key)) {
-          _appliedLauncher = key;
-          await _save(launcherKey, key);
+        try {
+          if (await _launcher.set(key)) {
+            _appliedLauncher = key;
+            await _save(launcherKey, key);
+          }
+        } catch (_) {
+          // Zamanlayıcıdan çalışır: hata yakalanmazsa işlenmemiş async hata olurdu.
         }
       }
 
-      _launcherTimer?.cancel();
       if (!debounce) return await apply();
       _launcherTimer = Timer(const Duration(milliseconds: 1500), apply);
     } catch (_) {}
   }
 
+  bool _disposed = false;
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return; // load()/setX await sonrası dispose edilmiş olabilir (testler)
+    super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _launcherTimer?.cancel();
     super.dispose();
   }

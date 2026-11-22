@@ -34,6 +34,14 @@ class BudgetProgress {
 
   /// Harcama / limit (1'i aşabilir).
   double get ratio => budget.limit <= 0 ? 0 : spent / budget.limit;
+
+  /// Gösterilen yüzde (aşağı yuvarlanmış), kuruş tamsayılarıyla: `0.57 * 100` = 56,999… olduğundan oranın kayan
+  /// noktalı tabanı 57/100 için "%56" gösteriyordu. Eşiklerle ([budgetLevel]) aynı aritmetik: %80 görünüyorsa sarıdır.
+  int get percent {
+    final l = (budget.limit * 100).round();
+    if (l <= 0) return 0;
+    return (spent * 100).round() * 100 ~/ l;
+  }
   BudgetLevel get level => budgetLevel(spent, budget.limit);
   double get remaining => budget.limit - spent;
 }
@@ -154,6 +162,9 @@ BudgetLimitCheck checkBudgetLimit({
     totalLimit: newTotal == null ? null : lira(newTotal),
   );
 }
+
+/// Sunucunun kabul ettiği en büyük aylık limit (`budgets.go maxBudgetLimit`, hariç).
+const kMaxBudgetLimit = 1e9;
 
 /// [AppState.setBudget] tutarlılık kuralına takıldığında atılır (arayüz `check`'e göre "toplamı eşitle" önerir).
 class BudgetLimitException extends ApiException {

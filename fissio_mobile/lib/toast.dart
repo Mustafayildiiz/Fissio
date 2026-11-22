@@ -41,6 +41,9 @@ void showToast(
   String? actionLabel,
   VoidCallback? onAction,
 }) {
+  // Kapanmış bir sayfanın context'i: `Overlay.maybeOf` deaktive elemanda assert eder. Bildirim sessizce atlanır, böylece
+  // await sonrası `showMessage/showError` çağrıları ayrıca korunmasa da çökmez.
+  if (!context.mounted) return;
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   if (overlay == null) return;
   _current?.remove();
@@ -83,6 +86,10 @@ class _ToastView extends StatefulWidget {
 
 class _ToastViewState extends State<_ToastView> with SingleTickerProviderStateMixin {
   late final AnimationController _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+  // Bir kez kurulur: her build'de yeni CurvedAnimation, _anim'e dinleyici ekleyip hiç bırakmıyordu.
+  late final CurvedAnimation _curved = CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _slide =
+      Tween<Offset>(begin: const Offset(0, -.6), end: Offset.zero).animate(_curved);
   Timer? _timer;
   bool _closing = false;
 
@@ -96,6 +103,7 @@ class _ToastViewState extends State<_ToastView> with SingleTickerProviderStateMi
   @override
   void dispose() {
     _timer?.cancel();
+    _curved.dispose();
     _anim.dispose();
     super.dispose();
   }
@@ -106,9 +114,11 @@ class _ToastViewState extends State<_ToastView> with SingleTickerProviderStateMi
     _timer?.cancel();
     if (mounted) {
       try {
-        await _anim.reverse();
-      } catch (_) {
-        // dispose edildi
+        // `orCancel`: bildirim kapanırken yenisiyle değiştirilirse controller dispose edilir; düz TickerFuture o zaman
+        // hiç tamamlanmaz (bekleyen future asılı kalırdı), orCancel TickerCanceled ile biter.
+        await _anim.reverse().orCancel;
+      } on TickerCanceled {
+        // değiştirildi/dispose edildi
       }
     }
     widget.onDone();
@@ -122,7 +132,6 @@ class _ToastViewState extends State<_ToastView> with SingleTickerProviderStateMi
       ToastKind.error => (LucideIcons.circleAlert, c.danger),
       ToastKind.info => (LucideIcons.info, c.accent),
     };
-    final curved = CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic);
     return Positioned(
       top: 0,
       left: 0,
@@ -132,9 +141,9 @@ class _ToastViewState extends State<_ToastView> with SingleTickerProviderStateMi
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: FadeTransition(
-            opacity: curved,
+            opacity: _curved,
             child: SlideTransition(
-              position: Tween<Offset>(begin: const Offset(0, -.6), end: Offset.zero).animate(curved),
+              position: _slide,
               child: Dismissible(
                 key: const ValueKey('app-toast'),
                 direction: DismissDirection.up,

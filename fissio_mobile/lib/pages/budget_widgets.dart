@@ -29,7 +29,8 @@ class BudgetBar extends StatelessWidget {
     final c = context.c;
     return Semantics(
       label: 'Bütçe kullanımı',
-      value: '%${(ratio * 100).round()}',
+      // Satırdaki yüzdeyle aynı (aşağı yuvarlama); küçük pay kayan nokta artığını (56,999…) yutar.
+      value: '%${ratio.isNaN ? 0 : (ratio * 100 + 1e-6).floor()}',
       child: ClipRRect(
         borderRadius: BorderRadius.circular(height / 2),
         child: SizedBox(
@@ -56,15 +57,18 @@ class BudgetBar extends StatelessWidget {
 
 /// Bir kategorinin bütçe satırı: ad, harcanan / limit, yüzde ve ilerleme çubuğu.
 class BudgetRow extends StatelessWidget {
-  const BudgetRow({super.key, required this.progress, this.onTap});
+  const BudgetRow({super.key, required this.progress, this.onTap, this.title});
   final BudgetProgress progress;
   final VoidCallback? onTap;
+
+  /// Verilirse bütçedeki kategori adı yerine gösterilir (ör. adı bilinmeyen kategori).
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final level = progress.level;
-    final pct = (progress.ratio * 100).floor();
+    final pct = progress.percent;
     final note = switch (level) {
       BudgetLevel.ok => null,
       BudgetLevel.warning => 'Limitin %$kBudgetWarnPercent\'ine ulaştın',
@@ -80,7 +84,7 @@ class BudgetRow extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  progress.budget.isTotal ? 'Toplam aylık bütçe' : progress.budget.categoryName,
+                  title ?? (progress.budget.isTotal ? 'Toplam aylık bütçe' : progress.budget.categoryName),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: FissioText.body(c, size: 15, weight: FontWeight.w600),

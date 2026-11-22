@@ -53,7 +53,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       hint: 'Örn: Ev, İş, Kişisel',
       confirmLabel: 'Oluştur',
     );
-    if (name == null || name.isEmpty) return;
+    if (name == null || name.isEmpty || !mounted) return;
     setState(() => _busyId = '__new__');
     try {
       await appState.createProfile(name);

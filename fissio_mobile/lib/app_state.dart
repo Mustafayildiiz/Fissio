@@ -674,9 +674,13 @@ class AppState extends ChangeNotifier {
   Future<InboundAddress?> loadInbound() async {
     if (user == null) return null;
     if (!_syncEnabled) return _inbound;
+    final gen = _inboundGen;
     try {
       final info = await api.inboundAddress();
       if (user == null) return _inbound;
+      // Bu okuma sürerken adres değiştirildi/duraklatıldı: yanıt değişiklikten ÖNCEKİ durumu taşıyabilir (ör. rotate
+      // öncesi geçersiz adres, active=true) — atılır, değişikliğin kendi yanıtı geçerlidir.
+      if (gen != _inboundGen) return _inbound;
       // Değişmediyse bildirme: sihirbaz her 5 sn'de yoklar, Özet/Ayarlar gereksiz yeniden çizilmesin.
       if (_inbound != info) {
         _inbound = info;
@@ -692,26 +696,30 @@ class AppState extends ChangeNotifier {
   /// sunucuda değilse (çevrimdışı oluşturuldu) [ApiException] fırlatılır.
   Future<InboundAddress> setInboundProfile(Profile? profile) async {
     if (profile != null && profile.serverId == null) throw ApiException('Profil henüz sunucuda değil; bağlantı gelince tekrar deneyin.');
-    final info = await api.setInboundProfile(profile?.serverId);
-    _inbound = info;
-    notifyListeners();
-    return info;
+    return _mutateInbound(() => api.setInboundProfile(profile?.serverId));
   }
 
   /// Adresi yeniler (eski adres hemen geçersiz olur).
-  Future<InboundAddress> rotateInbound() async {
-    final info = await api.rotateInboundAddress();
-    _inbound = info;
-    notifyListeners();
-    return info;
-  }
+  Future<InboundAddress> rotateInbound() => _mutateInbound(api.rotateInboundAddress);
 
   /// Aktarımı duraklatır / sürdürür; hata [ApiException] olarak yukarı çıkar.
-  Future<InboundAddress> setInboundPaused(bool paused) async {
-    final info = await api.setInboundPaused(paused);
-    _inbound = info;
-    notifyListeners();
-    return info;
+  Future<InboundAddress> setInboundPaused(bool paused) => _mutateInbound(() => api.setInboundPaused(paused));
+
+  /// Yönlendirme ayarının nesli: her değişiklik isteğinin BAŞINDA ve SONUNDA artar. [loadInbound] başladığı nesli
+  /// yakalar; o arada değişiklik olduysa yanıtını atar (değişiklik gönderildikten sonra ama dönmeden başlayan okuma da
+  /// eski alias'ı görebilir, bu yüzden iki uçta artırılır).
+  int _inboundGen = 0;
+
+  Future<InboundAddress> _mutateInbound(Future<InboundAddress> Function() call) async {
+    _inboundGen++;
+    try {
+      final info = await call();
+      _inbound = info;
+      notifyListeners();
+      return info;
+    } finally {
+      _inboundGen++;
+    }
   }
 
   /// "Son Aktarılan E-Postalar": yalnız özellik kullanılabilirken çekilir; senkron kapalı/çevrimdışı/hata → null (liste
@@ -1281,14 +1289,62 @@ class AppState extends ChangeNotifier {
   /// durumda (bekleyen kuyruk dahil) denetlenir, böylece çevrimdışı/yerel yollar da kapsanır; ihlalde
   /// [BudgetLimitException] atılır. [raiseTotal] true ise kategori limiti için toplam bütçe önce kategori
   /// toplamına yükseltilir.
-  Future<void> setBudget(int categoryId, double limit, {bool raiseTotal = false}) async {
+  ///
+  /// Bütçe yazımları sıralanır (eşzamanlı iki kayıt aynı eski duruma karşı denetlenip birlikte kuralı aşmasın).
+  /// [raiseTotal] yolunda kategori yazımı başarısız olursa toplam eski değerine döndürülür (en-iyi-çaba).
+  Future<void> setBudget(int categoryId, double limit, {bool raiseTotal = false}) =>
+      _budgetLocked(() => _setBudgetCore(categoryId, limit, raiseTotal: raiseTotal));
+
+  /// Bütçe yazımlarının Completer kuyruğu (Future zinciri değil: FakeAsync/runAsync bölgeleri karışınca kilitlenir).
+  /// Yeniden girişli DEĞİLDİR: kilit içindeki kod yalnız `_...Core` fonksiyonlarını çağırır.
+  Completer<void>? _budgetBusy;
+
+  Future<T> _budgetLocked<T>(Future<T> Function() body) async {
+    while (_budgetBusy != null) {
+      await _budgetBusy!.future;
+    }
+    final c = _budgetBusy = Completer<void>();
+    try {
+      return await body();
+    } finally {
+      _budgetBusy = null;
+      c.complete();
+    }
+  }
+
+  Future<void> _setBudgetCore(int categoryId, double limit, {bool raiseTotal = false}) async {
     final p = activeProfile;
     if (p == null || limit <= 0) return;
     final check = checkBudgetLimit(budgets: _snap.budgets, profileUid: p.id, categoryId: categoryId, newLimit: limit);
     if (!check.ok) {
       if (!raiseTotal || check.issue != BudgetLimitIssue.categoriesExceedTotal) throw BudgetLimitException(check);
-      await setBudget(kTotalBudgetCategoryId, check.suggestedTotal);
+      if (check.suggestedTotal >= kMaxBudgetLimit) {
+        throw ApiException('Kategori limitlerinin toplamı (${fmtMoney(check.suggestedTotal)}) izin verilen en yüksek '
+            'aylık bütçeyi aşıyor. Önce bazı kategori limitlerini düşürün.');
+      }
+      final prevTotal = _budgetOf(p.id, kTotalBudgetCategoryId);
+      await _writeBudget(p, kTotalBudgetCategoryId, check.suggestedTotal);
+      try {
+        await _writeBudget(p, categoryId, limit);
+      } catch (_) {
+        // Kategori yazılamadı: toplam yükseltilmiş kalmasın (kullanıcı yalnız birlikte onayladı). Eski durum zaten
+        // geçerliydi; kural denetimi atlanır.
+        try {
+          if (prevTotal == null) {
+            await _removeBudgetCore(p, kTotalBudgetCategoryId);
+          } else {
+            await _writeBudget(p, kTotalBudgetCategoryId, prevTotal.limit);
+          }
+        } catch (_) {}
+        rethrow;
+      }
+      return;
     }
+    await _writeBudget(p, categoryId, limit);
+  }
+
+  /// Tek bir bütçe satırını yazar (sunucu / kuyruk / yalnız cihaz); kural denetimi YAPMAZ.
+  Future<void> _writeBudget(Profile p, int categoryId, double limit) async {
     final name = categoryId == kTotalBudgetCategoryId ? kTotalBudgetName : (_categoryName(categoryId) ?? '');
     final existing = _budgetOf(p.id, categoryId);
     Budget make(SyncState state, {int? serverId, double? lim}) => Budget(
@@ -1327,9 +1383,13 @@ class AppState extends ChangeNotifier {
   }
 
   /// Aktif profildeki kategori limitini kaldırır.
-  Future<void> removeBudget(int categoryId) async {
-    final p = activeProfile;
-    final existing = p == null ? null : _budgetOf(p.id, categoryId);
+  Future<void> removeBudget(int categoryId) => _budgetLocked(() async {
+        final p = activeProfile;
+        if (p != null) await _removeBudgetCore(p, categoryId);
+      });
+
+  Future<void> _removeBudgetCore(Profile p, int categoryId) async {
+    final existing = _budgetOf(p.id, categoryId);
     if (existing == null) return;
     if (existing.serverId != null) {
       if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
@@ -1425,11 +1485,14 @@ class AppState extends ChangeNotifier {
 
   @override
   void notifyListeners() {
+    // dispose sonrası gelen geç bildirimler (bağlantı `.then`, süren yenileme/loadInbound, SyncService onChanged)
+    // ChangeNotifier assert'ine çarpmasın.
+    if (_disposed) return;
     _rev++;
     super.notifyListeners();
     // Fiş ekleme/silme/güncelleme, profil değişimi, yenileme, senkron/çıkış... hepsi buradan geçer; widget ve
     // hatırlatıcılar değişiklik olduğunda (aynı veri tekrar gönderilmez) güncellenir.
-    if (_derivedQueued || _disposed) return;
+    if (_derivedQueued) return;
     _derivedQueued = true;
     scheduleMicrotask(() {
       _derivedQueued = false;

@@ -262,7 +262,8 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
           confirmLabel: 'Yeniden tara',
           cancelLabel: 'Eksik haliyle devam et',
         );
-        if (!retry || !mounted) break;
+        if (!mounted) return; // sayfa kapandıysa aşağıdaki diyalog/yönlendirme ölü context kullanırdı
+        if (!retry) break;
         res = await appState.rescanFailedPages(res, _session.pages, engine: themeController.ocrEngine);
         if (!mounted) return;
       }

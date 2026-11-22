@@ -39,6 +39,18 @@ String? emailLastStatusMessage(String? status) => _EmailSetupWizardPageState.las
   };
 }
 
+/// Gmail onay bağlantısı yalnız sunucunun kabul ettiği biçimdeyse açılır (Go `digital.validGmailLink` ile aynı kural):
+/// https + `mail-settings.google.com/mail/…` ya da `mail.google.com/mail/vf-…`. Yönlendirme adresini bilen biri sahte
+/// bir "Gmail onayı" maili gönderebilir; genel `*.google.com` yetmez (`www.google.com/url?q=` açık yönlendirmedir,
+/// `sites.google.com` / `docs.google.com` kullanıcı içeriği barındırır).
+bool isTrustedConfirmationLink(Uri? u) {
+  if (u == null || u.scheme != 'https') return false;
+  final host = u.host.toLowerCase();
+  if (host == 'mail-settings.google.com') return u.path.startsWith('/mail/');
+  if (host == 'mail.google.com') return u.path.startsWith('/mail/vf-');
+  return false;
+}
+
 /// Onay kodu yoklama aralığı (sihirbaz açıkken); testlerde kısaltılır.
 const kConfirmationPollInterval = Duration(seconds: 5);
 
@@ -62,7 +74,7 @@ class EmailSetupWizardPage extends StatefulWidget {
   State<EmailSetupWizardPage> createState() => _EmailSetupWizardPageState();
 }
 
-class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
+class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with WidgetsBindingObserver {
   AppState get _app => widget.app ?? appState;
 
   bool _loading = true;
@@ -73,22 +85,57 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
   List<InboundHistoryItem> _history = const [];
   String? _historyStamp;
 
+  /// Bir yoklama sürüyor: yavaş ağda periyodik tetik yenisini üst üste bindirmesin.
+  bool _polling = false;
+  bool _pauseBusy = false;
+  bool _backgrounded = false;
+
+  /// Adres yenileme nesli (rotate'in başında ve sonunda artar) ve yenilemeden ÖNCEKİ en yeni onay. Sunucu son 24 saatin
+  /// onayını adres yenilense de döndürür; eski adrese ait onay yeni adresin kartında yeniden belirmesin diye elenir.
+  int _confEpoch = 0;
+  ForwardingConfirmation? _lastSeenConf;
+  ForwardingConfirmation? _staleConf;
+
   @override
   void initState() {
     super.initState();
     _app.addListener(_onApp);
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_load());
   }
 
   void _onApp() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    // Özellik sonradan kullanılabilir olduysa (başka bir loadInbound çağrısı) yoklama da başlasın; yoksa "onay maili
+    // bekleniyor…" sonsuza kadar döner.
+    if (_timer == null && !_loading && !_backgrounded && _app.emailImportAvailable) _startPolling();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _app.removeListener(_onApp);
     super.dispose();
+  }
+
+  /// Asıl akış Gmail'e gidip geri dönmektir: arka planda yoklanmaz, dönünce HEMEN yoklanır.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _backgrounded = true;
+      _timer?.cancel();
+      _timer = null;
+    } else if (state == AppLifecycleState.resumed && _backgrounded) {
+      _backgrounded = false;
+      if (mounted && !_loading && _app.emailImportAvailable) _startPolling();
+    }
+  }
+
+  void _startPolling() {
+    unawaited(_poll());
+    _setPollRate(_rate ?? widget.pollInterval);
   }
 
   Future<void> _load() async {
@@ -99,7 +146,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
     if (_app.emailImportAvailable) {
       unawaited(_alignProfile());
       unawaited(_refreshHistory());
-      _poll();
+      unawaited(_poll());
       _setPollRate(widget.pollInterval);
     }
   }
@@ -153,23 +200,57 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
   }
 
   Future<void> _poll() async {
-    final conf = await _app.pollForwardingConfirmation();
-    if (!mounted) return;
-    // Aktarım başladıysa (ilk e-posta işlendi) durum satırı da güncellensin.
-    await _app.loadInbound();
-    if (!mounted) return;
-    // Yalnız onay kartı değiştiyse yeniden çiz (her yoklamada tüm listeyi kurma).
-    if (conf != null && !_sameConfirmation(conf, _confirmation)) setState(() => _confirmation = conf);
-    // Geçmiş yalnız yeni bir aktarım olduğunda (son durum/zaman değişince) yeniden çekilir.
-    final info = _app.inbound;
-    if (widget.pollInterval == kConfirmationPollInterval && (info?.active ?? false)) _setPollRate(kConnectedPollInterval);
-    if ('${info?.lastReceivedAt?.toIso8601String()}|${info?.lastStatus}' != _historyStamp) {
-      await _refreshHistory(reloadInfo: false);
+    if (_polling) return;
+    _polling = true;
+    try {
+      final epoch = _confEpoch;
+      final conf = await _app.pollForwardingConfirmation();
+      if (!mounted) return;
+      if (conf != null) {
+        _lastSeenConf = _newer(_lastSeenConf, conf);
+        // Adres yenilenirken başlamış yoklama: sonucu yenilemeden öncesine aittir.
+        if (epoch != _confEpoch) _staleConf = _newer(_staleConf, conf);
+      }
+      // Aktarım başladıysa (ilk e-posta işlendi) durum satırı da güncellensin.
+      await _app.loadInbound();
+      if (!mounted) return;
+      // Yalnız onay kartı değiştiyse yeniden çiz (her yoklamada tüm listeyi kurma).
+      if (conf != null && epoch == _confEpoch && !_isStale(conf) && !_sameConfirmation(conf, _confirmation)) {
+        setState(() => _confirmation = conf);
+      }
+      // Geçmiş yalnız yeni bir aktarım olduğunda (son durum/zaman değişince) yeniden çekilir.
+      final info = _app.inbound;
+      if (widget.pollInterval == kConfirmationPollInterval && (info?.active ?? false) && !_backgrounded) {
+        _setPollRate(kConnectedPollInterval);
+      }
+      if ('${info?.lastReceivedAt?.toIso8601String()}|${info?.lastStatus}' != _historyStamp) {
+        await _refreshHistory(reloadInfo: false);
+      }
+    } finally {
+      _polling = false;
     }
   }
 
   static bool _sameConfirmation(ForwardingConfirmation a, ForwardingConfirmation? b) =>
       b != null && a.code == b.code && a.link == b.link && a.receivedAt == b.receivedAt;
+
+  static ForwardingConfirmation? _newer(ForwardingConfirmation? a, ForwardingConfirmation? b) {
+    if (a == null) return b;
+    if (b == null) return a;
+    final ta = a.receivedAt, tb = b.receivedAt;
+    if (ta == null) return b;
+    if (tb == null) return a;
+    return tb.isAfter(ta) ? b : a;
+  }
+
+  /// Adres yenilenmeden önce görülmüş (ya da ondan eski) onay: eski adrese aittir.
+  bool _isStale(ForwardingConfirmation c) {
+    final s = _staleConf;
+    if (s == null) return false;
+    if (_sameConfirmation(c, s)) return true;
+    final tc = c.receivedAt, ts = s.receivedAt;
+    return tc != null && ts != null && !tc.isAfter(ts);
+  }
 
   Future<void> _copy(String text, String done) async {
     await clipboardWriter(text);
@@ -177,7 +258,12 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
   }
 
   Future<void> _openLink(String link) async {
-    final ok = await externalLinkLauncher(Uri.parse(link));
+    final uri = Uri.tryParse(link);
+    if (!isTrustedConfirmationLink(uri)) {
+      showError(context, 'Bu bağlantı Google\'a ait görünmüyor; güvenliğin için açılmadı. Onayı Gmail ayarlarından yap.');
+      return;
+    }
+    final ok = await externalLinkLauncher(uri!);
     if (!ok && mounted) {
       await clipboardWriter(link);
       if (mounted) showMessage(context, 'Bağlantı açılamadı; panoya kopyalandı.');
@@ -193,9 +279,13 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
       destructive: true,
     );
     if (!ok || !mounted) return;
+    _confEpoch++;
     try {
       await _app.rotateInbound();
       if (mounted) {
+        // Bu ana kadar görülen onaylar eski adrese aittir; süren yoklamaların sonucu da (nesil değişti) eskidir.
+        _confEpoch++;
+        _staleConf = _newer(_staleConf, _newer(_lastSeenConf, _confirmation));
         // Yeni adres henüz mail almadı (sunucu son aktarımı sıfırlar): rehber kendiliğinden yeniden açılır; hızlı yoklamaya dön.
         setState(() => _confirmation = null);
         if (widget.pollInterval == kConfirmationPollInterval) _setPollRate(kConfirmationPollInterval);
@@ -207,6 +297,9 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
   }
 
   Future<void> _setPaused(bool paused) async {
+    // Hızlı ardışık dokunuşlar sırasız tamamlanıp anahtarı yanlış durumda bırakmasın: istek sürerken anahtar kapalı.
+    if (_pauseBusy) return;
+    setState(() => _pauseBusy = true);
     try {
       await _app.setInboundPaused(paused);
       if (mounted) {
@@ -218,6 +311,8 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
       }
     } on ApiException catch (e) {
       if (mounted) showError(context, e.message);
+    } finally {
+      if (mounted) setState(() => _pauseBusy = false);
     }
   }
 
@@ -390,7 +485,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> {
                   ],
                 ),
               ),
-              Switch(key: const ValueKey('wiz-pause-switch'), value: info.paused, onChanged: _setPaused),
+              Switch(key: const ValueKey('wiz-pause-switch'), value: info.paused, onChanged: _pauseBusy ? null : _setPaused),
             ],
           ),
           const SizedBox(height: 6),

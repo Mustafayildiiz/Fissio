@@ -29,8 +29,8 @@ Future<void> renameProfileWithDialog(BuildContext context, Profile p, {AppState?
   }
 }
 
-/// Aktif profilin adını ve avatarını düzenler ("Profili düzenle"). Ad değişikliği sunucuya yazıldığından bulut
-/// senkronu kapalıyken satır devre dışıdır ve nedeni yazılır (kayıt denemesi hata vermek yerine baştan kapalı).
+/// Aktif profilin adını ve avatarını düzenler ("Profili düzenle"). Buluttaki profilin adı sunucuya yazıldığından
+/// bulut senkronu kapalıyken o satır devre dışıdır ve nedeni yazılır; cihazdaki profil her zaman yeniden adlandırılabilir.
 class ProfileEditPage extends StatelessWidget {
   const ProfileEditPage({super.key, this.app});
 
@@ -47,6 +47,7 @@ class ProfileEditPage extends StatelessWidget {
           listenable: a,
           builder: (context, _) {
             final p = a.activeProfile;
+            final canRename = a.syncEnabled || (p != null && p.state != SyncState.synced);
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -64,7 +65,7 @@ class ProfileEditPage extends StatelessWidget {
                             Center(
                               child: GestureDetector(
                                 key: const ValueKey('edit-avatar'),
-                                onTap: () => changeProfileAvatar(context, p),
+                                onTap: () => changeProfileAvatar(context, p, app: a),
                                 child: ProfileAvatarView(name: a.displayName, profile: p, size: 96, filled: true),
                               ),
                             ),
@@ -72,7 +73,7 @@ class ProfileEditPage extends StatelessWidget {
                             Center(
                               child: TextButton(
                                 key: const ValueKey('edit-avatar-change'),
-                                onPressed: () => changeProfileAvatar(context, p),
+                                onPressed: () => changeProfileAvatar(context, p, app: a),
                                 child: Text('Fotoğrafı değiştir', style: TextStyle(color: c.accentInk)),
                               ),
                             ),
@@ -85,11 +86,13 @@ class ProfileEditPage extends StatelessWidget {
                                   key: const ValueKey('edit-name'),
                                   leading: IconTile(LucideIcons.pencil, size: 30, radius: 8),
                                   title: p.name,
-                                  subtitle: a.syncEnabled
+                                  // Yalnız buluttaki (senkronlu) profilin adı senkron ister ([AppState.renameProfile]);
+                                  // cihazdaki/kuyruktaki profil senkron kapalıyken de yeniden adlandırılabilir.
+                                  subtitle: canRename
                                       ? 'Adı değiştirmek için dokun'
                                       : 'Ad değiştirmek için bulut senkronu açık olmalı (Veri Yönetimi).',
-                                  chevron: a.syncEnabled,
-                                  onTap: a.syncEnabled ? () => renameProfileWithDialog(context, p, app: a) : null,
+                                  chevron: canRename,
+                                  onTap: canRename ? () => renameProfileWithDialog(context, p, app: a) : null,
                                 ),
                               ],
                             ),

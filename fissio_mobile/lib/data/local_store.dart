@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
@@ -99,6 +100,13 @@ class LocalSnapshot {
   };
 }
 
+/// Bu uzunluğun (karakter) üstündeki JSON ayrı bir isolate'ta işlenir.
+const kIsolateJsonThreshold = 64 * 1024;
+
+LocalSnapshot _decodeSnapshot(String raw) => LocalSnapshot.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+
+String _encodeSnapshot(LocalSnapshot s) => jsonEncode(s.toJson());
+
 /// Cihazdaki kullanıcı verisi deposu (hesap başına ayrı; testlerde bellek içi sahtesi verilir).
 abstract class LocalStore {
   Future<LocalSnapshot> load(int userId);
@@ -175,7 +183,11 @@ class FileLocalStore implements LocalStore {
     try {
       final f = File('${(await _userDir(userId)).path}${Platform.pathSeparator}data.json');
       if (!await f.exists()) return LocalSnapshot();
-      return LocalSnapshot.fromJson(jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+      final raw = await f.readAsString();
+      // Bulut fiş önbelleği büyüyebilir: ayrıştırma ana thread'i (açılış karelerini) tutmasın diye isolate'ta yapılır.
+      // Küçük dosyada isolate başlatma maliyeti kazancı aşar.
+      if (raw.length < kIsolateJsonThreshold) return _decodeSnapshot(raw);
+      return await Isolate.run(() => _decodeSnapshot(raw));
     } catch (_) {
       // Bozuk dosya uygulamayı açılmaz hale getirmesin; kullanıcı verisi yedekten geri yüklenebilir.
       return LocalSnapshot();
@@ -186,7 +198,10 @@ class FileLocalStore implements LocalStore {
   Future<void> save(int userId, LocalSnapshot snapshot) async {
     final dir = await _userDir(userId);
     final tmp = File('${dir.path}${Platform.pathSeparator}data.json.tmp');
-    await tmp.writeAsString(jsonEncode(snapshot.toJson()), flush: true);
+    // Büyük anlık görüntü isolate'ta kodlanır (nesne grafiği kopyalanır; kopya, çağrı anındaki tutarlı durumdur).
+    final big = snapshot.cloudExpenses.length + snapshot.expenses.length + snapshot.pendingEdits.length > 150;
+    final json = big ? await Isolate.run(() => _encodeSnapshot(snapshot)) : _encodeSnapshot(snapshot);
+    await tmp.writeAsString(json, flush: true);
     await tmp.rename('${dir.path}${Platform.pathSeparator}data.json');
   }
 

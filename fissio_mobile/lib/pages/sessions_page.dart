@@ -34,6 +34,8 @@ class _SessionsPageState extends State<SessionsPage> {
   }
 
   Future<void> _load() async {
+    // _revoke'tan await sonrası da çağrılır: sayfa o arada kapandıysa dispose edilmiş State'e setState yapılmaz.
+    if (!mounted) return;
     setState(() => _error = null);
     try {
       final list = await (widget.loader ?? appState.api.sessions)();
@@ -51,7 +53,7 @@ class _SessionsPageState extends State<SessionsPage> {
       confirmLabel: 'Kapat',
       destructive: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
       await (widget.onRevoke ?? appState.api.revokeSession)(s.id);
@@ -77,7 +79,7 @@ class _SessionsPageState extends State<SessionsPage> {
       confirmLabel: 'Çıkış yap',
       destructive: true,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
       await (widget.onLogoutAll ?? appState.logoutEverywhere)();

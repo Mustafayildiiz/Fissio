@@ -376,7 +376,9 @@ class ApiClient {
       msg,
       status: r.statusCode,
       code: code,
-      retryAfter: (e?['retry_after'] as num?)?.toInt(),
+      // Gövde (auth OTP bekleme süresi) yoksa standart `Retry-After` başlığı (saniye): sunucu genel hız sınırında
+      // (429), tarama sınırında ve `auth_unavailable` (503) yalnız başlığı gönderir.
+      retryAfter: (e?['retry_after'] as num?)?.toInt() ?? int.tryParse(r.headers['retry-after']?.trim() ?? ''),
       current: current,
     );
   }

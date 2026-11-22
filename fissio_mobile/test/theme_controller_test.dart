@@ -1,3 +1,4 @@
+import 'package:fissio_mobile/services/launcher_icon.dart';
 import 'package:fissio_mobile/theme.dart';
 import 'package:fissio_mobile/theme_controller.dart';
 import 'package:flutter/material.dart';
@@ -18,7 +19,55 @@ class _BrokenStore implements PrefsStore {
   Future<void> write(String key, String value) => throw Exception('no storage');
 }
 
+/// Yalnız [badKey] okunurken hata atan depo (ör. tek anahtarda şifre çözme hatası).
+class _OneBadKeyStore extends _MemStore {
+  _OneBadKeyStore(this.badKey);
+  final String badKey;
+  @override
+  Future<String?> read(String key) => key == badKey ? Future.error(Exception('decrypt')) : super.read(key);
+}
+
+class _RecordingLauncher implements LauncherIcon {
+  final applied = <String>[];
+  @override
+  Future<bool> get supported async => true;
+  @override
+  Future<bool> set(String key) async {
+    applied.add(key);
+    return true;
+  }
+}
+
 void main() {
+  test('tek anahtar okunamazsa yalnız o tercih varsayılana düşer, diğerleri yüklenir', () async {
+    final store = _OneBadKeyStore(ThemeController.styleKey)
+      ..map[ThemeController.modeKey] = ThemeMode.dark.name
+      ..map[ThemeController.accentKey] = kAccentOptions[1].color.toARGB32().toString()
+      ..map[ThemeController.styleKey] = ReceiptStyle.list.name;
+    final c = ThemeController(store: store);
+    await c.load();
+    expect(c.themeMode, ThemeMode.dark);
+    expect(c.accent.toARGB32(), kAccentOptions[1].color.toARGB32());
+    expect(c.receiptStyle, ReceiptStyle.paper, reason: 'okunamayan anahtar varsayılan');
+  });
+
+  testWidgets('başlatıcı ikonu: başka renge dokunup uygulanmış renge dönülürse bekleyen değişiklik iptal edilir',
+      (tester) async {
+    final launcher = _RecordingLauncher();
+    final c = ThemeController(store: _MemStore(), launcherIcon: launcher);
+    await c.load();
+    await tester.pump();
+    final applied = List.of(launcher.applied); // açılışta uygulanan (varsayılan renk)
+    final original = c.logoColor;
+    final other = kBrandPalette.firstWhere((b) => b.color.toARGB32() != original.toARGB32()).color;
+    await c.setLogoColor(other);
+    await tester.pump(const Duration(milliseconds: 300));
+    await c.setLogoColor(original);
+    await tester.pump(const Duration(seconds: 3));
+    expect(launcher.applied, applied, reason: 'ara renk uygulanmamalı');
+    c.dispose();
+  });
+
   test('varsayılanlar: mor vurgu, sistem teması, kağıt fiş', () async {
     final c = ThemeController(store: _MemStore());
     await c.load();

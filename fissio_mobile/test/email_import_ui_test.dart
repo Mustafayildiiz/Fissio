@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fissio_mobile/api.dart';
 import 'package:fissio_mobile/app_info.dart';
 import 'package:fissio_mobile/models.dart';
@@ -395,6 +397,140 @@ void main() {
       expect(h.backend.user(_email).inboundPaused, isFalse);
       expect(find.byKey(const ValueKey('wiz-paused-badge')), findsNothing);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('duraklat anahtarına hızlı çift dokunuş tek istek gönderir', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      final gate = Completer<void>();
+      h.backend.hold['POST /inbound-address/pause'] = gate;
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-pause-switch')));
+      await tester.tap(find.byKey(const ValueKey('wiz-pause-switch')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('wiz-pause-switch')), warnIfMissed: false);
+      await tester.pump();
+      gate.complete();
+      await _flush(tester, h);
+      await tester.pump(const Duration(milliseconds: 400));
+      int calls(String p) => h.backend.log.where((l) => l.path == p).length;
+      expect(calls('/inbound-address/pause'), 1);
+      expect(calls('/inbound-address/resume'), 0, reason: 'ikinci dokunuş istek sürerken yok sayılır');
+      expect(h.app.inbound!.paused, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('adres yenilenince eski adrese ait Gmail onayı yeni adreste yeniden görünmez', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      h.backend.user(_email).confirmation = {'code': '111222333', 'received_at': '2026-11-20T20:00:00Z'};
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
+      await _flush(tester, h);
+      expect(find.text('Onay Kodu Geldi: 111222333'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-rotate')));
+      await tester.tap(find.byKey(const ValueKey('wiz-rotate')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('Yenile'));
+      await tester.pump();
+      await _flush(tester, h);
+      // Sunucu son 24 saatin onayını adres yenilense de döndürür: sonraki yoklamalarda kart geri gelmemeli.
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 150));
+        await _flush(tester, h);
+      }
+      expect(find.byKey(const ValueKey('wiz-confirm-card')), findsNothing);
+      // Yeni adres için gelen YENİ onay gösterilir.
+      h.backend.user(_email).confirmation = {'code': '444555666', 'received_at': '2026-11-20T21:00:00Z'};
+      await tester.pump(const Duration(milliseconds: 150));
+      await _flush(tester, h);
+      expect(find.text('Onay Kodu Geldi: 444555666'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('yoklama: yanıt gecikirse üst üste binmez; arka planda durur, dönünce hemen yoklar', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
+      await _flush(tester, h);
+      final gate = Completer<void>();
+      h.backend.hold['GET /inbound-address/confirmation'] = gate;
+      final before = h.backend.confirmationPolls;
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 110));
+        await _flush(tester, h);
+      }
+      expect(h.backend.confirmationPolls - before, 1, reason: 'yanıtı bekleyen yoklama varken yenisi gönderilmez');
+      gate.complete();
+      await _flush(tester, h);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await _flush(tester, h);
+      final paused = h.backend.confirmationPolls;
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 110));
+        await _flush(tester, h);
+      }
+      expect(h.backend.confirmationPolls, paused, reason: 'arka planda yoklanmaz');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await _flush(tester, h);
+      expect(h.backend.confirmationPolls, paused + 1, reason: 'dönüşte zamanlayıcıyı beklemeden yoklanır');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Google dışı onay bağlantısı açılmaz', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      h.backend.user(_email).confirmation = {
+        'link': 'https://mail-settings.google.com.evil.io/mail/vf-x',
+        'received_at': '2026-11-20T20:00:00Z',
+      };
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      await tester.ensureVisible(find.byKey(const ValueKey('wiz-open-link')));
+      await tester.tap(find.byKey(const ValueKey('wiz-open-link')));
+      await tester.pump();
+      expect(opened, isEmpty);
+      expect(find.textContaining('Google\'a ait görünmüyor'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    test('bağlantı doğrulama: sunucunun Gmail onay kuralıyla aynı (yalnız mail-settings /mail/… ve mail /mail/vf-…)', () {
+      bool ok(String s) => isTrustedConfirmationLink(Uri.tryParse(s));
+      expect(ok('https://mail-settings.google.com/mail/vf-a'), isTrue);
+      expect(ok('https://mail-settings.google.com/mail/u/0/x'), isTrue);
+      expect(ok('https://mail.google.com/mail/vf-a'), isTrue);
+      expect(ok('https://mail.google.com/mail/u/0/#inbox'), isFalse, reason: 'sıradan Gmail bağlantısı');
+      expect(ok('https://google.com/x'), isFalse);
+      expect(ok('https://www.google.com/url?q=https://evil.io'), isFalse, reason: 'açık yönlendirme');
+      expect(ok('https://sites.google.com/view/evil'), isFalse, reason: 'kullanıcı içeriği');
+      expect(ok('https://docs.google.com/forms/d/x'), isFalse);
+      expect(ok('http://mail.google.com/mail/vf-a'), isFalse);
+      expect(ok('https://google.com.evil.io/x'), isFalse);
+      expect(ok('https://evilgoogle.com/x'), isFalse);
+      expect(ok('javascript:alert(1)'), isFalse);
+      expect(ok(''), isFalse);
+    });
+
+    testWidgets('adres yenilenirken geç dönen eski adres okuması yeni adresi ezmez', (tester) async {
+      final h = await _signedIn(tester);
+      await tester.runAsync(() async {
+        final old = h.app.inbound!.address;
+        final gate = Completer<void>();
+        h.backend.hold['GET /inbound-address'] = gate; // rotate'ten ÖNCEKİ durumu taşıyan yanıt bekletilir
+        final slow = h.app.loadInbound();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final rotated = await h.app.rotateInbound();
+        gate.complete();
+        await slow;
+        expect(rotated.address, isNot(old));
+        expect(h.app.inbound!.address, rotated.address);
+      });
     });
 
     testWidgets('adres yenilenince duraklatma kalkar', (tester) async {

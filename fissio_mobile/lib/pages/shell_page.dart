@@ -24,7 +24,9 @@ class _ShellPageState extends State<ShellPage> {
   @override
   void initState() {
     super.initState();
-    appState.refreshIfStale(); // oturum açma/açılış yenilemesinin hemen ardından yinelenmez
+    // Oturum açma/açılış yenilemesinin hemen ardından yinelenmez. Build SIRASINDA başlatılmaz: yenileme `loading=true`
+    // bildirimini senkron yayar ve ağaçta önceki bir dalda appState dinleyen widget "setState during build" atardı.
+    Future.microtask(appState.refreshIfStale);
     // Ana ekran widget'ından gelen "hızlı tara" (fissio://scan): soğuk açılışta bekleyen istek ilk karede,
     // sıcak açılışta (arka plandan) geldiği anda tüketilir.
     deepLinks.addListener(_maybeOpenDeepLink);
@@ -41,6 +43,12 @@ class _ShellPageState extends State<ShellPage> {
   /// Bekleyen hızlı eylem: `fissio://scan` → kamera; `fissio://import-digital` ya da paylaşılan PDF → dijital fiş akışı.
   void _maybeOpenDeepLink() {
     if (!mounted || !appState.loggedIn || appState.activeProfile == null) return;
+    // Tarama zaten açıkken gelen "tara" yinelenen istektir: atılır (bekletilirse tarama fiş formuyla değişince
+    // yarım formun üstünde ikinci bir tarama sayfası açılırdı).
+    if (_scanOpen) deepLinks.consumeScan();
+    // Bir akış açıkken diğer istekleri TÜKETME: (ör. paylaşılan PDF yolu) bekler ve akış kapanınca işlenir; aksi halde
+    // sessizce kaybolurdu.
+    if (_scanOpen || _importOpen) return;
     if (deepLinks.consumeScan()) {
       _addReceipt();
       return;
@@ -60,7 +68,13 @@ class _ShellPageState extends State<ShellPage> {
       await runDigitalImport(context, path: path);
     } finally {
       _importOpen = false;
+      _afterFlow();
     }
+  }
+
+  /// Akış kapandı: o sırada gelip bekleyen hızlı eylem varsa şimdi açılır.
+  void _afterFlow() {
+    if (mounted && deepLinks.hasPendingAction) WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenDeepLink());
   }
 
   void _openCategory(int? categoryId) {
@@ -71,12 +85,14 @@ class _ShellPageState extends State<ShellPage> {
   bool _scanOpen = false;
 
   void _addReceipt() {
-    // Widget'a art arda dokunulursa ikinci bir tarama sayfası üst üste açılmasın.
-    if (_scanOpen) return;
+    // Widget'a art arda dokunulursa ikinci bir tarama sayfası üst üste açılmasın; dijital içe aktarma sürerken de
+    // açılmaz (ilerleme penceresinin üstüne binerdi).
+    if (_scanOpen || _importOpen) return;
     _scanOpen = true;
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const ScanPage()))
-        .whenComplete(() => _scanOpen = false);
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScanPage())).whenComplete(() {
+      _scanOpen = false;
+      _afterFlow();
+    });
   }
 
   @override

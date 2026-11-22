@@ -158,10 +158,10 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
     final d = await showDatePicker(
       context: context,
       initialDate: clampPickerDate(_draft.date, last),
-      firstDate: DateTime(2000),
+      firstDate: kPickerFirstDate,
       lastDate: last,
     );
-    if (d != null) setState(() => _draft.date = d);
+    if (d != null && mounted) setState(() => _draft.date = d);
   }
 
   Future<void> _pickCategory() async {
@@ -171,7 +171,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (final c in _app.categories) (c.id, c.name)],
       selected: _draft.categoryId,
     );
-    if (id != null) _setCategory(id);
+    if (id != null && mounted) _setCategory(id);
   }
 
   /// Fiş kategorisini kullanıcı seçti: "kontrol edin" uyarısı kalkar. Otomatik öneriden farklıysa
@@ -213,7 +213,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (final c in _app.categories) (c.id, c.name)],
       selected: _rows[i].categoryId,
     );
-    if (id != null) {
+    // Sayfa kapandıysa ya da satır bu arada silindiyse (i artık geçersiz) yapılacak bir şey yok.
+    if (id != null && mounted && i < _rows.length) {
       setState(() {
         _rows[i].categoryId = id;
         _rows[i].review = false;
@@ -260,7 +261,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (var d = 1; d <= 31; d++) (d, 'Ayın $d. günü')],
       selected: _draft.recurringDay,
     );
-    if (day != null) {
+    if (day != null && mounted) {
       _recurringTouched = true;
       setState(() => _draft.recurringDay = day);
     }

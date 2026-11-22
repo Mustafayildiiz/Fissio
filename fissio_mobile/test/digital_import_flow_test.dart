@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:fissio_mobile/pages/digital_import.dart';
 import 'package:fissio_mobile/pages/receipt_form_page.dart';
 import 'package:fissio_mobile/pages/scan_page.dart';
 import 'package:fissio_mobile/services/deep_links.dart';
@@ -8,6 +11,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fakes.dart';
+
+/// Okumayı [gate] açılana dek bekletir (yavaş PDF).
+class _SlowPdfReader implements PdfReader {
+  _SlowPdfReader(this.inner, this.gate);
+  final PdfReader inner;
+  final Future<void> gate;
+  @override
+  Future<List<String>> readText(String path, {int maxPages = 6}) async {
+    await gate;
+    return inner.readText(path, maxPages: maxPages);
+  }
+
+  @override
+  Future<List<Uint8List>> renderPages(String path, {int maxPages = 6}) async {
+    await gate;
+    return inner.renderPages(path, maxPages: maxPages);
+  }
+}
 
 Widget _wrap(Widget w) => MaterialApp(theme: buildTheme(brightness: Brightness.light), home: w);
 
@@ -97,6 +118,45 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.textContaining('açılamadı'), findsOneWidget);
       expect(find.byType(ReceiptFormPage), findsNothing);
+    });
+  });
+
+  group('ilerleme penceresi', () {
+    testWidgets('okuma sürerken üste sayfa açılırsa (ör. fissio://scan) yalnız ilerleme penceresi kaldırılır', (tester) async {
+      final gate = Completer<void>();
+      pdfReader = _SlowPdfReader(FakePdfReader(failure: PdfReadException('PDF dosyası açılamadı.')), gate.future);
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: nav,
+        theme: buildTheme(brightness: Brightness.light),
+        home: Builder(
+          builder: (ctx) => Scaffold(
+            body: TextButton(
+              key: const ValueKey('import'),
+              onPressed: () => runDigitalImport(ctx, path: '/tmp/a.pdf'),
+              child: const Text('içe aktar'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.byKey(const ValueKey('import')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      // Araya başka bir sayfa girer (kör pop() önceden BU sayfayı kapatıp spinner'ı bırakırdı).
+      nav.currentState!.push(MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('ARAYA GİREN'))));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(() async {
+        gate.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('ARAYA GİREN'), findsOneWidget, reason: 'araya giren sayfa kapanmamalı');
+      expect(find.byType(CircularProgressIndicator), findsNothing, reason: 'ilerleme penceresi kalmamalı');
+      await tester.pump(const Duration(seconds: 4));
     });
   });
 

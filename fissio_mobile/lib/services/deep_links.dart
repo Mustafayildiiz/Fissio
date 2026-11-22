@@ -70,17 +70,33 @@ class DeepLinkController extends ChangeNotifier {
   }
 
   /// Soğuk açılış adresini okur ve sıcak açılışları dinler. Eklenti yoksa (test/masaüstü) sessizce geçer.
-  Future<void> init({ShareIntentPort? shareIntent}) async {
-    if (_sub != null) return;
+  ///
+  /// Eşzamanlı çağrılar aynı işi paylaşır (koruma `await`'ten önce kurulur; aksi halde iki abonelik açılırdı). Hiçbir
+  /// dinleyici kurulamadıysa (eklenti yok) sonraki çağrı yeniden dener.
+  Future<void> init({ShareIntentPort? shareIntent}) {
+    final running = _init;
+    if (running != null) return running;
+    if (_sub != null || _fileSub != null) return Future.value();
+    return _init = _doInit(shareIntent).whenComplete(() => _init = null);
+  }
+
+  Future<void>? _init;
+  bool _disposed = false;
+
+  Future<void> _doInit(ShareIntentPort? shareIntent) async {
     try {
-      handle(await HomeWidget.initiallyLaunchedFromHomeWidget());
+      final initial = await HomeWidget.initiallyLaunchedFromHomeWidget();
+      if (_disposed) return;
+      handle(initial);
       _sub = HomeWidget.widgetClicked.listen(handle, onError: (Object e) => pluginWarn('Derin bağlantı', e));
     } catch (e) {
       pluginWarn('Derin bağlantı dinlenemedi', e);
     }
     try {
       final port = shareIntent ?? shareIntentPort;
-      handleSharedFile(await port.initialFile());
+      final initial = await port.initialFile();
+      if (_disposed) return;
+      handleSharedFile(initial);
       _fileSub = port.files.listen(handleSharedFile, onError: (Object e) => pluginWarn('Paylaşılan dosya', e));
     } catch (e) {
       pluginWarn('Paylaşılan dosya dinlenemedi', e);
@@ -88,7 +104,14 @@ class DeepLinkController extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     _sub?.cancel();
     _fileSub?.cancel();
     super.dispose();

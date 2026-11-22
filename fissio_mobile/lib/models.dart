@@ -11,7 +11,7 @@ class Category {
   final String name;
   const Category(this.id, this.name);
   factory Category.fromJson(Map<String, dynamic> j) =>
-      Category(j['id'] as int, j['name'] as String);
+      Category((j['id'] as num).toInt(), j['name'] as String);
 }
 
 /// Kullanıcının bir düzeltmesinden öğrenilen kişisel kategori kuralı (işletme ya da kalem adı → kategori).
@@ -432,7 +432,7 @@ class Expense {
   );
 
   factory Expense.fromJson(Map<String, dynamic> j) => Expense(
-    id: j['id'] as int,
+    id: (j['id'] as num).toInt(),
     merchant: j['merchant'] as String,
     amount: (j['amount'] as num).toDouble(),
     date: DateTime.parse(j['date'] as String),
@@ -782,7 +782,7 @@ class ParsedReceipt {
     merchant: (j['merchant'] as String?) ?? '',
     amount: (j['amount'] as num?)?.toDouble(),
     date: j['date'] is String ? DateTime.tryParse(j['date'] as String) : null,
-    categoryId: (j['category_id'] as int?) ?? 0,
+    categoryId: (j['category_id'] as num?)?.toInt() ?? 0,
     categoryName: (j['category_name'] as String?) ?? kOtherCategory,
     items: ((j['items'] as List?) ?? [])
         .map((e) => ExpenseItem.fromJson(e as Map<String, dynamic>))

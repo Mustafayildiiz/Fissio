@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../app_state.dart';
 import '../logo.dart';
 import '../services/deep_links.dart';
@@ -33,7 +34,11 @@ class _SplashPageState extends State<SplashPage> {
     // Hızlı tara + oturum var ama aktif profil seçili değilse (ilk açılış / silinmiş profil) ilk profili seç:
     // kullanıcı profil seçiciye düşmeden doğrudan kameraya gitsin.
     if (ok && deepLinks.hasPendingAction && appState.activeProfile == null && appState.profiles.isNotEmpty) {
-      await appState.selectProfile(appState.profiles.first);
+      try {
+        await appState.selectProfile(appState.profiles.first);
+      } on ApiException {
+        // Seçilemedi (ağ/sunucu): splash'te takılı kalma; aşağıda profil seçicisine düşülür.
+      }
       if (!mounted) return;
     }
     // Widget'tan "hızlı tara" ile açıldıysa ve aktif profil varsa profil seçimi atlanır; kabuk taramayı açar.
