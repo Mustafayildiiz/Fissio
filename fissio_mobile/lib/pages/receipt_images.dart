@@ -174,7 +174,10 @@ class _LocalImage extends StatelessWidget {
                 : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-        return Image.memory(bytes, width: width, height: height, fit: fit, gaplessPlayback: true);
+        // Sabit genişlikli küçük resimler (liste/önizleme) tam çözünürlükte değil, gösterim boyutunda çözülür.
+        final w = width;
+        final cacheW = (w != null && w.isFinite) ? (w * MediaQuery.devicePixelRatioOf(context)).round() : null;
+        return Image.memory(bytes, width: width, height: height, fit: fit, gaplessPlayback: true, cacheWidth: cacheW);
       },
     );
   }

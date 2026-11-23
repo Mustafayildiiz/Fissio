@@ -677,6 +677,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
                         width: 72,
                         height: 96,
                         fit: BoxFit.cover,
+                        cacheWidth: 288,
                       ),
                     ),
                     Positioned(

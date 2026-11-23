@@ -1,4 +1,4 @@
-import 'dart:ui' show ImageFilter, PathMetric;
+import 'dart:ui' show PathMetric;
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -800,24 +800,21 @@ class FissioTabBar extends StatelessWidget {
             right: 0,
             bottom: 0,
             height: barH,
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                child: Container(
-                  padding: const EdgeInsets.only(top: 8),
-                  decoration: BoxDecoration(
-                    color: c.bar,
-                    border: Border(top: BorderSide(color: c.line)),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _tab(c, 0, LucideIcons.house, 'Özet')),
-                      const Expanded(child: SizedBox()),
-                      Expanded(child: _tab(c, 1, LucideIcons.receipt, 'Fişler')),
-                    ],
-                  ),
-                ),
+            // Not: eskiden σ=20 BackdropFilter vardı; `c.bar` zaten ~%94 opak olduğundan görsel fark ihmal edilebilir,
+            // ama kayan listenin üstündeki canlı bulanıklık her karede GPU'da tüm çubuğu yeniden işliyordu.
+            child: Container(
+              padding: const EdgeInsets.only(top: 8),
+              decoration: BoxDecoration(
+                color: c.bar,
+                border: Border(top: BorderSide(color: c.line)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _tab(c, 0, LucideIcons.house, 'Özet')),
+                  const Expanded(child: SizedBox()),
+                  Expanded(child: _tab(c, 1, LucideIcons.receipt, 'Fişler')),
+                ],
               ),
             ),
           ),

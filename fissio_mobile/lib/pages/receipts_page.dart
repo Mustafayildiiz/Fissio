@@ -43,14 +43,45 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
     super.dispose();
   }
 
+  // Süzme/sıralama/ay gruplama sonucu: yalnızca veri sürümü ya da süzgeçler değişince yeniden kurulur (yükleniyor,
+  // çevrimdışı vb. bildirimlerde tüm liste yeniden süzülmez). Öğe: [MonthGroup] (başlık) | [Expense] | [_Spacer].
+  List<Object> _entries = const [];
+  List<Expense> _visibleItems = const [];
+  String? _entriesKey;
+
+  // Katlanmış (merchant, categoryName) metni fiş başına bir kez hesaplanır; her tuş vuruşunda foldTR çalışmaz.
+  final _folded = Expando<(String, String)>();
+
+  (String, String) _foldOf(Expense e) => _folded[e] ??= (foldTR(e.merchant), foldTR(e.categoryName));
+
+  void _ensureEntries(int? catId) {
+    final r = _range;
+    final key =
+        '${appState.dataVersion}|${_search.text.trim()}|${_sort.name}|$catId|${r?.start.millisecondsSinceEpoch}-${r?.end.millisecondsSinceEpoch}';
+    if (key == _entriesKey) return;
+    _entriesKey = key;
+    final items = _visible(catId);
+    _visibleItems = items;
+    final out = <Object>[];
+    if (_sort.byDate) {
+      for (final g in groupByMonth(items)) {
+        out.add(g);
+        out.addAll(g.items);
+      }
+    } else {
+      out.add(const _Spacer());
+      out.addAll(items);
+    }
+    _entries = out;
+  }
+
   List<Expense> _visible(int? categoryId) {
     final q = foldTR(_search.text.trim());
     final list = appState.expenses.where((e) {
       if (categoryId != null && e.categoryId != categoryId) return false;
-      if (q.isNotEmpty &&
-          !foldTR(e.merchant).contains(q) &&
-          !foldTR(e.categoryName).contains(q)) {
-        return false;
+      if (q.isNotEmpty) {
+        final f = _foldOf(e);
+        if (!f.$1.contains(q) && !f.$2.contains(q)) return false;
       }
       if (_range != null) {
         final d = DateTime(e.date.year, e.date.month, e.date.day);
@@ -223,82 +254,78 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
 
   Widget _list(int? catId) {
     final c = context.c;
-    final items = _visible(catId);
+    _ensureEntries(catId);
+    final entries = _entries;
+    final items = _visibleItems;
     final now = DateTime.now();
 
     void open(Expense e) => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: e.id)),
         );
 
-    final children = <Widget>[];
-    if (_sort.byDate) {
-      for (final g in groupByMonth(items)) {
-        children.add(
-          Container(
-            margin: const EdgeInsets.only(top: 24),
-            padding: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: c.rule, width: 2)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Expanded(
-                  child: Text(
-                    g.title(now),
-                    style: FissioText.title(c, size: 17).copyWith(letterSpacing: 0),
-                  ),
-                ),
-                Text(
-                  fmtMoney(g.total),
-                  style: FissioText.money(c, size: 14, color: c.mute),
-                ),
-              ],
+    // Listenin başındaki koşullu satırlar (hata bandı, boş durum); ardından tembel (yalnızca görünen) öğeler.
+    final lead = <Widget>[
+      if (appState.error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: ErrorBanner(appState.error!, onRetry: appState.refresh),
+        ),
+      if (items.isEmpty && !appState.loading && appState.error == null)
+        Padding(
+          padding: const EdgeInsets.only(top: 48),
+          child: Center(
+            child: Text(
+              'Henüz fiş yok.\nAlttaki + ile ekleyin.',
+              textAlign: TextAlign.center,
+              style: FissioText.body(c, color: c.mute).copyWith(height: 1.4),
             ),
           ),
-        );
-        for (final e in g.items) {
-          children.add(ReceiptTile(expense: e, onTap: () => open(e)));
-        }
-      }
-    } else {
-      children.add(const SizedBox(height: 12));
-      for (final e in items) {
-        children.add(ReceiptTile(expense: e, onTap: () => open(e)));
-      }
-    }
+        ),
+    ];
 
     return RefreshIndicator(
       onRefresh: appState.refresh,
-      // Lazy: yalnızca görünen satırlar kurulur (binlerce fişte sekme geçişi/yeniden çizim takılmasın).
-      child: Builder(builder: (context) {
-        final rows = <Widget>[
-          if (appState.error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: ErrorBanner(appState.error!, onRetry: appState.refresh),
-            ),
-          if (items.isEmpty && !appState.loading && appState.error == null)
-            Padding(
-              padding: const EdgeInsets.only(top: 48),
-              child: Center(
-                child: Text(
-                  'Henüz fiş yok.\nAlttaki + ile ekleyin.',
-                  textAlign: TextAlign.center,
-                  style: FissioText.body(c, color: c.mute).copyWith(height: 1.4),
-                ),
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
+        itemCount: lead.length + entries.length,
+        itemBuilder: (context, i) {
+          if (i < lead.length) return lead[i];
+          final entry = entries[i - lead.length];
+          if (entry is MonthGroup) {
+            return Container(
+              margin: const EdgeInsets.only(top: 24),
+              padding: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: c.rule, width: 2)),
               ),
-            ),
-          ...children,
-        ];
-        return ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
-          itemCount: rows.length,
-          itemBuilder: (context, i) => rows[i],
-        );
-      }),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Expanded(
+                    child: Text(
+                      entry.title(now),
+                      style: FissioText.title(c, size: 17).copyWith(letterSpacing: 0),
+                    ),
+                  ),
+                  Text(
+                    fmtMoney(entry.total),
+                    style: FissioText.money(c, size: 14, color: c.mute),
+                  ),
+                ],
+              ),
+            );
+          }
+          if (entry is Expense) return ReceiptTile(expense: entry, onTap: () => open(entry));
+          return const SizedBox(height: 12);
+        },
+      ),
     );
   }
+}
+
+/// Tutara göre sıralamada listenin üstündeki boşluk satırı (tarih sıralamasında ay başlığı bu işi görür).
+class _Spacer {
+  const _Spacer();
 }

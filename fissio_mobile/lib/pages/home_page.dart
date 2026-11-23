@@ -30,6 +30,21 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   HomePeriod _period = HomePeriod.month;
 
+  // İstatistik yalnızca fiş görünümü / dönem / gün değişince yeniden hesaplanır (yükleniyor, çevrimdışı vb. bildirimlerde
+  // O(N) tarama + sıralama yapılmaz).
+  HomeStats? _stats;
+  String? _statsKey;
+
+  HomeStats _statsFor(HomePeriod p) {
+    final n = DateTime.now();
+    final key = '${appState.dataVersion}|${p.name}|${n.year}-${n.month}-${n.day}';
+    if (_stats == null || key != _statsKey) {
+      _stats = computeHomeStats(appState.expenses, p, now: n);
+      _statsKey = key;
+    }
+    return _stats!;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -87,7 +102,7 @@ class _HomePageState extends State<HomePage> {
     return ListenableBuilder(
       listenable: Listenable.merge([appState, themeController]),
       builder: (context, _) {
-        final stats = computeHomeStats(appState.expenses, _period);
+        final stats = _statsFor(_period);
         final cards = themeController.visibleHomeCards;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

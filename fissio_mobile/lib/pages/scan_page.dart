@@ -367,6 +367,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                             width: 48,
                             height: 64,
                             fit: BoxFit.cover,
+                            cacheWidth: 192,
                           ),
                         ),
                         title: Text('Sayfa ${i + 1}', style: FissioText.body(c)),
@@ -831,7 +832,7 @@ class _PageStrip extends StatelessWidget {
                   onTap: onOpen,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.memory(pages[i], fit: BoxFit.cover, key: ValueKey('thumb-$i')),
+                    child: Image.memory(pages[i], fit: BoxFit.cover, cacheWidth: 360, key: ValueKey('thumb-$i')),
                   ),
                 ),
               ),

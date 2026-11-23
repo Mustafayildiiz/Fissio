@@ -90,7 +90,11 @@ class AppState extends ChangeNotifier {
       userId: () => user?.id,
       enabled: () => _syncEnabled,
       snapshot: () => _snap,
-      onChanged: notifyListeners,
+      // Senkron servisi anlık görüntü listelerini yerinde değiştirir (kimlik değişmez): görünüm açıkça geçersiz kılınır.
+      onChanged: () {
+        _dataRev++;
+        notifyListeners();
+      },
     );
   }
 
@@ -180,7 +184,10 @@ class AppState extends ChangeNotifier {
     final edit = _snap.pendingEdits[i];
     if (keepMine) {
       final server = _snap.cloudExpenses.where((e) => e.id == id).firstOrNull;
-      _snap.pendingEdits[i] = edit.copyWith(clearSyncError: true, updatedAt: server?.updatedAt);
+      _snap.pendingEdits = [
+        for (var k = 0; k < _snap.pendingEdits.length; k++)
+          k == i ? edit.copyWith(clearSyncError: true, updatedAt: server?.updatedAt) : _snap.pendingEdits[k],
+      ];
     } else {
       for (final p in edit.localImages) {
         await _local.deleteImage(p);
@@ -214,33 +221,89 @@ class AppState extends ChangeNotifier {
     ];
   }
 
+  // --- Türetilmiş fiş görünümü önbelleği ---
+  // `notifyListeners` çok sık çağrılır (yükleniyor/çevrimdışı bayrakları, bağlantı, flush...) ve her çağrıda listeyi
+  // yeniden kurup sıralamak O(N)'dir. Görünüm yalnızca veri değiştiğinde yeniden kurulur: açık sürüm sayacı
+  // ([_dataRev]: kalıcılık ve senkron değişiklikleri) + anlık görüntü listelerinin kimliği/uzunluğu + aktif profil.
+  // Dönen listeler değiştirilemez ve çağrılar arasında aynı nesnedir.
+  int _dataRev = 0;
+  int _viewRev = 0;
+  int _kRev = -1;
+  Object? _kSnap, _kCloud, _kLocal, _kEdits, _kDel;
+  String? _kPid;
+  (int, int, int, int)? _kLens;
+  List<Expense>? _activeCache;
+  List<Expense>? _sortedCache;
+  List<Expense>? _allCache;
+
+  /// Fiş görünümü her değiştiğinde artar; liste/istatistik önbelleklerinin anahtarıdır (arayüz için).
+  int get dataVersion {
+    _syncView();
+    return _viewRev;
+  }
+
+  void _syncView() {
+    final s = _snap;
+    final lens = (s.cloudExpenses.length, s.expenses.length, s.pendingEdits.length, s.pendingDeletes.length);
+    if (_kRev == _dataRev &&
+        identical(_kSnap, s) &&
+        identical(_kCloud, s.cloudExpenses) &&
+        identical(_kLocal, s.expenses) &&
+        identical(_kEdits, s.pendingEdits) &&
+        identical(_kDel, s.pendingDeletes) &&
+        _kPid == activeProfileId &&
+        _kLens == lens) {
+      return;
+    }
+    _kRev = _dataRev;
+    _kSnap = s;
+    _kCloud = s.cloudExpenses;
+    _kLocal = s.expenses;
+    _kEdits = s.pendingEdits;
+    _kDel = s.pendingDeletes;
+    _kPid = activeProfileId;
+    _kLens = lens;
+    _viewRev++;
+    _activeCache = _sortedCache = _allCache = null;
+  }
+
   List<Expense> _activeUnsorted() {
-    final pid = activeProfileId;
-    final cloudUids = {for (final e in _cloudExpenses) e.clientUid};
-    return <Expense>[
-      ..._cloudExpenses.where((e) => e.profileUid == pid),
-      // Sunucuda zaten olan fişin yerel kaydı yalnızca görsel kuyruğudur; listede tekrarlanmaz.
-      ..._snap.expenses.where((e) => e.profileUid == pid && !cloudUids.contains(e.clientUid)),
-    ];
+    _syncView();
+    return _activeCache ??= () {
+      final pid = activeProfileId;
+      final cloud = _cloudExpenses;
+      final cloudUids = {for (final e in cloud) e.clientUid};
+      return List<Expense>.unmodifiable(<Expense>[
+        ...cloud.where((e) => e.profileUid == pid),
+        // Sunucuda zaten olan fişin yerel kaydı yalnızca görsel kuyruğudur; listede tekrarlanmaz.
+        ..._snap.expenses.where((e) => e.profileUid == pid && !cloudUids.contains(e.clientUid)),
+      ]);
+    }();
   }
 
-  /// Aktif profilin fişleri: sunucudakiler + cihazdakiler (tarihe göre, yeni üstte).
+  /// Aktif profilin fişleri: sunucudakiler + cihazdakiler (tarihe göre, yeni üstte). Değiştirilemez, önbellekli.
   List<Expense> get expenses {
-    final out = _activeUnsorted();
-    out.sort((a, b) {
-      final c = b.date.compareTo(a.date);
-      return c != 0 ? c : b.id.compareTo(a.id);
-    });
-    return out;
+    final base = _activeUnsorted();
+    return _sortedCache ??= List<Expense>.unmodifiable(
+      base.toList()
+        ..sort((a, b) {
+          final c = b.date.compareTo(a.date);
+          return c != 0 ? c : b.id.compareTo(a.id);
+        }),
+    );
   }
 
-  /// Tüm profillerdeki tüm fişler (dışa aktarma için).
+  /// Tüm profillerdeki tüm fişler (dışa aktarma için). Değiştirilemez, önbellekli.
   List<Expense> get allExpenses {
-    final cloudUids = {for (final e in _cloudExpenses) e.clientUid};
-    return [
-      ..._cloudExpenses,
-      ..._snap.expenses.where((e) => !cloudUids.contains(e.clientUid)),
-    ];
+    _syncView();
+    return _allCache ??= () {
+      final cloud = _cloudExpenses;
+      final cloudUids = {for (final e in cloud) e.clientUid};
+      return List<Expense>.unmodifiable([
+        ...cloud,
+        ..._snap.expenses.where((e) => !cloudUids.contains(e.clientUid)),
+      ]);
+    }();
   }
 
   // --- Oturum ---
@@ -784,6 +847,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _persistSnapshot() async {
+    _dataRev++; // her veri değişikliği buradan geçer: türetilmiş fiş görünümü geçersiz
     final id = user?.id;
     if (id != null) await _local.save(id, _snap);
   }
@@ -1514,7 +1578,15 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  String? _derivedKey;
+
   void _syncDerived() {
+    // Girdiler (fiş görünümü, kullanıcı, aktif profil, saat) değişmediyse çıktı da aynıdır: O(N) toplam/projeksiyon
+    // hesabı (her `notifyListeners`'ta çalışırdı) atlanır.
+    final t = _clock();
+    final key = '$dataVersion|${t.year}-${t.month}-${t.day}-${t.hour}|${user?.id}|$activeProfileId|${activeProfile?.name}';
+    if (key == _derivedKey) return;
+    _derivedKey = key;
     final payload = _widgetPayload();
     if (payload != null ? payload != _lastWidget : _widgetPushed) {
       _lastWidget = payload;
@@ -1540,6 +1612,7 @@ class AppState extends ChangeNotifier {
 
   /// Çıkış / hesap silme: widget verisi, planlı ve gösterilmiş bildirimler temizlenir.
   Future<void> _clearDerivedOutputs() async {
+    _derivedKey = null;
     _lastReminderSig = '';
     if (_widgetPushed || _lastWidget != null) {
       _lastWidget = null;
