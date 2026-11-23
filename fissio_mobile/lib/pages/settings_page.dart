@@ -297,7 +297,7 @@ class SettingsPage extends StatelessWidget {
                     GroupedCard(
                       children: [
                         _row(context, LucideIcons.shieldCheck, 'Gizlilik Politikası',
-                            () => _open(context, 'Gizlilik Politikası', InfoTexts.privacy)),
+                            () => _open(context, InfoTexts.privacyTitle, InfoTexts.privacy)),
                         _row(context, LucideIcons.fileText, 'Kullanım Şartları',
                             () => _open(context, 'Kullanım Şartları', InfoTexts.terms)),
                       ],

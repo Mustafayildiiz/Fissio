@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_info.dart';
 import '../logo.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -49,25 +50,65 @@ class InfoTexts {
     ),
   ];
 
+  /// Ayarlar ve kayıt ekranındaki onay penceresinde kullanılan başlıklar.
+  static const privacyTitle = 'Gizlilik Politikası ve KVKK Aydınlatma Metni';
+  static const termsTitle = 'Kullanım Şartları';
+
+  /// Gizlilik Politikası ve 6698 sayılı KVKK m.10 kapsamında Aydınlatma Metni.
   static const privacy = <InfoSection>[
     InfoSection(
-      'Hangi verileri işliyoruz?',
-      'Hesap bilgilerin (e-posta adresi, adın ve şifrenin geri döndürülemez biçimde hashlenmiş hâli), '
-          'profillerin, kaydettiğin fişlerin finansal bilgileri (işletme, tutar, tarih, kategori, kalemler), '
-          'fiş fotoğrafların, profil fotoğrafların ve oturum/cihaz bilgilerin (cihaz adı, platform, son etkinlik).',
+      'Veri sorumlusu ve iletişim',
+      "Bu metin, 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) m.10 uyarınca hazırlanan aydınlatma metni ve "
+          "Fissio'nun gizlilik politikasıdır. Kişisel verilerin veri sorumlusu sıfatıyla Fissio tarafından işlenir. "
+          "Kişisel verilerinle ilgili tüm soru, talep ve başvuruların için veri sorumlusunun iletişim adresi: $supportEmail.",
     ),
     InfoSection(
-      'Nerede saklanır?',
-      'Bulut senkronizasyonu açıkken (varsayılan) veriler hesabına bağlı olarak sunucu veritabanında saklanır ve '
-          'yalnızca senin hesabınla erişilebilir; başka hesapların profillerine ve fişlerine erişim mümkün değildir. '
-          'Senkronizasyon kapalıyken ya da çevrimdışıyken kaydettiklerin yalnızca cihazında tutulur; yeniden '
-          'etkinleştirdiğinde yüklenir.',
+      'Hangi verileri işliyoruz?',
+      "Hesap bilgilerin: adın, e-posta adresin ve şifrenin geri döndürülemez biçimde hashlenmiş hâli (şifrenin kendisi "
+          "saklanmaz). Profillerin ve profil fotoğrafların. Kaydettiğin fişlerin bilgileri: işletme/satıcı adı, tutar, "
+          "tarih, kategori, fiş kalemleri (ürün adı ve tutarı), varsa belge numarası (ETTN), sipariş numarası ve notun. "
+          "Fişe eklediğin fotoğraflar. Kategori düzeltmelerinden öğrenilen kuralların (satıcı/ürün adı → kategori). "
+          "Bütçe limitlerin ve her ay tekrarlanan gider ayarların. Oturum ve cihaz bilgilerin (cihaz adı, platform, "
+          "oturumun açıldığı IP adresi, son etkinlik zamanı). Sunucu istek kayıtları (log): isteğin IP adresi, zamanı "
+          "ve çağrılan adres. E-posta ile fiş aktarımını açarsan: sana özel yönlendirme adresin ve aktarım geçmişin. "
+          "Aktarım geçmişinde YALNIZCA gönderici, konu, alınma tarihi, işlem durumu (ör. kaydedildi, yok sayıldı, "
+          "başarısız), varsa hata nedeni ve oluşturulan fişin bağlantısı tutulur; ham e-posta gövdesi ve ekleri (XML, "
+          "PDF, HTML) hiçbir zaman saklanmaz. Uygulamada reklam veya kullanıcı takibi yapılmaz; reklam ya da analitik "
+          "amaçlı üçüncü taraf yazılım kullanılmaz. Cihaz içi metin okuma Google ML Kit kütüphanesiyle yapılır: fiş "
+          "fotoğrafı cihazından çıkmaz, ancak Google kütüphanenin çalışmasına ilişkin anonim kullanım ve performans "
+          "ölçümleri toplayabilir.",
+    ),
+    InfoSection(
+      'Verileri nasıl topluyoruz?',
+      'Kişisel verilerin; uygulamadaki formlara girdiğin bilgilerden, kamera veya galeriden eklediğin fiş '
+          'fotoğraflarından, paylaştığın ya da içe aktardığın dosyalardan (PDF, e-posta, JSON/CSV yedek) ve sana özel '
+          'adrese yönlendirdiğin e-postalardan, kısmen otomatik yollarla (OCR ile metin okuma, fiş/fatura ayrıştırma ve '
+          'otomatik kategori önerisi) toplanır.',
+    ),
+    InfoSection(
+      'İşleme amaçları ve hukuki sebepler',
+      'Verilerin; hesabının oluşturulması ve doğrulanması, fişlerinin okunması, kaydedilmesi, kategorilere ayrılması '
+          've raporlanması, bütçe ve ödeme hatırlatmalarının sunulması, verilerinin cihazların arasında senkronize '
+          'edilmesi amacıyla KVKK m.5/2-c (sözleşmenin kurulması ve ifası) hukuki sebebine; hesap ve oturum güvenliğinin '
+          'sağlanması, kötüye kullanımın önlenmesi (ör. hız sınırları, şüpheli oturumların kapatılması, IP adresi ve '
+          'sunucu istek kayıtları) amacıyla m.5/2-f '
+          '(meşru menfaat) hukuki sebebine; yetkili makamların hukuka uygun talepleri hâlinde m.5/2-ç (hukuki '
+          'yükümlülük) hukuki sebebine dayanılarak işlenir. Verilerin pazarlama veya profilleme amacıyla kullanılmaz.',
+    ),
+    InfoSection(
+      'Bulut senkronizasyonu ve cihazda saklama',
+      "Bulut senkronizasyonu açıkken (varsayılan) verilerin hesabına bağlı olarak sunucu veritabanında saklanır ve "
+          "yalnızca senin hesabınla erişilebilir; başka hesapların profillerine ve fişlerine erişim mümkün değildir. "
+          "Senkronizasyonu Ayarlar > Veri Yönetimi'nden dilediğin an kapatabilirsin; kapalıyken ya da çevrimdışıyken "
+          "kaydettiklerin yalnızca cihazında tutulur ve sunucuya hiçbir şey yazılmaz. Senkronizasyonu yeniden "
+          "açtığında bekleyen kayıtların yüklenir.",
     ),
     InfoSection(
       'Fiş fotoğrafları ve OCR',
-      'Sunucu OCR\'ı kullanıldığında fotoğraf, metne çevrilmek üzere geçici olarak sunucuya gönderilir ve bu '
-          'işlem sırasında kalıcı olarak saklanmaz. Cihaz içi OCR\'da fotoğraf cihazından çıkmaz. Fişe eklediğin '
-          'fotoğraflar yalnızca kaydetmeyi seçersen ve senkronizasyon açıksa bulutta tutulur.',
+      "Sunucu OCR'ı kullanıldığında fotoğraf, metne çevrilmek üzere geçici olarak sunucuya gönderilir ve bu "
+          "işlem sırasında kalıcı olarak saklanmaz. Cihaz içi OCR'da (senkronizasyon kapalıyken her zaman) fotoğraf "
+          "cihazından çıkmaz. Fişe eklediğin fotoğraflar yalnızca kaydetmeyi seçersen ve senkronizasyon açıksa "
+          "bulutta tutulur.",
     ),
     InfoSection(
       'E-posta kullanımı',
@@ -77,37 +118,87 @@ class InfoTexts {
     InfoSection(
       'E-posta ile fiş aktarımı',
       'İstersen sana özel @fissio.dev yönlendirme adresini açarsın; bu adrese gelen e-postalar YALNIZCA fiş/fatura '
-          'ayrıştırma amacıyla işlenir (tutar, tarih, işletme ve kalemler çıkarılır). Mail gövdesi ve ekleri (XML/PDF) '
+          'ayrıştırma amacıyla işlenir (tutar, tarih, işletme ve kalemler çıkarılır). Mail gövdesi ve ekleri (XML/PDF/HTML) '
           'kaydedilmez; saklanan yalnızca ortaya çıkan fiş verisi ile "Son Aktarılan E-Postalar" geçmişidir: gönderici, '
-          'konu, tarih, durum ve ilgili fiş (son 50 kayıt). Gmail yönlendirme onay maili fiş sayılmaz; onay kodu '
-          'yalnızca kurulum için kısa süre tutulur. Adresin sızdığını düşünürsen "Adresi yenile" ile eskisini anında '
-          'geçersiz kılabilirsin. Adres, geçmiş ve aktarılan fişler hesabını sildiğinde de kalıcı olarak silinir. '
-          'Senkron kapalıyken adres kullanılamaz.',
+          'konu, tarih, durum, varsa hata nedeni ve ilgili fiş (son 50 kayıt). Gmail yönlendirme onay maili fiş sayılmaz; '
+          'onay kodu/bağlantısı yalnızca kurulum için kısa süre tutulur. Adresin sızdığını düşünürsen "Adresi yenile" ile '
+          'eskisini anında geçersiz kılabilir, aktarımı istediğin an duraklatabilirsin. Adres, geçmiş ve aktarılan fişler '
+          'hesabını sildiğinde de kalıcı olarak silinir. Senkron kapalıyken adres kullanılamaz.',
+    ),
+    InfoSection(
+      'Verilerin aktarılması',
+      'Kişisel verilerin satılmaz, kiralanmaz ve reklam amacıyla paylaşılmaz. Yalnızca hizmetin sunulması için gerekli '
+          'olduğu ölçüde ve bu amaçla sınırlı olarak altyapı hizmet sağlayıcılarına aktarılır: sunucu ve veritabanı '
+          'barındırma hizmeti; doğrulama ve şifre sıfırlama kodlarını gönderen e-posta gönderim (SMTP) hizmeti (e-posta '
+          'adresin ve kod); yönlendirdiğin e-postaları Fissio\'ya ileten e-posta yönlendirme hizmeti (mail yalnızca '
+          'iletim sırasında bu hizmetten geçer). Bu sağlayıcıların sunucuları yurt dışında bulunabilir; yurt dışına '
+          'aktarım KVKK m.9\'daki şartlara uygun olarak yapılır. Ayrıca yetkili kamu kurum ve kuruluşlarının hukuka '
+          'uygun talepleri hâlinde, kanunen zorunlu olan ölçüde paylaşılabilir.',
+    ),
+    InfoSection(
+      'Saklama süresi',
+      'Verilerin hesabın açık kaldığı sürece saklanır. E-posta aktarım geçmişinde en fazla son 50 kayıt tutulur; daha '
+          'eskileri kendiliğinden silinir. Doğrulama kodları kısa süre (dakikalar) sonra geçersiz olur. Oturum '
+          'kayıtları (IP adresi dahil) oturum kapatıldıktan sonra da güvenlik geçmişi olarak hesabın açık kaldığı '
+          'sürece tutulur ve hesap silinince silinir; sunucu istek kayıtlarına '
+          'yalnızca hizmet işletmecisi erişir ve bunlar güvenlik amacıyla sınırlı bir süre tutulduktan sonra silinir. Hesabını '
+          'sildiğinde hesabın, profillerin, fişlerin, fotoğrafların, öğrenilen kuralların, bütçelerin, yönlendirme '
+          'adresin ve aktarım geçmişin sunucudan kalıcı olarak silinir ve tüm oturumların kapatılır.',
     ),
     InfoSection(
       'Haklarınız (KVKK / GDPR)',
-      'Verilerine erişme, düzeltme, dışa aktarma (JSON/CSV) ve silme hakkına sahipsin. Ayarlar > Hesap > '
-          '"Hesabımı kalıcı olarak sil" ile hesabın, profillerin, fişlerin, fotoğrafların ve açık oturumların '
-          'sunucudan ve bu cihazdan kalıcı olarak silinir; bu işlem geri alınamaz. Talepleriniz için Destek '
-          'ekranındaki adresten bize ulaşabilirsiniz.',
+      "KVKK m.11 uyarınca; kişisel verilerinin işlenip işlenmediğini öğrenme, işlenmişse buna ilişkin bilgi talep etme, "
+          "işlenme amacını ve amacına uygun kullanılıp kullanılmadığını öğrenme, yurt içinde veya yurt dışında "
+          "aktarıldığı üçüncü kişileri bilme, eksik veya yanlış işlenmişse düzeltilmesini isteme, KVKK m.7 çerçevesinde "
+          "silinmesini veya yok edilmesini isteme, bu düzeltme ve silme işlemlerinin verilerin aktarıldığı üçüncü kişilere "
+          "bildirilmesini isteme, işlenen verilerin münhasıran otomatik sistemler vasıtasıyla analiz edilmesi (ör. "
+          "otomatik kategori önerisi ve öğrenilen kurallar) suretiyle aleyhine bir sonucun ortaya çıkmasına itiraz etme "
+          "ve kanuna aykırı işleme sebebiyle zarara uğraman hâlinde zararın giderilmesini talep etme haklarına "
+          "sahipsin. Verilerini uygulama içinden JSON/CSV olarak dışa aktarabilir, kaydettiğin bilgileri dilediğin an "
+          "düzeltebilirsin. Ayarlar > Hesap > \"Hesabımı kalıcı olarak sil\" ile hesabın ve tüm verilerin sunucudan ve "
+          "bu cihazdan kalıcı olarak silinir; bu işlem geri alınamaz. Başvurularını $supportEmail adresine "
+          "iletebilirsin; talebin en geç 30 gün içinde ücretsiz olarak sonuçlandırılır. Başvurunun reddedilmesi, "
+          "verilen cevabı yetersiz bulman veya süresinde cevap verilmemesi hâlinde KVKK m.14 uyarınca Kişisel Verileri "
+          "Koruma Kurulu'na şikâyette bulunabilirsin.",
     ),
     InfoSection(
       'Güvenlik',
-      'Üretim ortamında iletişim HTTPS ile şifrelenir; oturum anahtarların cihazında güvenli depolamada tutulur, '
-          'şifren hiçbir zaman cihazında saklanmaz. Uzaktan oturum kapatma Ayarlar > Aktif oturumlar\'dan yapılabilir.',
+      "Üretim ortamında iletişim HTTPS ile şifrelenir; oturum anahtarların cihazında güvenli depolamada tutulur, "
+          "şifren hiçbir zaman cihazında saklanmaz. Uzaktan oturum kapatma Ayarlar > Aktif oturumlar'dan yapılabilir.",
+    ),
+    InfoSection(
+      'Değişiklikler',
+      'Bu metin, hizmette veya mevzuatta değişiklik oldukça güncellenebilir; güncel sürüm her zaman uygulamada '
+          'Ayarlar > Gizlilik Politikası altında yer alır.',
     ),
   ];
 
   static const terms = <InfoSection>[
     InfoSection(
-      'Kullanım',
-      'Fissio, kişisel harcama takibi için sunulur. Okunan fiş verileri otomatik olarak çıkarılır ve hatalı '
-          'olabilir; kaydetmeden önce kontrol etmek sana aittir.',
+      'Hizmetin amacı',
+      'Fissio, YALNIZCA kişisel finans ve harcama takibi amacıyla sunulan bir uygulamadır. Ticari muhasebe, defter '
+          'tutma, vergi beyannamesi hazırlama veya resmi kayıt aracı değildir ve bu amaçlarla kullanılmamalıdır.',
     ),
     InfoSection(
-      'Sorumluluk',
-      'Uygulama resmi bir muhasebe, fatura veya vergi belgesi yerine geçmez. Hesabının güvenliğinden ve '
-          'şifrenin gizliliğinden sen sorumlusun.',
+      'Kullanım',
+      'Fissio\'yu kullanarak bu şartları kabul etmiş olursun. Hesabını yalnızca kendin kullanır, doğru ve güncel '
+          'bilgiler verirsin. Okunan fiş verileri otomatik olarak çıkarılır ve hatalı olabilir; kaydetmeden önce kontrol '
+          'etmek sana aittir.',
+    ),
+    InfoSection(
+      'Otomatik okuma sonuçları bilgi amaçlıdır',
+      'Fiş fotoğraflarından OCR ile, e-faturalardan UBL-TR XML ayrıştırmasıyla ve e-posta/PDF içeriklerinden HTML/metin '
+          'ayrıştırmasıyla elde edilen tutar, tarih, satıcı, kalem, KDV ve kategori bilgileri YALNIZCA bilgi amaçlıdır; '
+          'eksik veya hatalı olabilir. Bu sonuçlar vergi, muhasebe veya hukuki işlemlerde resmi belge yerine geçmez; '
+          'geçerli olan her zaman satıcının düzenlediği asıl fatura/fiştir. Otomatik sonuçlara dayanılarak verilen '
+          'kararlardan Fissio sorumlu tutulamaz.',
+    ),
+    InfoSection(
+      'Kullanıcının yükümlülükleri',
+      'Uygulamaya yalnızca KENDİNE ait, hukuka uygun olarak düzenlenmiş fatura ve fişleri yükleyebilir ve '
+          'yönlendirebilirsin; bunu yapmakla yükümlüsün. Başkalarına ait kişisel verileri içeren belgeleri, sahte veya '
+          'hukuka aykırı içerikleri gönderemezsin. Asıl (orijinal) belgelerini, yasal saklama süreleri boyunca kendin '
+          'saklamaktan sorumlusun; Fissio bir belge arşivleme hizmeti değildir.',
     ),
     InfoSection(
       'E-posta yönlendirme',
@@ -115,7 +206,51 @@ class InfoTexts {
           'göndermemelisin. Gmail/Outlook filtresini ve yönlendirmeyi sen kurar ve yönetirsin; adresin gizliliği sana '
           'aittir. Otomatik okunan fişler hatalı olabilir; kaydedilen tutar, tarih ve kalemleri kontrol etmek sana aittir.',
     ),
+    InfoSection(
+      'Sorumluluk',
+      'Uygulama resmi bir muhasebe, fatura veya vergi belgesi yerine geçmez. Hizmet "olduğu gibi" sunulur; kesintisiz '
+          'veya hatasız çalışacağı garanti edilmez. Verilerini düzenli olarak dışa aktarman önerilir. Hesabının '
+          'güvenliğinden ve şifrenin gizliliğinden sen sorumlusun.',
+    ),
+    InfoSection(
+      'Hesabın sonlandırılması',
+      'Hesabını Ayarlar > Hesap üzerinden dilediğin an kalıcı olarak silebilirsin. Bu şartların veya hukukun ağır '
+          'ihlali, hizmetin kötüye kullanılması ya da güvenliği tehdit eden kullanım hâlinde hesap askıya alınabilir.',
+    ),
+    InfoSection(
+      'Değişiklikler ve iletişim',
+      'Bu şartlar güncellenebilir; güncel sürüm her zaman uygulamada yer alır. Sorularını $supportEmail adresine '
+          'iletebilirsin.',
+    ),
   ];
+}
+
+/// Başlıklı paragraf listesi (Bilgi sayfaları ve kayıt ekranındaki yasal onay penceresi).
+class InfoSectionsList extends StatelessWidget {
+  const InfoSectionsList({super.key, required this.sections});
+  final List<InfoSection> sections;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final s in sections)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s.heading, style: FissioText.body(c, size: 16, weight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                Text(s.body, style: FissioText.body(c, size: 15).copyWith(height: 1.5)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class InfoPage extends StatelessWidget {
@@ -151,18 +286,7 @@ class InfoPage extends StatelessWidget {
                       padding: EdgeInsets.only(bottom: 22),
                       child: Align(alignment: Alignment.centerLeft, child: FissioWordmark(logoSize: 56, fontSize: 40)),
                     ),
-                  for (final s in sections)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(s.heading, style: FissioText.body(c, size: 16, weight: FontWeight.w700)),
-                          const SizedBox(height: 6),
-                          Text(s.body, style: FissioText.body(c, size: 15).copyWith(height: 1.5)),
-                        ],
-                      ),
-                    ),
+                  InfoSectionsList(sections: sections),
                   ],
                 ),
               ),

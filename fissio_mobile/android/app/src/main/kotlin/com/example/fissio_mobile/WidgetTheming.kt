@@ -79,12 +79,33 @@ object WidgetTheming {
         return Style(theme, accent, day, night)
     }
 
+    /**
+     * DİKKAT (tema geçişi hatası): aynı layout'lu yeni bir RemoteViews geldiğinde ana ekran (host) görünümü yeniden
+     * şişirmez, eylemleri MEVCUT View'a yeniden uygular (reapply). Bu yüzden önceki temanın bıraktığı her özellik
+     * (arka plan tint'i, yazı rengi, renk filtresi) bir sonraki temada AÇIKÇA üzerine yazılmalı/temizlenmelidir; aksi
+     * halde "Marka Rengi"nden "Açık"/"Koyu"/"Sistem"e geçince zemin marka renginde takılı kalır.
+     */
+    private fun clearTint(views: RemoteViews, viewId: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            views.setColorStateList(viewId, "setBackgroundTintList", null as ColorStateList?)
+        }
+    }
+
     /** Widget zemini (köşeleri yuvarlak). */
     fun applyBackground(context: Context, views: RemoteViews, rootId: Int, style: Style) {
         when (style.theme) {
-            Theme.SYSTEM -> views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg)
-            Theme.LIGHT -> views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_light)
-            Theme.DARK -> views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_dark)
+            Theme.SYSTEM -> {
+                views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg)
+                clearTint(views, rootId)
+            }
+            Theme.LIGHT -> {
+                views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_light)
+                clearTint(views, rootId)
+            }
+            Theme.DARK -> {
+                views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_dark)
+                clearTint(views, rootId)
+            }
             Theme.BRAND -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     views.setInt(rootId, "setBackgroundResource", R.drawable.widget_bg_tint)
@@ -102,10 +123,22 @@ object WidgetTheming {
         }
     }
 
-    /** Başlık/tutar (mute=false) ve alt başlık (mute=true) yazı rengi. system temada layout renkleri korunur. */
+    /**
+     * Başlık/tutar (mute=false) ve alt başlık (mute=true) yazı rengi. system temada layout'taki `@color/widget_*`
+     * renkleri yeniden yazılır (reapply'da önceki temanın rengi kalmasın); API 31+'da kaynak, host'un gece moduna göre
+     * uygulama anında çözülür.
+     */
     fun applyText(context: Context, views: RemoteViews, textId: Int, style: Style, mute: Boolean) {
         val res = when (style.theme) {
-            Theme.SYSTEM -> return
+            Theme.SYSTEM -> {
+                val sys = if (mute) R.color.widget_mute else R.color.widget_ink
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    views.setColor(textId, "setTextColor", sys)
+                } else {
+                    views.setTextColor(textId, context.getColor(sys))
+                }
+                return
+            }
             Theme.LIGHT -> if (mute) R.color.widget_light_mute else R.color.widget_light_ink
             Theme.DARK -> if (mute) R.color.widget_dark_mute else R.color.widget_dark_ink
             Theme.BRAND -> {
@@ -128,7 +161,15 @@ object WidgetTheming {
      * zemin + marka renkli yazı/ikon; koyu palet = marka renkli zemin + beyaz (ya da koyu) yazı/ikon.
      */
     fun applyButton(context: Context, views: RemoteViews, buttonId: Int, iconId: Int, labelId: Int, style: Style) {
-        if (style.theme != Theme.BRAND) return
+        if (style.theme != Theme.BRAND) {
+            // Layout varsayılanına dön (reapply'da brand'in zemin/tint/yazı/ikon rengi kalmasın).
+            val onAccent = context.getColor(R.color.widget_on_accent)
+            views.setInt(buttonId, "setBackgroundResource", R.drawable.widget_scan_bg)
+            clearTint(views, buttonId)
+            views.setTextColor(labelId, onAccent)
+            views.setInt(iconId, "setColorFilter", onAccent)
+            return
+        }
         views.setInt(buttonId, "setBackgroundResource", R.drawable.widget_btn_inverse)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             views.setColorStateList(

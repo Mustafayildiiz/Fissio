@@ -7,6 +7,8 @@ import '../theme.dart';
 import '../widgets.dart';
 import 'account_widgets.dart';
 import 'forgot_password_page.dart';
+import 'info_page.dart';
+import 'legal_consent_sheet.dart';
 import 'profile_select_page.dart';
 import 'verify_email_page.dart';
 
@@ -29,7 +31,9 @@ class _AuthPageState extends State<AuthPage> {
   final _password2 = TextEditingController();
   late bool _register = widget.startInRegister;
   bool _showPass = false;
-  bool _accepted = false;
+  // Yasal onaylar: yalnızca ilgili metin onay penceresinde sonuna kadar okunup kabul edilince işaretlenir.
+  bool _termsAccepted = false;
+  bool _privacyAccepted = false;
   bool _busy = false;
   String? _error;
 
@@ -63,7 +67,7 @@ class _AuthPageState extends State<AuthPage> {
         setState(() => _error = 'Şifreler eşleşmiyor.');
         return;
       }
-      if (!_accepted) {
+      if (!_termsAccepted || !_privacyAccepted) {
         setState(() => _error = 'Devam etmek için Kullanım Şartları ve Gizlilik Politikası\'nı kabul edin.');
         return;
       }
@@ -113,6 +117,71 @@ class _AuthPageState extends State<AuthPage> {
     if (done == true && mounted) {
       showMessage(context, 'Şifren güncellendi. Yeni şifrenle giriş yap.');
     }
+  }
+
+  /// Metni onay penceresinde açar; "Okudum, Kabul Ediyorum" ile dönülürse ilgili kutuyu işaretler.
+  Future<void> _openLegal(String title, List<InfoSection> sections, void Function(bool) set) async {
+    final ok = await showLegalConsent(context, title: title, sections: sections);
+    if (!mounted || !ok) return;
+    setState(() {
+      set(true);
+      if (_error != null && _termsAccepted && _privacyAccepted) _error = null;
+    });
+  }
+
+  /// Onay kutusu: işaretsiz kutuya ya da bağlantıya dokunmak metni açar (okumadan işaretlenemez); işaretli kutuya
+  /// dokunmak işareti kaldırır.
+  Widget _consentCheck(
+    FissioColors c, {
+    required String checkKey,
+    required String linkKey,
+    required bool value,
+    required String link,
+    required String rest,
+    required void Function(bool) onChanged,
+    required String title,
+    required List<InfoSection> sections,
+  }) {
+    void open() => _openLegal(title, sections, onChanged);
+    return AccentCheck(
+      key: ValueKey(checkKey),
+      value: value,
+      onChanged: (v) {
+        if (v) {
+          open();
+        } else {
+          setState(() => onChanged(false));
+        }
+      },
+      child: Text.rich(
+        TextSpan(
+          style: FissioText.body(c, size: 14, color: c.mute).copyWith(height: 1.45),
+          children: [
+            WidgetSpan(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: Semantics(
+                link: true,
+                child: GestureDetector(
+                  key: ValueKey(linkKey),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: open,
+                  child: Text(
+                    link,
+                    style: FissioText.body(c, size: 14, weight: FontWeight.w600, color: c.accentInk).copyWith(
+                      height: 1.45,
+                      decoration: TextDecoration.underline,
+                      decorationColor: c.accentInk,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            TextSpan(text: rest),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -233,26 +302,27 @@ class _AuthPageState extends State<AuthPage> {
                     const SizedBox(height: 12),
                     PasswordStrength(rules: rules),
                     const SizedBox(height: 8),
-                    AccentCheck(
-                      value: _accepted,
-                      onChanged: (v) => setState(() => _accepted = v),
-                      child: Text.rich(
-                        TextSpan(
-                          style: FissioText.body(c, size: 14, color: c.mute).copyWith(height: 1.45),
-                          children: [
-                            TextSpan(
-                              text: 'Kullanım Şartları',
-                              style: TextStyle(color: c.ink, fontWeight: FontWeight.w600),
-                            ),
-                            const TextSpan(text: '\'nı ve '),
-                            TextSpan(
-                              text: 'Gizlilik Politikası',
-                              style: TextStyle(color: c.ink, fontWeight: FontWeight.w600),
-                            ),
-                            const TextSpan(text: '\'nı kabul ediyorum.'),
-                          ],
-                        ),
-                      ),
+                    _consentCheck(
+                      c,
+                      checkKey: 'terms-check',
+                      linkKey: 'terms-link',
+                      value: _termsAccepted,
+                      link: 'Kullanım Şartları',
+                      rest: '\'nı okudum ve kabul ediyorum.',
+                      onChanged: (v) => _termsAccepted = v,
+                      title: InfoTexts.termsTitle,
+                      sections: InfoTexts.terms,
+                    ),
+                    _consentCheck(
+                      c,
+                      checkKey: 'privacy-check',
+                      linkKey: 'privacy-link',
+                      value: _privacyAccepted,
+                      link: 'Gizlilik Politikası ve KVKK Aydınlatma Metni',
+                      rest: '\'ni okudum.',
+                      onChanged: (v) => _privacyAccepted = v,
+                      title: InfoTexts.privacyTitle,
+                      sections: InfoTexts.privacy,
                     ),
                   ],
                   if (_error != null) ...[

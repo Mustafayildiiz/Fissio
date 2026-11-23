@@ -123,4 +123,48 @@ void main() {
     await tester.pumpWidget(_app(InfoPage(title: 'Gizlilik Politikası', sections: InfoTexts.privacy)));
     expect(find.text('E-posta ile fiş aktarımı', skipOffstage: false), findsOneWidget);
   });
+
+  testWidgets('destek adresi destek@fissio.dev: ekranda, mailto ve kopyalamada', (tester) async {
+    _tall(tester);
+    expect(supportEmail, 'destek@fissio.dev');
+    expect(supportMailUri(version: '1.0.0').path, 'destek@fissio.dev');
+    appVersionLoader = () async => '1.0.0';
+    Uri? opened;
+    mailLauncher = (u) async {
+      opened = u;
+      return true;
+    };
+    await tester.pumpWidget(_app(const SupportPage()));
+    await tester.pumpAndSettle();
+    expect(find.text('destek@fissio.dev'), findsOneWidget);
+    expect(find.textContaining('gmail.com'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('support-mail')));
+    await tester.pumpAndSettle();
+    expect(opened?.toString(), startsWith('mailto:destek@fissio.dev?'));
+  });
+
+  test('KVKK aydınlatma ve kullanım şartları eksiksiz', () {
+    String all(List<InfoSection> s) => s.map((e) => '${e.heading}\n${e.body}').join('\n');
+    final privacy = all(InfoTexts.privacy);
+    final terms = all(InfoTexts.terms);
+    // Veri sorumlusu ve başvuru kanalı.
+    expect(InfoTexts.privacy.first.heading, 'Veri sorumlusu ve iletişim');
+    expect(privacy, contains('destek@fissio.dev'));
+    expect(privacy, isNot(contains('gmail.com')));
+    // Toplanan veriler; e-posta geçmişinde yalnız üstveri, ham gövde/ek yok.
+    for (final s in ['fiş kalemleri', 'tutar', 'tarih', 'gönderici, konu, alınma tarihi, işlem durumu',
+        'ham e-posta gövdesi ve ekleri', 'hiçbir zaman saklanmaz']) {
+      expect(privacy, contains(s));
+    }
+    // Amaç + hukuki sebep, senkron, aktarım, saklama, haklar ve silme.
+    for (final s in ['m.5/2-c', 'Bulut senkronizasyonu', 'KVKK m.9', 'Saklama süresi', 'KVKK m.11',
+        'otomatik', 'Hesabımı kalıcı olarak sil', '30 gün', 'Kişisel Verileri Koruma Kurulu']) {
+      expect(privacy, contains(s));
+    }
+    // Şartlar: yalnız kişisel finans, otomatik sonuçlar bilgi amaçlı, kullanıcının kendi belgeleri.
+    for (final s in ['YALNIZCA kişisel finans', 'OCR', 'UBL-TR', 'HTML', 'bilgi amaçlıdır',
+        'vergi, muhasebe', 'resmi belge yerine geçmez', 'KENDİNE ait', 'yükümlüsün', 'destek@fissio.dev']) {
+      expect(terms, contains(s));
+    }
+  });
 }

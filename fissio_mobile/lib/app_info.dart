@@ -2,8 +2,8 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Destek e-posta adresi (Destek ekranı ve Gizlilik Politikası'ndaki iletişim bilgisi).
-const supportEmail = 'mustafa935yildiz@gmail.com';
+/// Destek ve veri sorumlusu iletişim adresi (Destek ekranı, Gizlilik Politikası / KVKK metni ve Kullanım Şartları).
+const supportEmail = 'destek@fissio.dev';
 
 /// Uygulama sürümü ("1.0.0 (1)"). Testlerde değiştirilebilir; okunamazsa boş döner.
 Future<String> Function() appVersionLoader = () async {
