@@ -269,6 +269,7 @@ void main() {
       expect(m('duplicate'), contains('zaten kayıtlıydı'));
       expect(m('ignored:no_amount'), contains('tutar bulunamadı'));
       expect(m('ignored:rate_limited'), contains('çok fazla'));
+      expect(m('ignored:too_large'), contains('boyut sınırını'));
       expect(m('ignored:empty'), contains('okunamadı'));
       expect(m('gmail_confirmation'), contains('Gmail'));
       expect(m(null), isNull);
@@ -783,6 +784,8 @@ void main() {
       expect(emailHistoryBadge(it('failed', 'db_error')).error, isTrue);
       expect(emailHistoryBadge(it('ignored', 'pdf_unreadable')).label, 'PDF Okunamadı');
       expect(emailHistoryBadge(it('ignored', 'rate_limited')).warn, isTrue);
+      expect(emailHistoryBadge(it('ignored', 'too_large')).label, 'Çok Büyük');
+      expect(emailHistoryBadge(it('ignored', 'too_large')).warn, isTrue);
       expect(emailHistoryBadge(it('ignored', 'unknown_category')).label, 'Atlandı');
       expect(ocrEngineDisplayName('xml'), 'e-Fatura XML (UBL-TR)', reason: 'sunucunun yazdığı xml motoru detayda etiketli');
       expect(InboundHistoryItem.fromJson({'id': 3, 'status': 'saved', 'expense_id': 9}).hasExpense, isTrue);

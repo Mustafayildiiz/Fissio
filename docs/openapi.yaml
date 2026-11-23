@@ -107,7 +107,7 @@ components:
         address: { type: string, example: 'k3j9x2m4q7p1w8zt@fis.fissio.app', description: Kullanıcıya özel, tahmin edilemez yönlendirme adresi }
         profile_id: { type: integer, format: int64, description: 'Aktarılan fişlerin düşeceği profil; yoksa en eski/varsayılan profil' }
         last_received_at: { type: string, format: date-time, description: 'Alias geçerli olan SON mailin zamanı (fiş oluşsun, yok sayılsın, mükerrer çıksın ya da hata alsın); Gmail yönlendirme onay maili sayılmaz' }
-        last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden> (paused, rate_limited, unknown_category, gmail_confirmation_unreadable, …) | failed:<kod> (ör. failed:internal; ayrıntı geçmişteki reason alanında)' }
+        last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden> (paused, rate_limited, too_large, unreadable_payload, unknown_category, gmail_confirmation_unreadable, …) | failed:<kod> (ör. failed:internal; ayrıntı geçmişteki reason alanında)' }
         paused: { type: boolean, description: 'true = aktarım duraklatıldı; gelen mailler fişe dönüşmez (alan yoksa false)' }
     Item:
       type: object
@@ -899,7 +899,10 @@ paths:
         HTML gövde (platform sipariş tablolarından ad/adet/tutar kalemleri dahil) > düz metin; mail tek fiş olarak
         kaydedilir. Metinsiz (taranmış) PDF OCR'a gönderilmez. "İlet" önsözü atılır. Gmail onay maili fiş olmaz. Bilinmeyen alias, okunamayan
         mail ve mükerrer belge hata DEĞİLDİR: 200 `{status: ignored|duplicate}` (yeniden deneme fırtınası ve alias sızdırma
-        olmasın). Yalnızca yanlış secret 401, aşırı boyut 413.
+        olmasın). Yalnızca yanlış secret 401, aşırı boyut 413. Boyut bildirimi: yönlendirici sınırı aşan maili göndermek
+        yerine `{to, from, subject, rejected: "too_large", size}` JSON'u gönderebilir (başlıklar RFC 2047 olabilir,
+        sunucu çözer); alias geçerliyse geçmişe `ignored/too_large` yazılır, yanıt 200 `ignored`. 413 ya da okunamayan
+        gövdede de `?rcpt=` geçerli bir alias'a aitse geçmişe `too_large` / `unreadable_payload` yazılır.
       security: []
       responses:
         '200':
@@ -913,7 +916,7 @@ paths:
                   id: { type: integer, format: int64 }
                   reason: { type: string }
         '401': { description: Secret yok/yanlış }
-        '413': { description: Gövde INBOUND_MAX_BYTES'tan büyük }
+        '413': { description: "Gövde INBOUND_MAX_BYTES'tan büyük (?rcpt= geçerli alias ise geçmişe too_large yazılır)" }
   /categories:
     get:
       tags: [expense]

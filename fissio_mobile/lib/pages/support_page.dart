@@ -89,7 +89,9 @@ const _emailFaqs = <_Faq>[
         '(yaklaşık 15 MB üstü) — ek boyutunu küçült ya da PDF\'i mail uygulamasından "Paylaş → Fissio ile ekle" ile cihazda işle. '
         '2) Adres yenilendi ya da yazım hatası var — E-Posta ile Otomatik Fiş Aktarımı ekranındaki güncel adresi kopyalayıp '
         'yönlendirmeyi yeniden ekle. 3) Mail sağlayıcın güvenlik politikası nedeniyle dış adrese iletmeyi engelliyor '
-        '(kurumsal hesaplarda sık) — kişisel bir hesaptan ilet. Büyük mail kaydedilmez ama kendi kutunda durur; '
+        '(kurumsal hesaplarda sık) — kişisel bir hesaptan ilet. 4) Gönderen alan adı kimlik doğrulamasından (SPF/DKIM/DMARC) '
+        'geçemedi — bu, faturayı gönderen firmanın posta ayarlarından kaynaklanır; faturayı Paylaş → Fissio ile ekle. '
+        'Büyük mail kaydedilmez ama kendi kutunda durur ve E-Posta ekranındaki geçmişte "Çok Büyük" olarak görünür; '
         'fişini yine Paylaş → Fissio ile ekleyebilirsin.',
   ),
 ];

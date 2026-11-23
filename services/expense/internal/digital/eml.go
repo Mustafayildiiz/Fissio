@@ -56,6 +56,10 @@ var wordDecoder = &mime.WordDecoder{CharsetReader: func(charset string, input io
 	return enc.NewDecoder().Reader(input), nil
 }}
 
+// DecodeHeader RFC 2047 kodlu başlık değerini (`=?UTF-8?B?…?=`, windows-1254 vb.) UTF-8 metne çevirir; çözülemezse
+// değeri aynen döndürür. Ham MIME dışında gelen başlıklar (ör. Worker'ın boyut bildirimi) için.
+func DecodeHeader(s string) string { return decodeHeader(s) }
+
 func decodeHeader(s string) string {
 	d, err := wordDecoder.DecodeHeader(s)
 	if err != nil {

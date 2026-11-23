@@ -1,57 +1,98 @@
 // Fissio — Cloudflare Email Worker (e-posta ile otomatik fiş aktarımı).
-// Kurulum ve ortam değişkenleri: docs/cloudflare-email-worker.md
+// Kurulum, ortam değişkenleri ve "5.7.1" teşhis rehberi: docs/cloudflare-email-worker.md
 //
-// Neden ham MIME akışı? Önceki yaklaşım maili tamamen string'e çevirip JSON/base64'e koyuyordu: büyük ekli mailler Worker
-// belleğini (128 MB) zorlar ve base64 gövdeyi %33 şişirdiği için sunucunun boyut sınırını (INBOUND_MAX_BYTES, 413) aşardı.
-// Burada `message.raw` akışı doğrudan webhook'a `message/rfc822` olarak borulanır (bellekte tutulmaz) ve boyut ÖNCEDEN
-// `message.rawSize` ile denetlenir. Alıcı (zarf) adresi `?rcpt=` ile iletilir; sunucu alias'ı oradan çözer.
+// Tasarım kuralları:
+// 1) Handler ASLA fırlatmaz. Email Worker'da yakalanmamış hata Cloudflare'in maili gönderene kalıcı ret (5.x.x) ile
+//    döndürmesine yol açabilir; Gmail yönlendirmesinde bu, kullanıcıya "teslim edilemedi" bildirimi olarak yansır.
+//    Mail zaten kullanıcının kendi kutusunda durduğundan, işlenemeyen mail günlüğe yazılır ve sessizce bırakılır.
+// 2) Ham MIME bellekte string/base64'e çevrilmez: `message.raw` akışı doğrudan webhook'a `message/rfc822` olarak gider.
+// 3) Boyut ÖNCEDEN `message.rawSize` ile denetlenir; sınırı aşan mailin gövdesi gönderilmez, sunucuya yalnız küçük bir
+//    JSON bildirimi (`rejected: "too_large"`) gider ki kullanıcı uygulamadaki aktarım geçmişinde nedenini görsün.
+// 4) Ret (`setReject`) yalnız REJECT_OVERSIZE=true ile ve yalnız aşırı boyutta, bilinçli olarak yapılır.
+
+const CLOUDFLARE_MAX_BYTES = 25 * 1024 * 1024; // Email Routing'in kendi tavanı (25 MiB)
+const DEFAULT_MAX_BYTES = 15 * 1024 * 1024; // sunucudaki INBOUND_MAX_BYTES varsayılanı
+const TIMEOUT_MS = 60_000;
+
+function maxBytesOf(env) {
+  const n = Number(env.INBOUND_MAX_BYTES);
+  const v = Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_BYTES;
+  return Math.min(v, CLOUDFLARE_MAX_BYTES);
+}
+
+function webhookURL(env, rcpt) {
+  const url = new URL('/webhooks/inbound-email', env.FISSIO_API_BASE);
+  url.searchParams.set('rcpt', rcpt); // zarf alıcısı: auto-forward'da To: başlığı kullanıcının kendi adresidir
+  return url;
+}
+
+function logResponse(res, message, size) {
+  if (res.ok) return;
+  if (res.status === 401) {
+    console.error('fissio: webhook sırrı reddedildi (401); Worker ve sunucudaki INBOUND_WEBHOOK_SECRET değerlerini eşitle');
+  } else if (res.status === 413) {
+    console.error(`fissio: sunucu boyut sınırı nedeniyle reddetti (413) size=${size}; INBOUND_MAX_BYTES'i Worker ve sunucuda eşitle`);
+  } else {
+    console.error(`fissio: webhook ${res.status} döndü to=${message.to} size=${size}`);
+  }
+}
 
 export default {
   async email(message, env, ctx) {
-    // Sunucudaki INBOUND_MAX_BYTES ile aynı olmalı (varsayılan 15 MB).
-    const maxBytes = Number(env.INBOUND_MAX_BYTES || 15 * 1024 * 1024);
-
-    if (message.rawSize > maxBytes) {
-      // Büyük ekli mail: işlenmez. Mail kullanıcının kendi kutusunda durur (yönlendirme bir kopyadır); hata günlüğe düşer.
-      console.warn(
-        `fissio: mail çok büyük, atlandı (${message.rawSize} > ${maxBytes} bayt) from=${message.from} to=${message.to}`,
-      );
-      // İsteğe bağlı: REJECT_OVERSIZE=true ise gönderene kalıcı ret (5.x.x) döner; varsayılan sessiz atlamadır
-      // (Gmail yönlendirmesinde ret, kullanıcıya "teslim edilemedi" bildirimi olarak döner).
-      if (env.REJECT_OVERSIZE === 'true') message.setReject('Mesaj Fissio için çok büyük (boyut sınırı aşıldı).');
-      return;
-    }
-
-    const url = new URL('/webhooks/inbound-email', env.FISSIO_API_BASE);
-    url.searchParams.set('rcpt', message.to); // zarf alıcısı: auto-forward'da To: başlığı kullanıcının kendi adresidir
-
-    // Bilinen uzunlukta akış: sunucuya Content-Length ile gider, chunked/bellekte biriktirme olmaz.
-    const { readable, writable } = new FixedLengthStream(message.rawSize);
-    const pipe = message.raw.pipeTo(writable);
-
-    let res;
     try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'message/rfc822',
-          'X-Webhook-Secret': env.INBOUND_WEBHOOK_SECRET,
-        },
-        body: readable,
-      });
-      await pipe;
-    } catch (err) {
-      console.error(`fissio: webhook çağrısı başarısız: ${err} to=${message.to}`);
-      return;
-    }
+      if (!env.FISSIO_API_BASE || !env.INBOUND_WEBHOOK_SECRET) {
+        console.error('fissio: FISSIO_API_BASE / INBOUND_WEBHOOK_SECRET tanımlı değil; mail işlenmedi (ret yok)');
+        return;
+      }
+      if (env.DEBUG_AUTH === 'true') {
+        // SPF/DKIM/DMARC teşhisi: Cloudflare'in kendi sonucu `mx.cloudflare.net` ile başlayan ilk satırdır.
+        console.log(`fissio: to=${message.to} auth=${message.headers.get('authentication-results')}`);
+      }
 
-    if (res.status === 413) {
-      console.warn(`fissio: sunucu boyut sınırını aştığı için reddetti (413) size=${message.rawSize}; INBOUND_MAX_BYTES'i eşitle`);
-    } else if (res.status === 401) {
-      console.error('fissio: webhook sırrı reddedildi (401); INBOUND_WEBHOOK_SECRET değerlerini eşitle');
-    } else if (!res.ok) {
-      console.error(`fissio: webhook ${res.status} döndü to=${message.to}`);
+      const maxBytes = maxBytesOf(env);
+      const size = message.rawSize;
+      const headers = { 'X-Webhook-Secret': env.INBOUND_WEBHOOK_SECRET };
+
+      if (size > maxBytes) {
+        console.warn(`fissio: mail çok büyük, gövde gönderilmedi (${size} > ${maxBytes} bayt) to=${message.to}`);
+        // Gövdesiz bildirim: sunucu aktarım geçmişine "too_large" yazar. Başlıklar ham (RFC 2047) olabilir; sunucu çözer.
+        // `from` zarf göndericisi DEĞİL, başlıktaki Gönderen'dir (Gmail iletiminde zarf = kullanıcının kendi/SRS adresi).
+        try {
+          const res = await fetch(webhookURL(env, message.to), {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: message.to,
+              from: message.headers.get('from') || '',
+              subject: message.headers.get('subject') || '',
+              rejected: 'too_large',
+              size,
+            }),
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+          });
+          logResponse(res, message, size);
+        } catch (err) {
+          console.error(`fissio: boyut bildirimi gönderilemedi: ${err} to=${message.to}`);
+        }
+        if (env.REJECT_OVERSIZE === 'true') {
+          message.setReject('Mesaj Fissio için çok büyük (boyut sınırı aşıldı).');
+        }
+        return;
+      }
+
+      // Ham MIME akışı doğrudan gövde: bellekte biriktirilmez (chunked). Uzunluk uyuşmazlığı riski taşıyan
+      // FixedLengthStream ve ayrı bir pipe sözü (yakalanmamış ret) kullanılmaz.
+      const res = await fetch(webhookURL(env, message.to), {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'message/rfc822' },
+        body: message.raw,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      logResponse(res, message, size);
+      // Sunucu bilinmeyen alias / okunamayan maili de 200 `ignored` ile yanıtlar (yeniden deneme fırtınası olmasın).
+    } catch (err) {
+      // Ağ hatası, zaman aşımı, geçersiz FISSIO_API_BASE…: günlüğe yaz, maili REDDETME.
+      console.error(`fissio: mail işlenemedi: ${err && err.stack ? err.stack : err} to=${message && message.to}`);
     }
-    // Sunucu bilinmeyen alias / okunamayan maili de 200 `ignored` ile yanıtlar (yeniden deneme fırtınası olmasın).
   },
 };

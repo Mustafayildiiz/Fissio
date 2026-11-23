@@ -135,6 +135,36 @@ type inboundPayload struct {
 	RawBase64   string              `json:"raw_base64"`
 	MessageID   string              `json:"message_id"`
 	Attachments []inboundAttachment `json:"attachments"`
+	// Rejected: yönlendiricinin gövdesiz bildirimi (yalnız "too_large" kabul edilir: Worker maili boyut sınırı
+	// nedeniyle göndermedi). Size bilgi amaçlıdır.
+	Rejected string `json:"rejected"`
+	Size     int64  `json:"size"`
+
+	// rawBytes: ham message/rfc822 gövdesi (JSON'a girmez). Ayrı tutulur ki 15 MB'lık mail string'e ve geri kopyalanmasın.
+	rawBytes []byte
+}
+
+// rejectedTooLarge yönlendiricinin "boyut sınırı aşıldı, gövde gönderilmedi" bildirimi.
+const rejectedTooLarge = "too_large"
+
+// gmailScanLimit: Gmail onay tespitine verilen ham MIME'ın üst sınırı (onay mailleri birkaç KB'tır; büyük ekli mailde
+// megabaytlarca base64 üzerinde regex taraması yapılmasın).
+const gmailScanLimit = 1 << 20
+
+// rawMIME ham MIME baytları: rfc822 gövdesi > JSON `raw_base64` > JSON `raw`.
+func (p inboundPayload) rawMIME() []byte {
+	if len(p.rawBytes) > 0 {
+		return p.rawBytes
+	}
+	if p.RawBase64 != "" {
+		if b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.RawBase64)); err == nil {
+			return b
+		}
+	}
+	if p.Raw != "" {
+		return []byte(p.Raw)
+	}
+	return nil
 }
 
 // readInbound webhook gövdesini (JSON, multipart/form-data ya da ham message/rfc822) ortak biçime çevirir.
@@ -187,7 +217,7 @@ func (h *handler) readInbound(c *gin.Context) (inboundPayload, error) {
 		return p, nil
 	default: // message/rfc822, text/plain: ham MIME; alıcı ?rcpt= ile verilebilir
 		b, err := io.ReadAll(c.Request.Body)
-		p.Raw = string(b)
+		p.rawBytes = b
 		if r := c.Query("rcpt"); r != "" {
 			p.Recipient = flexStrings{r}
 		}
@@ -196,24 +226,19 @@ func (h *handler) readInbound(c *gin.Context) (inboundPayload, error) {
 }
 
 // buildMessage payload'ı digital.Message'a çevirir (ham MIME varsa önce o ayrıştırılır, alanlar eksikleri doldurur).
-func buildMessage(p inboundPayload) *digital.Message {
+func buildMessage(p inboundPayload, raw []byte) *digital.Message {
 	m := &digital.Message{}
-	raw := []byte(p.Raw)
-	if p.RawBase64 != "" {
-		if b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.RawBase64)); err == nil {
-			raw = b
-		}
-	}
 	if len(raw) > 0 {
 		if parsed, err := digital.ParseEML(raw); err == nil {
 			m = parsed
 		}
 	}
+	// JSON/form alanları ham RFC 2047 olabilir (ör. Worker'ın boyut bildirimi başlıkları aynen iletir).
 	if m.Subject == "" {
-		m.Subject = p.Subject
+		m.Subject = digital.DecodeHeader(p.Subject)
 	}
 	if m.From == "" {
-		m.From = p.From
+		m.From = digital.DecodeHeader(p.From)
 	}
 	if m.MessageID == "" {
 		m.MessageID = p.MessageID
@@ -302,6 +327,20 @@ func failureReason(code string, cause error) string {
 	return code + ": " + msg
 }
 
+// recordEarlyReject gövdesi okunamayan (413 / bozuk) istekte zarf alıcısı (?rcpt=) geçerli bir alias'a aitse geçmişe
+// ve last_status'a "ignored:<reason>" yazar. Gönderen/konu bilinmez (gövde okunmadı). Duraklatılmış adreste yazılmaz.
+func (h *handler) recordEarlyReject(rcpt, reason string) {
+	if strings.TrimSpace(rcpt) == "" {
+		return
+	}
+	userID, _, _, paused, err := h.lookupAlias([]string{rcpt})
+	if err != nil || paused {
+		return
+	}
+	log.Printf("inbound: user %d: request rejected before parse (%s)", userID, reason)
+	h.finishInbound(userID, "", "", "ignored:"+reason, historyIgnored, reason, 0, true)
+}
+
 func (h *handler) setInboundStatus(userID int64, status string, received bool) {
 	q := `UPDATE expense.inbound_aliases SET last_status = $2 WHERE user_id = $1`
 	if received {
@@ -329,13 +368,17 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
+			// Gövde okunamadı ama zarf alıcısı ?rcpt= ile biliniyorsa kullanıcı geçmişinde nedenini görsün.
+			h.recordEarlyReject(c.Query("rcpt"), rejectedTooLarge)
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request too large"})
 			return
 		}
+		h.recordEarlyReject(c.Query("rcpt"), "unreadable_payload")
 		ignored("unreadable_payload")
 		return
 	}
-	msg := buildMessage(p)
+	raw := p.rawMIME()
+	msg := buildMessage(p, raw)
 
 	userID, profile, alias, paused, err := h.lookupAlias(recipientCandidates(p, msg))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -369,6 +412,13 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		ignored("paused")
 		return
 	}
+	// Yönlendiricinin gövdesiz boyut bildirimi (Worker maili INBOUND_MAX_BYTES'i aştığı için göndermedi): fiş yok,
+	// yalnız geçmişe "too_large". Rate limiter'dan önce: bildirim sayacı tüketmez.
+	if p.Rejected == rejectedTooLarge {
+		log.Printf("inbound: user %d: mail too large at forwarder (%d bytes)", userID, p.Size)
+		skip(rejectedTooLarge)
+		return
+	}
 	if !inboundLimiter.allow(alias, time.Now()) {
 		log.Printf("inbound: alias rate limited (user %d)", userID)
 		skip("rate_limited")
@@ -378,11 +428,9 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	// Gmail yönlendirme onayı: fiş DEĞİLDİR; kod/bağlantı saklanır, mobil istemci çeker.
 	// Tutar/fiş ayrıştırmasından ÖNCE çalışır. Ham MIME (kodlu hâliyle) ve konu da kaynak olarak taranır.
 	htmlText := digital.HTMLToText(msg.HTML)
-	extra := []string{msg.Subject, p.Raw}
-	if p.RawBase64 != "" {
-		if b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.RawBase64)); err == nil {
-			extra = append(extra, string(b))
-		}
+	extra := []string{msg.Subject}
+	if len(raw) > 0 {
+		extra = append(extra, string(raw[:min(len(raw), gmailScanLimit)]))
 	}
 	if conf, ok := digital.DetectGmailConfirmation(msg.From, msg.Text, htmlText, msg.HTML, extra...); ok {
 		if conf.Code == "" && conf.Link == "" {

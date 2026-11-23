@@ -34,6 +34,7 @@ String? emailLastStatusMessage(String? status) => _EmailSetupWizardPageState.las
     'duplicate_document' || 'duplicate_order' || 'already_imported' => (label: 'Zaten Kayıtlı', warn: false, error: false),
     'gmail_confirmation' || 'gmail_confirmation_unreadable' => (label: 'Gmail Onayı', warn: false, error: false),
     'rate_limited' => (label: 'Sınır Aşıldı', warn: true, error: false),
+    'too_large' => (label: 'Çok Büyük', warn: true, error: false),
     'paused' => (label: 'Duraklatıldı', warn: true, error: false),
     _ => (label: 'Atlandı', warn: true, error: false),
   };
@@ -622,6 +623,7 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
       'ignored:no_amount' => 'Son e-postada tutar bulunamadı; fiş olarak kaydedilmedi. Gerekirse Paylaş → Fissio ile ekle.',
       'ignored:paused' => 'Aktarım duraklatıldı; gelen e-postalar fişe dönüştürülmüyor.',
       'ignored:rate_limited' => 'Kısa sürede çok fazla e-posta geldi; bir süre sonra tekrar dene.',
+      'ignored:too_large' => 'Son e-posta boyut sınırını aştığı için işlenmedi. Faturayı mail uygulamandan Paylaş → Fissio ile ekleyebilirsin.',
       _ when status.startsWith('failed') => 'Son e-posta işlenirken bir hata oluştu. Nedeni aşağıdaki listede; tekrar deneyebilir ya da Paylaş → Fissio ile ekleyebilirsin.',
       _ when status.startsWith('ignored:') => 'Son e-posta fiş olarak okunamadı. Gerekirse Paylaş → Fissio ile ekle.',
       _ => null,
