@@ -38,10 +38,11 @@ class InfoTexts {
     ),
     InfoSection(
       'E-posta ile otomatik fiş aktarımı',
-      'Bulut senkronu açıkken sana özel, tahmin edilemez bir yönlendirme adresi (…@fissio.dev) verilir. E-fatura, '
-          'e-arşiv ve sipariş özeti maillerini bu adrese yönlendirdiğinde fişler kendiliğinden eklenir: ekteki UBL-TR XML '
-          'fatura, PDF eki ya da mail gövdesi (ürün adı, adet ve tutarlarıyla) okunur. Aktarılan e-postaları '
-          'Ayarlar > E-Posta ile Otomatik Fiş Aktarımı ekranındaki "Son Aktarılan E-Postalar" listesinden izleyebilirsin.',
+      'Bulut senkronu açıkken her profiline özel, tahmin edilemez bir yönlendirme adresi (…@fissio.dev) verilir. '
+          'E-fatura, e-arşiv ve sipariş özeti maillerini bu adrese yönlendirdiğinde fişler kendiliğinden o profile eklenir: '
+          'ekteki UBL-TR XML fatura, PDF eki ya da mail gövdesi (ürün adı, adet ve tutarlarıyla) okunur. Aktarılan '
+          'e-postaları Ayarlar > E-Posta ile Otomatik Fiş Aktarımı ekranındaki "Son Aktarılan E-Postalar" listesinden '
+          'izleyebilirsin; işlenemeyen bir e-posta olursa (istersen kapatabileceğin) bir bilgilendirme maili alırsın.',
     ),
     InfoSection(
       'Verilerin sende',
@@ -70,7 +71,8 @@ class InfoTexts {
           "Fişe eklediğin fotoğraflar. Kategori düzeltmelerinden öğrenilen kuralların (satıcı/ürün adı → kategori). "
           "Bütçe limitlerin ve her ay tekrarlanan gider ayarların. Oturum ve cihaz bilgilerin (cihaz adı, platform, "
           "oturumun açıldığı IP adresi, son etkinlik zamanı). Sunucu istek kayıtları (log): isteğin IP adresi, zamanı "
-          "ve çağrılan adres. E-posta ile fiş aktarımını açarsan: sana özel yönlendirme adresin ve aktarım geçmişin. "
+          "ve çağrılan adres. E-posta ile fiş aktarımını açarsan: profillerine özel yönlendirme adreslerin, aktarım geçmişin "
+          "ve bildirim tercihin. "
           "Aktarım geçmişinde YALNIZCA gönderici, konu, alınma tarihi, işlem durumu (ör. kaydedildi, yok sayıldı, "
           "başarısız), varsa hata nedeni ve oluşturulan fişin bağlantısı tutulur; ham e-posta gövdesi ve ekleri (XML, "
           "PDF, HTML) hiçbir zaman saklanmaz. Uygulamada reklam veya kullanıcı takibi yapılmaz; reklam ya da analitik "
@@ -112,15 +114,19 @@ class InfoTexts {
     ),
     InfoSection(
       'E-posta kullanımı',
-      'E-posta adresin hesap doğrulama, şifre sıfırlama ve güvenlik amaçlı kodları göndermek için kullanılır; '
-          'pazarlama amacıyla kullanılmaz ve üçüncü kişilerle paylaşılmaz.',
+      'E-posta adresin hesap doğrulama, şifre sıfırlama ve güvenlik amaçlı kodları göndermek ve (e-posta ile fiş '
+          'aktarımını kullanıyorsan) yönlendirdiğin bir e-posta işlenemediğinde seni bilgilendirmek için kullanılır. Bu '
+          'bilgilendirme yalnızca hesabının kayıtlı adresine gider; ilgili profilin adını, işlenemeyen mailin konusunu '
+          '(bağlantılar çıkarılarak), geliş zamanını ve nedenini içerir, saatte en fazla 5 kez gönderilir ve Tercihler > "Başarısız e-posta aktarımlarında e-posta ile '
+          'bilgilendir" ile kapatılabilir. Yönlendirilen mailin göndericisine hiçbir zaman otomatik yanıt verilmez. '
+          'E-posta adresin pazarlama amacıyla kullanılmaz ve üçüncü kişilerle paylaşılmaz.',
     ),
     InfoSection(
       'E-posta ile fiş aktarımı',
-      'İstersen sana özel @fissio.dev yönlendirme adresini açarsın; bu adrese gelen e-postalar YALNIZCA fiş/fatura '
+      'İstersen her profiline özel @fissio.dev yönlendirme adresini açarsın; bu adrese gelen e-postalar YALNIZCA fiş/fatura '
           'ayrıştırma amacıyla işlenir (tutar, tarih, işletme ve kalemler çıkarılır). Mail gövdesi ve ekleri (XML/PDF/HTML) '
           'kaydedilmez; saklanan yalnızca ortaya çıkan fiş verisi ile "Son Aktarılan E-Postalar" geçmişidir: gönderici, '
-          'konu, tarih, durum, varsa hata nedeni ve ilgili fiş (son 50 kayıt). Gmail yönlendirme onay maili fiş sayılmaz; '
+          'konu, tarih, durum, varsa hata nedeni ve ilgili fiş (profil başına son 50 kayıt). Gmail yönlendirme onay maili fiş sayılmaz; '
           'onay kodu/bağlantısı yalnızca kurulum için kısa süre tutulur. Adresin sızdığını düşünürsen "Adresi yenile" ile '
           'eskisini anında geçersiz kılabilir, aktarımı istediğin an duraklatabilirsin. Adres, geçmiş ve aktarılan fişler '
           'hesabını sildiğinde de kalıcı olarak silinir. Senkron kapalıyken adres kullanılamaz.',
@@ -130,14 +136,14 @@ class InfoTexts {
       'Kişisel verilerin satılmaz, kiralanmaz ve reklam amacıyla paylaşılmaz. Yalnızca hizmetin sunulması için gerekli '
           'olduğu ölçüde ve bu amaçla sınırlı olarak altyapı hizmet sağlayıcılarına aktarılır: sunucu ve veritabanı '
           'barındırma hizmeti; doğrulama ve şifre sıfırlama kodlarını gönderen e-posta gönderim (SMTP) hizmeti (e-posta '
-          'adresin ve kod); yönlendirdiğin e-postaları Fissio\'ya ileten e-posta yönlendirme hizmeti (mail yalnızca '
+          'adresin ve kod; e-posta aktarımı bilgilendirmelerinde ayrıca profil adı, işlenemeyen mailin konusu ve nedeni); yönlendirdiğin e-postaları Fissio\'ya ileten e-posta yönlendirme hizmeti (mail yalnızca '
           'iletim sırasında bu hizmetten geçer). Bu sağlayıcıların sunucuları yurt dışında bulunabilir; yurt dışına '
           'aktarım KVKK m.9\'daki şartlara uygun olarak yapılır. Ayrıca yetkili kamu kurum ve kuruluşlarının hukuka '
           'uygun talepleri hâlinde, kanunen zorunlu olan ölçüde paylaşılabilir.',
     ),
     InfoSection(
       'Saklama süresi',
-      'Verilerin hesabın açık kaldığı sürece saklanır. E-posta aktarım geçmişinde en fazla son 50 kayıt tutulur; daha '
+      'Verilerin hesabın açık kaldığı sürece saklanır. E-posta aktarım geçmişinde profil başına en fazla son 50 kayıt tutulur; daha '
           'eskileri kendiliğinden silinir. Doğrulama kodları kısa süre (dakikalar) sonra geçersiz olur. Oturum '
           'kayıtları (IP adresi dahil) oturum kapatıldıktan sonra da güvenlik geçmişi olarak hesabın açık kaldığı '
           'sürece tutulur ve hesap silinince silinir; sunucu istek kayıtlarına '

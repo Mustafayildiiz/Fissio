@@ -28,6 +28,10 @@ type handler struct {
 	scanLim *scan.Limiter
 	// inbound: e-posta ile otomatik fis aktarimi ayarlari (bos Domain = ozellik kapali, bkz. inbound.go).
 	inbound inboundConfig
+	// notifier: basarisiz e-posta aktariminda hesap sahibine bildirim kuyrugu (nil = bildirim yok, bkz. notify.go).
+	notifier failureNotifier
+	// notifyLim: kullanici basina saatlik bildirim siniri (maxFailureNoticesPerHour).
+	notifyLim aliasLimiter
 }
 
 const dateLayout = "2006-01-02"

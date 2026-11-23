@@ -560,6 +560,9 @@ class AppState extends ChangeNotifier {
     activeProfileId = null;
     _syncEnabled = true;
     _inbound = null;
+    _inboundFor = null;
+    _inboundEnabled = false;
+    _inboundNotify = null;
     _emailCardDismissed = false;
     _emailImportSeen = false;
     _alertsSent = {};
@@ -718,15 +721,26 @@ class AppState extends ChangeNotifier {
   // --- E-posta ile otomatik fiş aktarımı ---
 
   InboundAddress? _inbound;
+
+  /// [_inbound]'un ait olduğu profil (`Profile.id`; null = profil seçilmeden alınan varsayılan profil adresi).
+  String? _inboundFor;
+
+  /// Sunucuda e-posta aktarımı yapılandırılmış mı (son başarılı okumadan; profil değişse de korunur ki kart/rozet titremesin).
+  bool _inboundEnabled = false;
+  bool? _inboundNotify;
   bool _emailCardDismissed = false;
   bool _emailImportSeen = false;
 
-  /// Son bilinen yönlendirme adresi/durumu (henüz yüklenmediyse null).
-  InboundAddress? get inbound => _inbound;
+  /// AKTİF profilin yönlendirme adresi/durumu (her profilin kendi adresi vardır; henüz yüklenmediyse ya da başka profile
+  /// aitse null).
+  InboundAddress? get inbound => _inboundFor == activeProfile?.id ? _inbound : null;
+
+  /// Aktif profil henüz sunucuda değil (çevrimdışı oluşturuldu / senkron kapalıyken açıldı): e-posta adresi olamaz.
+  bool get inboundNeedsSync => activeProfile != null && activeProfile!.serverId == null;
 
   /// E-posta aktarımı sunulabilir mi: bulut senkronu AÇIK ve sunucuda özellik yapılandırılmış. Senkron kapalıyken hiçbir şey
   /// sunucuya yazılamaz, bu yüzden adım/sihirbaz/kart gösterilmez.
-  bool get emailImportAvailable => _syncEnabled && (_inbound?.enabled ?? false);
+  bool get emailImportAvailable => _syncEnabled && _inboundEnabled;
 
   /// Ana sayfadaki "Yeni: E-Faturalarını Otomatik Aktar" kartı gösterilsin mi: kapatılmadıysa VE özellik henüz tanıtılmadıysa
   /// (onboarding'in e-posta adımı gösterildiyse ya da sihirbaz/kart açıldıysa kart gereksizdir: o, mevcut kullanıcılar içindir).
@@ -735,52 +749,62 @@ class AppState extends ChangeNotifier {
   /// Ayarlar'daki "Yeni" rozeti: kullanıcı sihirbazı/kartı henüz açmadı.
   bool get emailImportIsNew => emailImportAvailable && !_emailImportSeen;
 
-  /// Yönlendirme adresini sunucudan alır (yoksa üretilir). Senkron kapalıysa ya da hata/çevrimdışıysa son bilinen değer döner
-  /// (ağ hatası sessizdir: özellik yalnızca gizli kalır).
+  /// Sunucuya gönderilecek profil seçicisi; aktif profil sunucuda değilse [ApiException].
+  String? _inboundProfileUid() {
+    final p = activeProfile;
+    if (p != null && p.serverId == null) {
+      throw ApiException('Bu profil henüz sunucuya eşitlenmedi; bağlantı gelince tekrar deneyin.');
+    }
+    return p?.id;
+  }
+
+  /// AKTİF profilin yönlendirme adresini sunucudan alır (yoksa üretilir). Senkron kapalıysa, profil henüz sunucuda değilse
+  /// ya da hata/çevrimdışıysa son bilinen değer döner (ağ hatası sessizdir: özellik yalnızca gizli kalır).
   Future<InboundAddress?> loadInbound() async {
     if (user == null) return null;
-    if (!_syncEnabled) return _inbound;
+    if (!_syncEnabled || inboundNeedsSync) return inbound;
+    final key = activeProfile?.id;
     final gen = _inboundGen;
     try {
-      final info = await api.inboundAddress();
-      if (user == null) return _inbound;
-      // Bu okuma sürerken adres değiştirildi/duraklatıldı: yanıt değişiklikten ÖNCEKİ durumu taşıyabilir (ör. rotate
+      final info = await api.inboundAddress(profileUid: key);
+      if (user == null) return inbound;
+      // Bu okuma sürerken adres değiştirildi/duraklatıldı ya da profil değişti: yanıt eski durumu taşıyabilir (ör. rotate
       // öncesi geçersiz adres, active=true) — atılır, değişikliğin kendi yanıtı geçerlidir.
-      if (gen != _inboundGen) return _inbound;
+      if (gen != _inboundGen || key != activeProfile?.id) return inbound;
       // Değişmediyse bildirme: sihirbaz her 5 sn'de yoklar, Özet/Ayarlar gereksiz yeniden çizilmesin.
-      if (_inbound != info) {
+      if (_inbound != info || _inboundFor != key || _inboundEnabled != info.enabled) {
         _inbound = info;
+        _inboundFor = key;
+        _inboundEnabled = info.enabled;
         notifyListeners();
       }
     } on ApiException {
       // Çevrimdışı / sunucu hatası: son bilinen değer kalır.
     }
-    return _inbound;
+    return inbound;
   }
 
-  /// Aktarılan fişlerin düşeceği profili seçer (null = en eski/varsayılan profil). Sunucu profil kimliği gerekir; profil henüz
-  /// sunucuda değilse (çevrimdışı oluşturuldu) [ApiException] fırlatılır.
-  Future<InboundAddress> setInboundProfile(Profile? profile) async {
-    if (profile != null && profile.serverId == null) throw ApiException('Profil henüz sunucuda değil; bağlantı gelince tekrar deneyin.');
-    return _mutateInbound(() => api.setInboundProfile(profile?.serverId));
-  }
+  /// Aktif profilin adresini yeniler (eski adres hemen geçersiz olur).
+  Future<InboundAddress> rotateInbound() => _mutateInbound((uid) => api.rotateInboundAddress(profileUid: uid));
 
-  /// Adresi yeniler (eski adres hemen geçersiz olur).
-  Future<InboundAddress> rotateInbound() => _mutateInbound(api.rotateInboundAddress);
+  /// Aktif profilin aktarımını duraklatır / sürdürür; hata [ApiException] olarak yukarı çıkar.
+  Future<InboundAddress> setInboundPaused(bool paused) =>
+      _mutateInbound((uid) => api.setInboundPaused(paused, profileUid: uid));
 
-  /// Aktarımı duraklatır / sürdürür; hata [ApiException] olarak yukarı çıkar.
-  Future<InboundAddress> setInboundPaused(bool paused) => _mutateInbound(() => api.setInboundPaused(paused));
-
-  /// Yönlendirme ayarının nesli: her değişiklik isteğinin BAŞINDA ve SONUNDA artar. [loadInbound] başladığı nesli
-  /// yakalar; o arada değişiklik olduysa yanıtını atar (değişiklik gönderildikten sonra ama dönmeden başlayan okuma da
-  /// eski alias'ı görebilir, bu yüzden iki uçta artırılır).
+  /// Yönlendirme ayarının nesli: her değişiklik isteğinin BAŞINDA ve SONUNDA, ayrıca aktif profil değişince artar.
+  /// [loadInbound] başladığı nesli yakalar; o arada değişiklik olduysa yanıtını atar (değişiklik gönderildikten sonra ama
+  /// dönmeden başlayan okuma da eski alias'ı görebilir, bu yüzden iki uçta artırılır).
   int _inboundGen = 0;
 
-  Future<InboundAddress> _mutateInbound(Future<InboundAddress> Function() call) async {
+  Future<InboundAddress> _mutateInbound(Future<InboundAddress> Function(String? profileUid) call) async {
+    final uid = _inboundProfileUid();
     _inboundGen++;
     try {
-      final info = await call();
+      final info = await call(uid);
+      // Yanıt gelene kadar profil değiştiyse yine de o profile yazılır; [inbound] yalnız aktif profilinkini gösterir.
       _inbound = info;
+      _inboundFor = uid;
+      _inboundEnabled = info.enabled;
       notifyListeners();
       return info;
     } finally {
@@ -788,24 +812,60 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// "Son Aktarılan E-Postalar": yalnız özellik kullanılabilirken çekilir; senkron kapalı/çevrimdışı/hata → null (liste
-  /// gizlenmez, sihirbaz son bilinen listeyi korur).
+  /// Aktif profilin "Son Aktarılan E-Postalar"ı: yalnız özellik kullanılabilirken çekilir; senkron kapalı/çevrimdışı/hata/
+  /// profil sunucuda değil → null (liste gizlenmez, sihirbaz son bilinen listeyi korur).
   Future<List<InboundHistoryItem>?> loadInboundHistory({int limit = 20}) async {
-    if (user == null || !emailImportAvailable) return null;
+    if (user == null || !emailImportAvailable || inboundNeedsSync) return null;
     try {
-      return await api.inboundHistory(limit: limit);
+      return await api.inboundHistory(limit: limit, profileUid: activeProfile?.id);
     } on ApiException {
       return null;
     }
   }
 
-  /// Gmail yönlendirme onayını yoklar (sihirbaz açıkken); bekleyen yoksa ya da hata varsa null.
+  /// Aktif profilin Gmail yönlendirme onayını yoklar (sihirbaz açıkken); bekleyen yoksa ya da hata varsa null.
   Future<ForwardingConfirmation?> pollForwardingConfirmation() async {
-    if (user == null || !_syncEnabled) return null;
+    if (user == null || !_syncEnabled || inboundNeedsSync) return null;
     try {
-      return await api.forwardingConfirmation();
+      return await api.forwardingConfirmation(profileUid: activeProfile?.id);
     } on ApiException {
       return null;
+    }
+  }
+
+  /// "Başarısız e-posta aktarımlarında e-posta ile bilgilendir" (kullanıcı düzeyi, sunucuda; varsayılan açık).
+  /// Henüz okunmadıysa null.
+  bool? get inboundNotifyFailures => _inboundNotify;
+
+  /// Tercihi sunucudan okur; senkron kapalı / hata → son bilinen değer.
+  Future<bool?> loadInboundNotifyFailures() async {
+    if (user == null || !_syncEnabled) return _inboundNotify;
+    try {
+      final v = await api.inboundNotifyFailures();
+      if (user != null && v != _inboundNotify) {
+        _inboundNotify = v;
+        notifyListeners();
+      }
+    } on ApiException {
+      // sessiz
+    }
+    return _inboundNotify;
+  }
+
+  /// Tercihi yazar (iyimser: anahtar hemen değişir, hata olursa geri alınır ve [ApiException] fırlatılır).
+  Future<void> setInboundNotifyFailures(bool value) async {
+    if (user == null) return;
+    if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
+    final before = _inboundNotify;
+    _inboundNotify = value;
+    notifyListeners();
+    try {
+      _inboundNotify = await api.setInboundNotifyFailures(value);
+    } on ApiException {
+      _inboundNotify = before;
+      rethrow;
+    } finally {
+      notifyListeners();
     }
   }
 
@@ -1063,6 +1123,12 @@ class AppState extends ChangeNotifier {
   Future<void> createProfile(String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
+    // Sunucu kuralları (8 profil, Türkçe katlamalı benzersiz ad) yerelde de uygulanır: çevrimdışı/yerel profil sonradan
+    // sunucuda 409 alıp kuyrukta takılı kalmasın. Bekleyen/yerel profiller de sayılır.
+    if (!canAddProfile) throw ApiException(kProfileLimitMessage, status: 409, code: 'profile_limit');
+    if (profileNameTaken(trimmed)) {
+      throw ApiException(kDuplicateProfileNameMessage, status: 409, code: 'duplicate_profile_name');
+    }
     final uid = newClientUid('p');
     Profile created;
     if (_syncEnabled) {
@@ -1082,10 +1148,22 @@ class AppState extends ChangeNotifier {
 
   Profile? _profile(String id) => _snap.profiles.where((p) => p.id == id).firstOrNull;
 
+  /// Yeni profil eklenebilir mi ([kMaxProfiles]; bekleyen ve yalnız cihazdaki profiller dahil).
+  bool get canAddProfile => _snap.profiles.length < kMaxProfiles;
+
+  /// [name] başka bir profilde (exceptId hariç) kullanılıyor mu (büyük/küçük harf, Türkçe karakter ve boşluk duyarsız).
+  bool profileNameTaken(String name, {String? exceptId}) {
+    final key = profileNameKey(name);
+    return _snap.profiles.any((p) => p.id != exceptId && profileNameKey(p.name) == key);
+  }
+
   Future<void> renameProfile(String id, String newName) async {
     final trimmed = newName.trim();
     final p = _profile(id);
     if (trimmed.isEmpty || p == null) return;
+    if (profileNameTaken(trimmed, exceptId: id)) {
+      throw ApiException(kDuplicateProfileNameMessage, status: 409, code: 'duplicate_profile_name');
+    }
     if (p.state == SyncState.synced) {
       if (!_syncEnabled) throw ApiException(readOnlyCloudMessage);
       await api.renameProfile(p.serverId!, trimmed);
@@ -1556,6 +1634,10 @@ class AppState extends ChangeNotifier {
     // ChangeNotifier assert'ine çarpmasın.
     if (_disposed) return;
     _rev++;
+    if (activeProfileId != _lastActiveProfile) {
+      _lastActiveProfile = activeProfileId;
+      _onActiveProfileChanged();
+    }
     super.notifyListeners();
     // Fiş ekleme/silme/güncelleme, profil değişimi, yenileme, senkron/çıkış... hepsi buradan geçer; widget ve
     // hatırlatıcılar değişiklik olduğunda (aynı veri tekrar gönderilmez) güncellenir.
@@ -1565,6 +1647,20 @@ class AppState extends ChangeNotifier {
       _derivedQueued = false;
       if (!_disposed) _syncDerived();
     });
+  }
+
+  String? _lastActiveProfile;
+
+  /// Aktif profil değişti (seçim, silme, oturum açma/kapama, yenilemede düzeltme...): profile özel tema ve e-posta adresi.
+  void _onActiveProfileChanged() {
+    final id = activeProfileId;
+    // Tema denetleyicisi kendi dinleyicilerini (MaterialApp) uyarır; bir build sırasında çağrılmış olabiliriz.
+    scheduleMicrotask(() {
+      if (!_disposed) themeController.setActiveProfile(id);
+    });
+    // Önceki profilin süren adres okuması/değişikliği yeni profile yazılmasın.
+    _inboundGen++;
+    if (_inboundEnabled && _syncEnabled && user != null) unawaited(loadInbound());
   }
 
   WidgetPayload? _widgetPayload() {

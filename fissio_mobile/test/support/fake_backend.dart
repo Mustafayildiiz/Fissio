@@ -6,6 +6,7 @@ import 'package:fissio_mobile/app_state.dart';
 import 'package:fissio_mobile/data/connectivity.dart';
 import 'package:fissio_mobile/data/local_store.dart';
 import 'package:fissio_mobile/device_info.dart';
+import 'package:fissio_mobile/models.dart' show kMaxProfiles, profileNameKey;
 import 'package:fissio_mobile/ocr/ocr_engine.dart';
 import 'package:fissio_mobile/receipt_parser/digital_ids.dart';
 import 'package:fissio_mobile/theme_controller.dart';
@@ -25,6 +26,9 @@ class FakeBackend {
   /// `GET /inbound-address/confirmation` kaç kez yoklandı.
   int confirmationPolls = 0;
   int historyPolls = 0;
+
+  /// Profil bazlı inbound istekleri: "METHOD /path profilClientUid".
+  final List<String> inboundRequests = [];
 
   /// Her istekten sonra çağrılır (ağın ortada kesilmesini simüle etmek için).
   void Function(String method, String path)? afterRequest;
@@ -244,13 +248,18 @@ class FakeBackend {
 
     // ---- profiller ----
     if (path == '/profiles' && m == 'GET') {
-      if (u.profiles.isEmpty) u.profiles.add({'id': ++_seq, 'name': 'Kişisel', 'client_uid': 'srv-default-${u.id}'});
+      _ensureDefaultProfile(u);
       return _json(200, u.profiles);
     }
     if (path == '/profiles' && m == 'POST') {
       final uid = (j['client_uid'] as String?) ?? 'srv-${++_seq}';
       final ex = u.profiles.where((p) => p['client_uid'] == uid).firstOrNull;
       if (ex != null) return _json(200, ex);
+      // Sunucu kuralları (profiles.go): 8 profil, Türkçe katlamalı benzersiz ad.
+      if (u.profiles.length >= kMaxProfiles) return _err(409, 'profile_limit', 'too many profiles');
+      if (_nameTaken(u, j['name'] as String? ?? '', null)) {
+        return _err(409, 'duplicate_profile_name', 'profile name already exists');
+      }
       final p = {'id': ++_seq, 'name': j['name'], 'client_uid': uid};
       u.profiles.add(p);
       return _json(201, p);
@@ -300,11 +309,17 @@ class FakeBackend {
     if (pm != null) {
       final id = int.parse(pm[1]!);
       if (m == 'PUT') {
-        final p = u.profiles.firstWhere((p) => p['id'] == id);
+        final p = u.profiles.where((p) => p['id'] == id).firstOrNull;
+        if (p == null) return _err(404, 'profile_not_found', 'profile not found');
+        if (_nameTaken(u, j['name'] as String? ?? '', id)) {
+          return _err(409, 'duplicate_profile_name', 'profile name already exists');
+        }
         p['name'] = j['name'];
         return _json(200, p);
       }
       if (m == 'DELETE') {
+        final gone = u.profiles.where((p) => p['id'] == id).firstOrNull;
+        if (gone != null) u.inboundByProfile.remove(gone['client_uid']);
         u.profiles.removeWhere((p) => p['id'] == id);
         u.expenses.removeWhere((e) => e['profile_id'] == id);
         return _json(204, null);
@@ -461,42 +476,71 @@ class FakeBackend {
         return _json(204, null);
       }
     }
-    if (path == '/inbound-address' && m == 'GET') return _json(200, _inbound(u));
-    if (path == '/inbound-address' && m == 'PUT') {
-      u.inboundProfileId = (j['profile_id'] as num?)?.toInt();
-      return _json(200, _inbound(u));
+    if (path == '/inbound-settings' && m == 'GET') return _json(200, {'notify_failures': u.notifyFailures});
+    if (path == '/inbound-settings' && m == 'PUT') {
+      final v = j['notify_failures'];
+      if (v is! bool) return _err(400, 'bad_request', 'notify_failures is required');
+      u.notifyFailures = v;
+      return _json(200, {'notify_failures': v});
     }
-    if (path == '/inbound-address/rotate' && m == 'POST') {
-      u.alias = 'rotated${++_seq}x9k2m4q7p1w8';
-      u.lastReceivedAt = null;
-      u.inboundPaused = false;
-      return _json(200, _inbound(u));
-    }
-    if ((path == '/inbound-address/pause' || path == '/inbound-address/resume') && m == 'POST') {
-      u.inboundPaused = path.endsWith('/pause');
-      return _json(200, _inbound(u));
-    }
-    if (path == '/inbound-address/confirmation' && m == 'GET') {
-      confirmationPolls++;
-      return u.confirmation == null ? _json(204, null) : _json(200, u.confirmation);
-    }
-    if (path == '/inbound-address/history' && m == 'GET') {
-      historyPolls++;
-      return _json(200, {'enabled': inboundEnabled, 'items': inboundEnabled ? u.inboundHistory : <Map<String, dynamic>>[]});
+    if (path.startsWith('/inbound-address')) {
+      // Profil bazlı: ?profile_uid= (yoksa varsayılan/ilk profil). Başkasının/olmayan profil 404.
+      final puid = req.url.queryParameters['profile_uid'];
+      Map<String, dynamic>? prof;
+      if (puid != null && puid.isNotEmpty) {
+        prof = u.profiles.where((p) => p['client_uid'] == puid).firstOrNull;
+        if (prof == null) return _err(404, 'profile_not_found', 'profile not found');
+      } else {
+        prof = _ensureDefaultProfile(u);
+      }
+      inboundRequests.add('$m $path ${prof['client_uid']}');
+      final ib = u.inboundFor(prof['client_uid'] as String);
+      if (path == '/inbound-address' && (m == 'GET' || m == 'PUT')) return _json(200, _inbound(ib, prof));
+      if (path == '/inbound-address/rotate' && m == 'POST') {
+        ib.alias = 'rotated${++_seq}x9k2m4q7p1w8';
+        ib.lastReceivedAt = null;
+        ib.paused = false;
+        ib.confirmation = null;
+        return _json(200, _inbound(ib, prof));
+      }
+      if ((path == '/inbound-address/pause' || path == '/inbound-address/resume') && m == 'POST') {
+        ib.paused = path.endsWith('/pause');
+        return _json(200, _inbound(ib, prof));
+      }
+      if (path == '/inbound-address/confirmation' && m == 'GET') {
+        confirmationPolls++;
+        return ib.confirmation == null ? _json(204, null) : _json(200, ib.confirmation);
+      }
+      if (path == '/inbound-address/history' && m == 'GET') {
+        historyPolls++;
+        return _json(200, {'enabled': inboundEnabled, 'items': inboundEnabled ? ib.history : <Map<String, dynamic>>[]});
+      }
     }
     return _err(404, 'not_found', 'no route $m $path');
   }
 
-  Map<String, dynamic> _inbound(FakeUser u) => inboundEnabled
+  Map<String, dynamic> _inbound(FakeInbound ib, Map<String, dynamic> prof) => inboundEnabled
       ? {
           'enabled': true,
-          'address': '${u.alias}@fis.test',
-          if (u.inboundProfileId != null) 'profile_id': u.inboundProfileId,
-          if (u.lastReceivedAt != null) 'last_received_at': u.lastReceivedAt,
-          if (u.lastStatus != null) 'last_status': u.lastStatus,
-          if (u.inboundPaused) 'paused': true,
+          'address': '${ib.alias}@fis.test',
+          'profile_id': prof['id'],
+          'profile_uid': prof['client_uid'],
+          'profile_name': prof['name'],
+          if (ib.lastReceivedAt != null) 'last_received_at': ib.lastReceivedAt,
+          if (ib.lastStatus != null) 'last_status': ib.lastStatus,
+          if (ib.paused) 'paused': true,
         }
       : {'enabled': false};
+
+  Map<String, dynamic> _ensureDefaultProfile(FakeUser u) {
+    if (u.profiles.isEmpty) u.profiles.add({'id': ++_seq, 'name': 'Kişisel', 'client_uid': 'srv-default-${u.id}'});
+    return u.profiles.first;
+  }
+
+  bool _nameTaken(FakeUser u, String name, int? exceptId) {
+    final key = profileNameKey(name);
+    return u.profiles.any((p) => p['id'] != exceptId && profileNameKey(p['name'] as String? ?? '') == key);
+  }
 
   String _catName(Object? id) =>
       categories.where((c) => c['id'] == id).map((c) => c['name'] as String).firstOrNull ?? 'Diğer';
@@ -586,16 +630,46 @@ class FakeUser {
   final List<Map<String, dynamic>> expenses = [];
   final List<Map<String, dynamic>> budgets = [];
 
-  /// E-posta aktarımı (sunucu `inbound_aliases` / `forwarding_confirmations` karşılığı).
-  String alias = 'k3j9x2m4q7p1w8zt';
-  int? inboundProfileId;
-  bool inboundPaused = false;
+  /// E-posta aktarımı, PROFİL bazlı (sunucu `inbound_aliases` / `forwarding_confirmations` / `inbound_history`
+  /// karşılığı; anahtar = profil client_uid). Aşağıdaki kısayollar VARSAYILAN (ilk) profilin durumudur.
+  final Map<String, FakeInbound> inboundByProfile = {};
+
+  /// Kullanıcı düzeyi `inbound_settings.notify_failures`.
+  bool notifyFailures = true;
+
+  String get _defaultUid => profiles.isEmpty ? 'srv-default-$id' : profiles.first['client_uid'] as String;
+
+  FakeInbound inboundFor(String profileUid) => inboundByProfile.putIfAbsent(
+    profileUid,
+    () => FakeInbound(profileUid == _defaultUid ? 'k3j9x2m4q7p1w8zt' : 'p${inboundByProfile.length}q7m2k9x4w8zt'),
+  );
+
+  FakeInbound get _def => inboundFor(_defaultUid);
+  String get alias => _def.alias;
+  set alias(String v) => _def.alias = v;
+  bool get inboundPaused => _def.paused;
+  set inboundPaused(bool v) => _def.paused = v;
+  String? get lastReceivedAt => _def.lastReceivedAt;
+  set lastReceivedAt(String? v) => _def.lastReceivedAt = v;
+  String? get lastStatus => _def.lastStatus;
+  set lastStatus(String? v) => _def.lastStatus = v;
+  Map<String, dynamic>? get confirmation => _def.confirmation;
+  set confirmation(Map<String, dynamic>? v) => _def.confirmation = v;
+
+  /// `GET /inbound-address/history` satırları (yeniden eskiye): {id, source, from, subject, received_at, status, reason, expense_id}.
+  List<Map<String, dynamic>> get inboundHistory => _def.history;
+  set inboundHistory(List<Map<String, dynamic>> v) => _def.history = v;
+}
+
+/// Bir profilin e-posta aktarım durumu.
+class FakeInbound {
+  FakeInbound(this.alias);
+  String alias;
+  bool paused = false;
   String? lastReceivedAt;
   String? lastStatus;
   Map<String, dynamic>? confirmation;
-
-  /// `GET /inbound-address/history` satırları (yeniden eskiye): {id, source, from, subject, received_at, status, reason, expense_id}.
-  List<Map<String, dynamic>> inboundHistory = [];
+  List<Map<String, dynamic>> history = [];
 }
 
 class MemPrefs implements DeletablePrefsStore {

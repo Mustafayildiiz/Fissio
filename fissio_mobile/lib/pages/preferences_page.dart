@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../api.dart' show ApiException;
 import '../app_state.dart';
 import '../logo.dart';
 import '../ocr/ocr_engine.dart';
@@ -11,11 +12,15 @@ import 'home_layout_page.dart';
 
 /// Tercihler: üç grupta — Görünüm ve Tema, Tarama ve OCR Motoru, Bildirimler ve Genel. Değişiklikler anında uygulanır.
 class PreferencesPage extends StatelessWidget {
-  const PreferencesPage({super.key});
+  const PreferencesPage({super.key, this.app});
+
+  /// Verilmezse global [appState].
+  final AppState? app;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final a = app ?? appState;
     return Scaffold(
       body: SafeArea(
         child: ListenableBuilder(
@@ -34,6 +39,18 @@ class PreferencesPage extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
                   children: [
                     const _GroupHeader('Görünüm ve Tema', first: true),
+                    _SwitchCard(
+                      switchKey: const Key('theme-per-profile-switch'),
+                      title: 'Profile özel tema kullan',
+                      subtitle: themeController.perProfileTheme
+                          ? 'Tema, vurgu rengi, logo ve widget teması '
+                                '${a.activeProfile == null ? 'her profil' : '"${a.activeProfile!.name}" profili'} için ayrı saklanır; '
+                                'profil değiştirince o profilin teması uygulanır.'
+                          : 'Kapalıyken tüm profiller aynı (ortak) temayı kullanır.',
+                      value: themeController.perProfileTheme,
+                      onChanged: themeController.setPerProfileTheme,
+                    ),
+                    const SizedBox(height: 24),
                     const SectionLabel('Tema'),
                     const SizedBox(height: 8),
                     SegmentedControl<ThemeMode>(
@@ -164,36 +181,12 @@ class PreferencesPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    GroupedCard(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Fiş detayında OCR motorunu göster',
-                                    style: FissioText.body(c, weight: FontWeight.w600),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Fişin altında “İşleyen Motor: …” notunu gösterir.',
-                                    style: FissioText.body(c, size: 13, color: c.mute),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Switch(
-                              key: const Key('show-ocr-engine-switch'),
-                              value: themeController.showOcrEngine,
-                              activeTrackColor: c.accent,
-                              onChanged: themeController.setShowOcrEngine,
-                            ),
-                          ],
-                        ),
-                      ],
+                    _SwitchCard(
+                      switchKey: const Key('show-ocr-engine-switch'),
+                      title: 'Fiş detayında OCR motorunu göster',
+                      subtitle: 'Fişin altında “İşleyen Motor: …” notunu gösterir.',
+                      value: themeController.showOcrEngine,
+                      onChanged: themeController.setShowOcrEngine,
                     ),
                     const _GroupHeader('Bildirimler ve Genel'),
                     const SectionLabel('Özet ekranı'),
@@ -225,6 +218,8 @@ class PreferencesPage extends StatelessWidget {
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),
+                    const SizedBox(height: 14),
+                    _InboundNotifySwitch(app: a),
                   ],
                 ),
               ),
@@ -262,11 +257,13 @@ class _LogoSection extends StatelessWidget {
                   child: FutureBuilder<bool>(
                     future: themeController.launcherSupported,
                     builder: (context, snap) {
-                      final icon = snap.data == true;
+                      // Profil teması açıkken ana ekran ikonu ortak temayı izler; burada seçilen logo yalnız uygulama içidir.
+                      final perProfile = themeController.perProfileTheme;
+                      final icon = snap.data == true && !perProfile;
                       final what = icon ? 'Logo ve ana ekran ikonu' : 'Logo';
                       return Text(
                         '${follows ? '$what vurgu rengini izler.' : '$what seçtiğin sabit renkte kalır.'}'
-                        '${icon ? '' : ' Ana ekran ikonu yalnızca yayın sürümünde değişir.'}',
+                        '${perProfile ? ' Ana ekran ikonu profilden bağımsız, ortak temanın logosunu kullanır.' : icon ? '' : ' Ana ekran ikonu yalnızca yayın sürümünde değişir.'}',
                         style: FissioText.body(c, size: 14, color: c.mute).copyWith(height: 1.35),
                       );
                     },
@@ -380,6 +377,110 @@ class _Swatch extends StatelessWidget {
 }
 
 /// Tercihler'in üç ana grubunun belirgin başlığı (altındaki `SectionLabel`'lardan büyük, ince çizgi + üst boşluk).
+/// Başlık + açıklama + anahtar satırı.
+class _SwitchCard extends StatelessWidget {
+  const _SwitchCard({
+    required this.switchKey,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final Key switchKey;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return GroupedCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: FissioText.body(c, weight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: FissioText.body(c, size: 13, color: c.mute)),
+                  ],
+                ),
+              ),
+            ),
+            Switch(key: switchKey, value: value, activeTrackColor: c.accent, onChanged: onChanged),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// "Başarısız e-posta aktarımlarında e-posta ile bilgilendir": kullanıcı düzeyi, sunucuda saklanır (maili sunucu atar;
+/// yalnız hesabın kayıtlı adresine). E-posta aktarımı kullanılamıyorsa (senkron kapalı / sunucuda kapalı) pasif.
+class _InboundNotifySwitch extends StatefulWidget {
+  const _InboundNotifySwitch({required this.app});
+  final AppState app;
+
+  @override
+  State<_InboundNotifySwitch> createState() => _InboundNotifySwitchState();
+}
+
+class _InboundNotifySwitchState extends State<_InboundNotifySwitch> {
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.app.addListener(_changed);
+    if (widget.app.syncEnabled) widget.app.loadInboundNotifyFailures();
+  }
+
+  @override
+  void dispose() {
+    widget.app.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _set(bool v) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.app.setInboundNotifyFailures(v);
+    } on ApiException catch (e) {
+      if (mounted) showError(context, e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.app;
+    final available = a.emailImportAvailable;
+    return _SwitchCard(
+      switchKey: const Key('inbound-notify-switch'),
+      title: 'Başarısız e-posta aktarımlarında e-posta ile bilgilendir',
+      subtitle: available
+          ? 'Yönlendirdiğin bir e-posta fişe dönüştürülemezse hesabının e-posta adresine nedenini bildiren kısa bir '
+                'mail gelir (saatte en fazla 5). Gönderene asla yanıt verilmez.'
+          : 'E-posta ile otomatik fiş aktarımı kullanılabilir olduğunda (bulut senkronu açık) ayarlanabilir.',
+      value: a.inboundNotifyFailures ?? true,
+      onChanged: available && !_busy ? _set : null,
+    );
+  }
+}
+
 class _GroupHeader extends StatelessWidget {
   const _GroupHeader(this.title, {this.first = false});
   final String title;

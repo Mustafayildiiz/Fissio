@@ -83,6 +83,7 @@ func buildInternalRouter(h *handler) *gin.Engine {
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"service": "auth-internal", "status": "ok"}) })
 	in := r.Group("/internal", internalAuth(h.cfg.internalToken))
 	in.GET("/sessions/:sid", h.internalSession)
+	in.POST("/users/:id/inbound-failure", h.internalInboundFailure)
 	return r
 }
 

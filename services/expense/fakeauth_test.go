@@ -21,6 +21,15 @@ type fakeAuth struct {
 	mu       sync.Mutex
 	sessions map[string]*fakeSession
 	hits     int
+	// notices: POST /internal/users/:id/inbound-failure govdeleri (basarisiz aktarim bildirimi).
+	notices []fakeNotice
+	// noticeStatus: bildirim ucunun yaniti (0 = 204).
+	noticeStatus int
+}
+
+type fakeNotice struct {
+	UserID int64
+	Body   map[string]any
 }
 
 type fakeSession struct {
@@ -41,11 +50,30 @@ func (f *fakeAuth) url() string { return f.srv.URL }
 func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.hits++
 	if r.Header.Get(internalTokenHeader) != testInternalToken {
+		f.hits++
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+	// Bildirim ucu oturum sayacini (hits) etkilemez.
+	if rest, ok := strings.CutPrefix(r.URL.Path, "/internal/users/"); ok && r.Method == http.MethodPost {
+		idPart, ok := strings.CutSuffix(rest, "/inbound-failure")
+		var uid int64
+		if _, err := fmt.Sscan(idPart, &uid); !ok || err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.notices = append(f.notices, fakeNotice{UserID: uid, Body: body})
+		if f.noticeStatus != 0 {
+			w.WriteHeader(f.noticeStatus)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	f.hits++
 	sid := strings.TrimPrefix(r.URL.Path, "/internal/sessions/")
 	if !strings.HasPrefix(r.URL.Path, "/internal/sessions/") || !looksLikeUUID(sid) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -75,6 +103,12 @@ func (f *fakeAuth) revoke(sid string) {
 	if s, ok := f.sessions[sid]; ok {
 		s.revoked = true
 	}
+}
+
+func (f *fakeAuth) noticeList() []fakeNotice {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeNotice(nil), f.notices...)
 }
 
 func (f *fakeAuth) hitCount() int {

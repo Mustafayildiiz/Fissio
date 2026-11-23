@@ -172,27 +172,36 @@ CREATE INDEX IF NOT EXISTS idx_expenses_user_updated ON expense.expenses (user_i
 	return err
 }
 
-// migrateInbound e-posta ile otomatik fis aktarimi tablolari (idempotent):
-//   - inbound_aliases: kullanici basina tek, tahmin edilemez yonlendirme takma adi (<alias>@INBOUND_EMAIL_DOMAIN);
-//     profile_id = fislerin dusecegi profil (NULL = en eski/varsayilan profil), last_* = son aktarim durumu.
-//   - forwarding_confirmations: Gmail yonlendirme onay kodu/baglantisi (fis degildir; mobil istemci ceker).
+// migrateInbound e-posta ile otomatik fis aktarimi tablolari (idempotent). Hepsi PROFIL bazlidir:
+//   - inbound_aliases: (user_id, profile_id) basina tek, tahmin edilemez yonlendirme takma adi
+//     (<alias>@INBOUND_EMAIL_DOMAIN); o adrese gelen fisler dogrudan o profile kaydedilir; last_* = son aktarim durumu.
+//   - forwarding_confirmations: Gmail yonlendirme onay kodu/baglantisi (fis degildir; mobil istemci ceker), profil bazli.
 //   - inbound_history: her gelen mailin akibeti (saved/ignored/failed + neden + fis kimligi); icerik saklanmaz.
+//   - inbound_settings: kullanici duzeyi tercih (basarisiz aktarimda hesap e-postasina bildirim).
+//
+// profile_id FK'lari ON DELETE CASCADE: profil silinince adresi, onaylari ve gecmisi de gider.
+// Eski (kullanici basina tek alias, profile_id NULL olabilen) sema yerinde donusturulur: NULL profile_id ve
+// onay/gecmis satirlari kullanicinin varsayilan (en eski) profiline baglanir; profili olmayan alias sahibine varsayilan
+// profil acilir (kurulu yonlendirme bozulmasin). PK/FK donusumleri pg_constraint kontrolluydu: tekrar calismada no-op.
 //
 // Hepsi user_id tasir: hesap silinince internal.go userOwnedTables ile temizlenir.
 func migrateInbound(db *sql.DB) error {
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS expense.inbound_aliases (
-	user_id          BIGINT PRIMARY KEY,
+	user_id          BIGINT NOT NULL,
+	profile_id       BIGINT NOT NULL REFERENCES expense.profiles(id) ON DELETE CASCADE,
 	alias            TEXT NOT NULL UNIQUE,
-	profile_id       BIGINT REFERENCES expense.profiles(id) ON DELETE SET NULL,
 	created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
 	last_received_at TIMESTAMPTZ,
-	last_status      TEXT
+	last_status      TEXT,
+	paused           BOOLEAN NOT NULL DEFAULT false,
+	PRIMARY KEY (user_id, profile_id)
 );
 ALTER TABLE expense.inbound_aliases ADD COLUMN IF NOT EXISTS paused BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS expense.forwarding_confirmations (
 	id          BIGSERIAL PRIMARY KEY,
 	user_id     BIGINT NOT NULL,
+	profile_id  BIGINT NOT NULL REFERENCES expense.profiles(id) ON DELETE CASCADE,
 	code        TEXT NOT NULL,
 	link        TEXT,
 	received_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -201,6 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_forwarding_conf_user ON expense.forwarding_confir
 CREATE TABLE IF NOT EXISTS expense.inbound_history (
 	id          BIGSERIAL PRIMARY KEY,
 	user_id     BIGINT NOT NULL,
+	profile_id  BIGINT NOT NULL REFERENCES expense.profiles(id) ON DELETE CASCADE,
 	received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	source      TEXT NOT NULL DEFAULT 'email',
 	from_addr   TEXT,
@@ -209,7 +219,66 @@ CREATE TABLE IF NOT EXISTS expense.inbound_history (
 	reason      TEXT,
 	expense_id  BIGINT REFERENCES expense.expenses(id) ON DELETE SET NULL
 );
-CREATE INDEX IF NOT EXISTS idx_inbound_history_user ON expense.inbound_history (user_id, received_at DESC);`)
+CREATE INDEX IF NOT EXISTS idx_inbound_history_user ON expense.inbound_history (user_id, received_at DESC);
+CREATE TABLE IF NOT EXISTS expense.inbound_settings (
+	user_id         BIGINT PRIMARY KEY,
+	notify_failures BOOLEAN NOT NULL DEFAULT true
+);
+
+-- Eski semadan donusum (taze semada hepsi no-op).
+INSERT INTO expense.profiles (user_id, name, client_uid)
+	SELECT DISTINCT a.user_id, 'Kişisel', 'srv-default-' || a.user_id FROM expense.inbound_aliases a
+	WHERE NOT EXISTS (SELECT 1 FROM expense.profiles p WHERE p.user_id = a.user_id)
+	ON CONFLICT (user_id, client_uid) DO NOTHING;
+UPDATE expense.inbound_aliases a
+	SET profile_id = (SELECT min(p.id) FROM expense.profiles p WHERE p.user_id = a.user_id)
+	WHERE a.profile_id IS NULL;
+
+ALTER TABLE expense.forwarding_confirmations ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES expense.profiles(id) ON DELETE CASCADE;
+UPDATE expense.forwarding_confirmations f
+	SET profile_id = (SELECT min(a.profile_id) FROM expense.inbound_aliases a WHERE a.user_id = f.user_id)
+	WHERE f.profile_id IS NULL;
+DELETE FROM expense.forwarding_confirmations WHERE profile_id IS NULL;
+ALTER TABLE expense.forwarding_confirmations ALTER COLUMN profile_id SET NOT NULL;
+
+ALTER TABLE expense.inbound_history ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES expense.profiles(id) ON DELETE CASCADE;
+UPDATE expense.inbound_history h
+	SET profile_id = COALESCE(
+		(SELECT min(a.profile_id) FROM expense.inbound_aliases a WHERE a.user_id = h.user_id),
+		(SELECT min(p.id) FROM expense.profiles p WHERE p.user_id = h.user_id))
+	WHERE h.profile_id IS NULL;
+DELETE FROM expense.inbound_history WHERE profile_id IS NULL;
+ALTER TABLE expense.inbound_history ALTER COLUMN profile_id SET NOT NULL;
+
+-- Eski PK (yalniz user_id) -> (user_id, profile_id).
+DO $$
+DECLARE pk record;
+BEGIN
+	SELECT conname, array_length(conkey, 1) AS n INTO pk FROM pg_constraint
+		WHERE conrelid = 'expense.inbound_aliases'::regclass AND contype = 'p';
+	IF pk.n = 1 THEN
+		EXECUTE format('ALTER TABLE expense.inbound_aliases DROP CONSTRAINT %I', pk.conname);
+		ALTER TABLE expense.inbound_aliases ADD PRIMARY KEY (user_id, profile_id);
+	END IF;
+END $$;
+
+-- Eski FK (ON DELETE SET NULL) -> CASCADE: NOT NULL kolonda SET NULL profil silmeyi 500'e cevirirdi.
+DO $$
+DECLARE fk record;
+BEGIN
+	FOR fk IN SELECT conname, conrelid::regclass AS tbl FROM pg_constraint
+		WHERE contype = 'f' AND confrelid = 'expense.profiles'::regclass AND confdeltype <> 'c'
+		  AND conrelid IN ('expense.inbound_aliases'::regclass, 'expense.forwarding_confirmations'::regclass,
+		                   'expense.inbound_history'::regclass)
+	LOOP
+		EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', fk.tbl, fk.conname);
+		EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I FOREIGN KEY (profile_id) REFERENCES expense.profiles(id) ON DELETE CASCADE',
+			fk.tbl, fk.conname);
+	END LOOP;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_forwarding_conf_profile ON expense.forwarding_confirmations (user_id, profile_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inbound_history_profile ON expense.inbound_history (user_id, profile_id, received_at DESC);`)
 	return err
 }
 

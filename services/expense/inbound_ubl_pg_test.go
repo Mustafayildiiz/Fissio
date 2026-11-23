@@ -215,14 +215,15 @@ func TestPGInboundHistory(t *testing.T) {
 		t.Fatalf("limit: %+v", h.Items)
 	}
 
-	// failed durumu + kontrol karakteri/uzunluk temizliği + kullanıcı başına 50 sınırı.
-	e.h.recordInboundHistory(u1, "a\x00b <x@y.z>", strings.Repeat("ş", 500)+"\nsatır", historyFailed, "db_error", 0)
+	// failed durumu + kontrol karakteri/uzunluk temizliği + profil başına 50 sınırı.
+	p1 := e.profiles(u1)[0].ID
+	e.h.recordInboundHistory(u1, p1, "a\x00b <x@y.z>", strings.Repeat("ş", 500)+"\nsatır", historyFailed, "db_error", 0)
 	h = e.history(u1, "")
 	if h.Items[0].Status != "failed" || len([]rune(h.Items[0].Subject)) != historyFieldRunes || strings.ContainsAny(h.Items[0].From, "\x00") {
 		t.Fatalf("failed/temizlik: %+v", h.Items[0])
 	}
 	for i := 0; i < inboundHistoryKept+5; i++ {
-		e.h.recordInboundHistory(u1, "x", "y", historyIgnored, "no_amount", 0)
+		e.h.recordInboundHistory(u1, p1, "x", "y", historyIgnored, "no_amount", 0)
 	}
 	var n int
 	if err := e.h.db.QueryRow(`SELECT count(*) FROM expense.inbound_history WHERE user_id = $1`, u1).Scan(&n); err != nil || n != inboundHistoryKept {

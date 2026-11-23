@@ -7,6 +7,8 @@ import '../api.dart';
 import '../app_info.dart' show clipboardWriter, externalLinkLauncher, kTestMailBody, mailLauncher, testMailUri;
 import '../app_state.dart';
 import '../dialogs.dart';
+import '../models.dart' show Profile;
+import '../profile_avatar.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'receipt_detail_page.dart';
@@ -64,6 +66,9 @@ const kConnectedPollInterval = Duration(seconds: 30);
 /// Gmail onay maili düşünce canlı görünen "Onay Kodu Geldi" kartı (kopyala / onay bağlantısını aç), (3) hazır Gmail filtre
 /// sorgusu (kopyala). Sekme 2 — Kurulumsuz: mail uygulamasından özel adrese İlet (Forward) ve Paylaş → Fissio. Durum satırı:
 /// "Aktif — Son aktarım: …".
+///
+/// Her profilin KENDİ adresi, onayı, duraklatma durumu ve geçmişi vardır: sayfa aktif profilinkini gösterir (üstte profil
+/// şeridi) ve profil değişince tüm profil durumunu sıfırlayıp yenisini yükler.
 class EmailSetupWizardPage extends StatefulWidget {
   const EmailSetupWizardPage({super.key, this.app, this.pollInterval = kConfirmationPollInterval});
 
@@ -97,9 +102,20 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
   ForwardingConfirmation? _lastSeenConf;
   ForwardingConfirmation? _staleConf;
 
+  /// Kurulum rehberinin aç/kapa durumu, adres (alias) başına: alias ilk görüldüğünde bağlıysa kapalı, değilse açık başlar;
+  /// sonrasında kullanıcının seçimi korunur (yoklama/yeniden çizim sıfırlamaz). Adres değişince (yenileme, profil değişimi)
+  /// yeniden belirlenir; yenilemeden sonra yeni adresin kurulumu için bir kez açık gelir.
+  String? _guideAlias;
+  bool _guideOpen = true;
+
+  /// Sayfanın gösterdiği profil; değişince profil durumu sıfırlanır.
+  String? _profileKey;
+  bool _wasUnsynced = false;
+
   @override
   void initState() {
     super.initState();
+    _profileKey = _app.activeProfileId;
     _app.addListener(_onApp);
     WidgetsBinding.instance.addObserver(this);
     unawaited(_load());
@@ -107,6 +123,18 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
 
   void _onApp() {
     if (!mounted) return;
+    if (_app.activeProfileId != _profileKey) {
+      _profileKey = _app.activeProfileId;
+      _resetProfileState();
+      if (!_loading && _app.emailImportAvailable && !_backgrounded) {
+        unawaited(_refreshHistory());
+        unawaited(_poll());
+      }
+    } else if (_wasUnsynced && !_app.inboundNeedsSync && !_loading) {
+      // Profil az önce sunucuya eşitlendi: adresi artık alınabilir.
+      unawaited(_refreshHistory());
+    }
+    _wasUnsynced = _app.inboundNeedsSync;
     setState(() {});
     // Özellik sonradan kullanılabilir olduysa (başka bir loadInbound çağrısı) yoklama da başlasın; yoksa "onay maili
     // bekleniyor…" sonsuza kadar döner.
@@ -134,6 +162,19 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
     }
   }
 
+  /// Profil değişti: önceki profilin onay kodu/geçmişi/rehber durumu yeni profilde görünmesin. Süren yoklamaların
+  /// sonuçları da (nesil değişti) atılır.
+  void _resetProfileState() {
+    _confEpoch++;
+    _confirmation = null;
+    _staleConf = null;
+    _lastSeenConf = null;
+    _history = const [];
+    _historyStamp = null;
+    _guideAlias = null;
+    if (_timer != null && widget.pollInterval == kConfirmationPollInterval) _setPollRate(kConfirmationPollInterval);
+  }
+
   void _startPolling() {
     unawaited(_poll());
     _setPollRate(_rate ?? widget.pollInterval);
@@ -145,7 +186,6 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
     if (!mounted) return;
     setState(() => _loading = false);
     if (_app.emailImportAvailable) {
-      unawaited(_alignProfile());
       unawaited(_refreshHistory());
       unawaited(_poll());
       _setPollRate(widget.pollInterval);
@@ -163,9 +203,11 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
   /// Geçmişi çeker; üst karttaki son aktarım zamanı/durumu da AYNI anda tazelenir (kart `AppState.inbound`'dan okur):
   /// geçmişte görünen bir mail üst kartta eski tarihle kalmasın.
   Future<void> _refreshHistory({bool reloadInfo = true}) async {
+    final profile = _profileKey;
     final list = await _app.loadInboundHistory();
     if (reloadInfo) await _app.loadInbound();
-    if (!mounted || list == null) return;
+    // Bu arada profil değiştiyse liste önceki profile aittir.
+    if (!mounted || list == null || profile != _profileKey) return;
     final info = _app.inbound;
     setState(() {
       _history = list;
@@ -186,18 +228,6 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
       return;
     }
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReceiptDetailPage(id: id, app: widget.app)));
-  }
-
-  /// Aktarılan fişler aktif profile düşsün (sunucu "aktif profil"i bilmez): seçili değilse sessizce ayarlanır.
-  Future<void> _alignProfile() async {
-    final p = _app.activeProfile;
-    final info = _app.inbound;
-    if (p == null || p.serverId == null || info == null || info.profileId == p.serverId) return;
-    try {
-      await _app.setInboundProfile(p);
-    } on ApiException {
-      // Sessiz: profil seçimi isteğe bağlıdır (varsayılan profil kullanılır).
-    }
   }
 
   Future<void> _poll() async {
@@ -288,7 +318,12 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
         _confEpoch++;
         _staleConf = _newer(_staleConf, _newer(_lastSeenConf, _confirmation));
         // Yeni adres henüz mail almadı (sunucu son aktarımı sıfırlar): rehber kendiliğinden yeniden açılır; hızlı yoklamaya dön.
-        setState(() => _confirmation = null);
+        setState(() {
+          _confirmation = null;
+          // Yeni adres henüz kurulmadı: rehber (kullanıcı daha önce kapatmış olsa da) bir kez açık gelir.
+          _guideAlias = _app.inbound?.address;
+          _guideOpen = true;
+        });
         if (widget.pollInterval == kConfirmationPollInterval) _setPollRate(kConfirmationPollInterval);
         showMessage(context, 'Yeni adres oluşturuldu. Eski adres artık geçersiz.', kind: ToastKind.success);
       }
@@ -353,7 +388,44 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Text('E-Posta ile Otomatik Fiş Aktarımı', style: FissioText.title(c, size: 28)),
             ),
+            if (_app.syncEnabled && _app.activeProfile != null) _profileBanner(c, _app.activeProfile!),
             Expanded(child: _body(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Hangi profilin adresinin ayarlandığı (her profilin kendi adresi vardır).
+  Widget _profileBanner(FissioColors c, Profile p) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+      child: Container(
+        key: const ValueKey('wiz-profile-banner'),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadius)),
+        child: Row(
+          children: [
+            ProfileAvatarView(name: p.name, profile: p, size: 32),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '"${p.name}" profili için',
+                    key: const ValueKey('wiz-profile-name'),
+                    style: FissioText.body(c, size: 15, weight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Bu adrese gelen fişler yalnız bu profile kaydedilir. Diğer profillerin kendi adresi vardır; '
+                    'profil değiştirince onun ayarları görünür.',
+                    style: FissioText.body(c, size: 12, color: c.mute).copyWith(height: 1.35),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -374,6 +446,15 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
         showShare: true,
       );
     }
+    if (_app.inboundNeedsSync) {
+      return _notice(
+        'Profil henüz eşitlenmedi',
+        '"${_app.activeProfile?.name}" profili henüz sunucuya yüklenmedi; e-posta adresi profil eşitlendikten sonra '
+            'oluşturulur. İnternet bağlantını kontrol et ve birazdan tekrar dene.',
+        key: 'wiz-profile-unsynced',
+        retry: true,
+      );
+    }
     final info = _app.inbound;
     if (info == null || !info.enabled) {
       return _notice(
@@ -387,9 +468,13 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
         retry: info == null,
       );
     }
-    // Bağlandıysa (en az bir mail işlendi) uzun kurulum rehberi katlanır; adres kopyalama kısayolu görünür kalır.
-    // Adres yenilenince sunucu son aktarımı sıfırlar → `active` false olur ve rehber yeniden açık gelir.
+    // Rehber her zaman açılır-kapanır; bağlıyken (en az bir mail işlendi) kapalı, değilse açık başlar ve kullanıcının
+    // seçimi adres değişene kadar korunur. Bağlıyken adres kopyalama kısayolu rehberin üstünde görünür kalır.
     final connected = info.active;
+    if (_guideAlias != info.address) {
+      _guideAlias = info.address;
+      _guideOpen = !connected;
+    }
     final guide = <Widget>[
       SegmentedControl<int>(
         key: const ValueKey('wiz-tabs'),
@@ -412,20 +497,28 @@ class _EmailSetupWizardPageState extends State<EmailSetupWizardPage> with Widget
               textKey: const ValueKey('wiz-address-compact'),
               done: 'Adres kopyalandı.'),
           const SizedBox(height: 10),
-          Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              key: const ValueKey('wiz-guide'),
-              tilePadding: const EdgeInsets.symmetric(horizontal: 4),
-              childrenPadding: const EdgeInsets.only(top: 8),
-              title: Text('Kurulum Rehberi', style: FissioText.body(c, size: 16, weight: FontWeight.w700)),
-              subtitle: Text('Yönlendirme zaten kurulu. Yeniden kurman gerekirse aç.',
-                  style: FissioText.body(c, size: 13, color: c.mute)),
-              children: guide,
+        ],
+        Theme(
+          key: const ValueKey('wiz-guide'),
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            // Anahtar yalnız adres değişince değişir: yeniden çizimde açık/kapalı durumu sıfırlanmaz.
+            key: ValueKey('wiz-guide-tile-${info.address}'),
+            initiallyExpanded: _guideOpen,
+            onExpansionChanged: (open) => _guideOpen = open,
+            maintainState: true,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+            childrenPadding: const EdgeInsets.only(top: 8),
+            title: Text('Kurulum Rehberi', style: FissioText.body(c, size: 16, weight: FontWeight.w700)),
+            subtitle: Text(
+              connected
+                  ? 'Yönlendirme zaten kurulu. Yeniden kurman gerekirse aç.'
+                  : 'Adresini e-posta hesabına ekleyip yönlendirmeyi kur.',
+              style: FissioText.body(c, size: 13, color: c.mute),
             ),
+            children: guide,
           ),
-        ] else
-          ...guide,
+        ),
         _testCard(c, info),
         _historySection(c),
         const SizedBox(height: 12),

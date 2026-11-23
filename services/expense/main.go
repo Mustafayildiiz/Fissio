@@ -51,6 +51,8 @@ func main() {
 	}
 
 	h := &handler{db: db, ocrFactory: scan.NewOcrEngineFactoryFromEnv(), inbound: inboundConfigFromEnv()}
+	// Basarisiz e-posta aktarimi bildirimi: auth (kullanicinin e-postasinin sahibi) gonderir; kuyruk + tek worker.
+	h.notifier = newAuthFailureNotifier(authURL, internalToken, failureNoticeQueue)
 	// Iptal edilen oturum (cikis, uzaktan cikis, hesap silme) en gec 10 sn icinde reddedilir.
 	sessions := newSessionChecker(authURL, internalToken, 10*time.Second)
 	r := buildRouterWith(h, verifier, sessions.alive)
@@ -119,6 +121,8 @@ func buildRouterWith(h *handler, v accessVerifier, alive func(sid string, userID
 	api.POST("/inbound-address/resume", h.resumeInboundAddress)
 	api.GET("/inbound-address/confirmation", h.getForwardingConfirmation)
 	api.GET("/inbound-address/history", h.getInboundHistory)
+	api.GET("/inbound-settings", h.getInboundSettings)
+	api.PUT("/inbound-settings", h.putInboundSettings)
 	api.GET("/profiles", h.listProfiles)
 	api.POST("/profiles", h.createProfile)
 	api.PUT("/profiles/:id", h.renameProfile)

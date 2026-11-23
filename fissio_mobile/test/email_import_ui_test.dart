@@ -342,16 +342,75 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('sihirbaz hesabı "Yeni" rozetini söndürür; aktarılan fişlerin profili aktif profile ayarlanır', (tester) async {
+    testWidgets('sihirbaz "Yeni" rozetini söndürür; aktif profilin adresi/onayı/geçmişi gösterilir, profil değişince yenisi yüklenir',
+        (tester) async {
       _tall(tester);
       final h = await _signedIn(tester);
+      final u = h.backend.user(_email);
+      final first = h.app.activeProfile!;
+      u.confirmation = {'code': '111222333', 'received_at': '2026-11-20T20:00:00Z'};
+      u.inboundHistory = [
+        {
+          'id': 1, 'source': 'email', 'from': 'a@b.c', 'subject': 'Kişisel fatura',
+          'received_at': '2026-11-20T19:00:00Z', 'status': 'saved', 'reason': 'created',
+        },
+      ];
       expect(h.app.emailImportIsNew, isTrue);
       await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
       await _flush(tester, h);
       await _flush(tester, h);
       expect(h.app.emailImportIsNew, isFalse);
-      expect(h.backend.user(_email).inboundProfileId, isNotNull, reason: 'aktif profil seçildi');
+      expect(find.byKey(const ValueKey('wiz-profile-banner')), findsOneWidget);
+      expect(find.text('"${first.name}" profili için'), findsOneWidget);
+      final addr1 = h.app.inbound!.address;
+      expect(h.app.inbound!.profileUid, first.id);
+      expect(find.text('Onay Kodu Geldi: 111222333'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-history-1')), findsOneWidget);
+      expect(h.backend.inboundRequests, isNotEmpty);
+      expect(h.backend.inboundRequests.every((r) => r.endsWith(first.id)), isTrue, reason: 'istekler aktif profil için');
+      expect(h.backend.inboundRequests.any((r) => r.startsWith('PUT')), isFalse, reason: 'profil hizalama PUT\'u yok');
+
+      // Profil değişti: yeni profilin adresi; önceki profilin onay kodu ve geçmişi görünmez.
+      await tester.runAsync(() => h.app.createProfile('İş'));
+      await _flush(tester, h);
+      await _flush(tester, h);
+      final work = h.app.activeProfile!;
+      expect(work.name, 'İş');
+      expect(find.text('"İş" profili için'), findsOneWidget);
+      expect(h.app.inbound?.profileUid, work.id);
+      expect(h.app.inbound!.address, isNot(addr1));
+      expect(find.text(h.app.inbound!.address), findsOneWidget);
+      expect(find.text('Onay Kodu Geldi: 111222333'), findsNothing);
+      expect(find.byKey(const ValueKey('wiz-history-1')), findsNothing);
+      expect(h.backend.inboundRequests.any((r) => r.endsWith(work.id)), isTrue);
+
+      // Geri dönünce ilk profilin adresi ve geçmişi yeniden gelir.
+      await tester.runAsync(() => h.app.selectProfile(h.app.profiles.firstWhere((p) => p.id == first.id)));
+      await _flush(tester, h);
+      await _flush(tester, h);
+      expect(h.app.inbound!.address, addr1);
+      expect(find.byKey(const ValueKey('wiz-history-1')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('sunucuya eşitlenmemiş profilde adres istenmez, açıklama gösterilir', (tester) async {
+      _tall(tester);
+      final h = await _signedIn(tester);
+      await tester.runAsync(() async {
+        h.backend.offline = true;
+        await h.app.createProfile('Yolda');
+      });
+      expect(h.app.activeProfile!.serverId, isNull);
+      expect(h.app.inboundNeedsSync, isTrue);
+      expect(h.app.inbound, isNull, reason: 'başka profilin adresi gösterilmez');
+      final before = h.backend.inboundRequests.length;
+      await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+      await _flush(tester, h);
+      expect(find.byKey(const ValueKey('wiz-profile-unsynced')), findsOneWidget);
+      expect(find.byKey(const ValueKey('wiz-profile-banner')), findsOneWidget);
+      expect(h.backend.inboundRequests.length, before);
+      await tester.pumpWidget(const SizedBox());
+      h.backend.offline = false;
     });
 
     testWidgets('adres yenile: onay → yeni adres', (tester) async {

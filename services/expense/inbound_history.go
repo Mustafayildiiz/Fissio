@@ -12,7 +12,7 @@ import (
 )
 
 // E-posta aktarım geçmişi: webhook'a gelen her mailin akıbeti (kaydedildi / atlandı / hata) kullanıcı başına son
-// inboundHistoryKept satır olarak tutulur. Mail gövdesi ve ekleri SAKLANMAZ; yalnızca gönderici, konu, durum, neden ve
+// inboundHistoryKept satır olarak tutulur (PROFİL başına: her profilin kendi adresi ve geçmişi vardır). Mail gövdesi ve ekleri SAKLANMAZ; yalnızca gönderici, konu, durum, neden ve
 // (varsa) ilgili fiş kimliği.
 
 const (
@@ -39,23 +39,23 @@ func cleanHistoryField(s string) string {
 	return s
 }
 
-// recordInboundHistory geçmişe satır ekler ve kullanıcı başına eski satırları kırpar. Hata yutulur (loglanır): geçmiş
+// recordInboundHistory geçmişe satır ekler ve profil başına eski satırları kırpar. Hata yutulur (loglanır): geçmiş
 // yazımı webhook sonucunu asla değiştirmemeli.
-func (h *handler) recordInboundHistory(userID int64, from, subject, status, reason string, expenseID int64) {
+func (h *handler) recordInboundHistory(userID, profileID int64, from, subject, status, reason string, expenseID int64) {
 	var exp any
 	if expenseID > 0 {
 		exp = expenseID
 	}
 	if _, err := h.db.Exec(
-		`INSERT INTO expense.inbound_history (user_id, from_addr, subject, status, reason, expense_id) VALUES ($1, $2, $3, $4, $5, $6)`,
-		userID, cleanHistoryField(from), cleanHistoryField(subject), status, cleanHistoryField(reason), exp); err != nil {
+		`INSERT INTO expense.inbound_history (user_id, profile_id, from_addr, subject, status, reason, expense_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		userID, profileID, cleanHistoryField(from), cleanHistoryField(subject), status, cleanHistoryField(reason), exp); err != nil {
 		log.Printf("inbound: history insert failed for user %d: %v", userID, err)
 		return
 	}
 	if _, err := h.db.Exec(
-		`DELETE FROM expense.inbound_history WHERE user_id = $1 AND id NOT IN
-		 (SELECT id FROM expense.inbound_history WHERE user_id = $1 ORDER BY received_at DESC, id DESC LIMIT $2)`,
-		userID, inboundHistoryKept); err != nil {
+		`DELETE FROM expense.inbound_history WHERE user_id = $1 AND profile_id = $2 AND id NOT IN
+		 (SELECT id FROM expense.inbound_history WHERE user_id = $1 AND profile_id = $2 ORDER BY received_at DESC, id DESC LIMIT $3)`,
+		userID, profileID, inboundHistoryKept); err != nil {
 		log.Printf("inbound: history trim failed for user %d: %v", userID, err)
 	}
 }
@@ -71,11 +71,16 @@ type inboundHistoryItem struct {
 	ExpenseID  *int64 `json:"expense_id,omitempty"`
 }
 
-// GET /inbound-address/history?limit=: son aktarılan e-postalar (yeniden eskiye). Özellik kapalıysa boş liste.
+// GET /inbound-address/history?profile_uid=&limit=: profilin son aktarılan e-postaları (yeniden eskiye).
+// Özellik kapalıysa boş liste.
 func (h *handler) getInboundHistory(c *gin.Context) {
 	items := []inboundHistoryItem{}
 	if !h.inbound.enabled() {
 		c.JSON(http.StatusOK, gin.H{"enabled": false, "items": items})
+		return
+	}
+	pid, ok := h.inboundProfile(c, 0)
+	if !ok {
 		return
 	}
 	limit := inboundHistoryDefault
@@ -87,8 +92,8 @@ func (h *handler) getInboundHistory(c *gin.Context) {
 	}
 	rows, err := h.db.Query(
 		`SELECT id, source, from_addr, subject, received_at, status, reason, expense_id
-		   FROM expense.inbound_history WHERE user_id = $1 ORDER BY received_at DESC, id DESC LIMIT $2`,
-		c.GetInt64("userID"), limit)
+		   FROM expense.inbound_history WHERE user_id = $1 AND profile_id = $2 ORDER BY received_at DESC, id DESC LIMIT $3`,
+		c.GetInt64("userID"), pid, limit)
 	if err != nil {
 		serverError(c)
 		return

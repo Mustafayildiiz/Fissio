@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'receipt_parser/normalize.dart' show foldTR;
+
 /// Sunucudaki sabit sınıflandırmanın "Diğer" kategorisi (kategori bulunamayınca / cihaz taramasında varsayılan).
 const String kOtherCategory = 'Diğer';
 
@@ -142,6 +144,13 @@ class AuthUser {
 
   Map<String, dynamic> toJson() => {'id': id, 'email': email, 'name': name};
 }
+
+/// Hesap başına en fazla profil (sunucu `maxProfilesPerUser` ile aynı; aşımda 409 `profile_limit`).
+const int kMaxProfiles = 8;
+
+/// Profil adı karşılaştırma anahtarı (Go `profileNameKey` ikizi): Türkçe katlama + boşluk sadeleştirme.
+/// "İstanbul" == " istanbul " → aynı ad sayılır (sunucu 409 `duplicate_profile_name`).
+String profileNameKey(String name) => foldTR(name).split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
 
 /// Hesaba bağlı profil (Kişisel, Ev, İş...). [id] istemci kimliğidir (`client_uid`): hem sunucudaki hem
 /// henüz yüklenmemiş yerel profiller için aynıdır; böylece senkron idempotent olur.

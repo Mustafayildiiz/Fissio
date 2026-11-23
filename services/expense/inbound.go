@@ -63,13 +63,19 @@ func (c inboundConfig) maxBytes() int64 {
 	return c.MaxBytes
 }
 
-// aliasLimiter alias başına kayan saatlik sayaç.
+// aliasLimiter anahtar (alias / kullanıcı) başına kayan saatlik sayaç. max 0 = aliasMaxPerHour.
 type aliasLimiter struct {
 	mu   sync.Mutex
 	hits map[string][]time.Time
+	max  int
 }
 
 func (l *aliasLimiter) allow(alias string, now time.Time) bool {
+	return l.allowWith(alias, now, l.max)
+}
+
+// allowWith limit ile (0 = aliasMaxPerHour) sayar.
+func (l *aliasLimiter) allowWith(alias string, now time.Time, limit int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.hits == nil {
@@ -82,7 +88,10 @@ func (l *aliasLimiter) allow(alias string, now time.Time) bool {
 			kept = append(kept, t)
 		}
 	}
-	if len(kept) >= aliasMaxPerHour {
+	if limit <= 0 {
+		limit = aliasMaxPerHour
+	}
+	if len(kept) >= limit {
 		l.hits[alias] = kept
 		return false
 	}
@@ -283,8 +292,15 @@ func recipientCandidates(p inboundPayload, m *digital.Message) []string {
 	return out
 }
 
+// inboundTarget çözülen alias: sahibi, bağlı olduğu profil ve takma ad.
+type inboundTarget struct {
+	UserID    int64
+	ProfileID int64
+	Alias     string
+}
+
 // lookupAlias adaylar arasında INBOUND_EMAIL_DOMAIN'e ait ilk bilinen alias'ı bulur (+tag ve büyük/küçük harf toleranslı).
-func (h *handler) lookupAlias(cands []string) (userID int64, profile sql.NullInt64, alias string, paused bool, err error) {
+func (h *handler) lookupAlias(cands []string) (t inboundTarget, paused bool, err error) {
 	for _, raw := range cands {
 		for _, piece := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' }) {
 			addr := strings.ToLower(strings.TrimSpace(piece))
@@ -299,22 +315,26 @@ func (h *handler) lookupAlias(cands []string) (userID int64, profile sql.NullInt
 			if i := strings.IndexByte(local, '+'); i >= 0 {
 				local = local[:i]
 			}
-			e := h.db.QueryRow(`SELECT user_id, profile_id, paused FROM expense.inbound_aliases WHERE alias = $1`, local).Scan(&userID, &profile, &paused)
+			e := h.db.QueryRow(`SELECT user_id, profile_id, paused FROM expense.inbound_aliases WHERE alias = $1`, local).
+				Scan(&t.UserID, &t.ProfileID, &paused)
 			if errors.Is(e, sql.ErrNoRows) {
 				continue
 			}
-			return userID, profile, local, paused, e
+			t.Alias = local
+			return t, paused, e
 		}
 	}
-	return 0, sql.NullInt64{}, "", false, sql.ErrNoRows
+	return inboundTarget{}, false, sql.ErrNoRows
 }
 
 // finishInbound webhook sonucunu iki yere TEK çağrıyla yazar: alias durumu (`last_status`, `bump` ise `last_received_at`
 // de) ve aktarım geçmişi. Alias geçerli her mail (kaydedildi / yok sayıldı / hata) için bump=true; yalnız Gmail
-// yönlendirme onay maili (fiş aktarımı değil) bump=false kullanır.
-func (h *handler) finishInbound(userID int64, from, subject, lastStatus, histStatus, reason string, expenseID int64, bump bool) {
-	h.setInboundStatus(userID, lastStatus, bump)
-	h.recordInboundHistory(userID, from, subject, histStatus, reason, expenseID)
+// yönlendirme onay maili (fiş aktarımı değil) bump=false kullanır. Durum ve geçmiş alias'ın PROFİLİNE yazılır.
+// İşlenemeyen/başarısız sonuçta hesap sahibine (asenkron) bilgilendirme maili kuyruğa eklenir (bkz. notify.go).
+func (h *handler) finishInbound(t inboundTarget, from, subject, lastStatus, histStatus, reason string, expenseID int64, bump bool) {
+	h.setInboundStatus(t, lastStatus, bump)
+	h.recordInboundHistory(t.UserID, t.ProfileID, from, subject, histStatus, reason, expenseID)
+	h.maybeNotifyFailure(t, subject, histStatus, reason, time.Now())
 }
 
 // failureReason geçmişteki `failed` satırı için "<kod>: <gerçek hata>" metni (≤160 rune; kontrol karakterleri temizlenir).
@@ -335,21 +355,21 @@ func (h *handler) recordEarlyReject(rcpt, reason string) {
 	if strings.TrimSpace(rcpt) == "" {
 		return
 	}
-	userID, _, _, paused, err := h.lookupAlias([]string{rcpt})
+	t, paused, err := h.lookupAlias([]string{rcpt})
 	if err != nil || paused {
 		return
 	}
-	log.Printf("inbound: user %d: request rejected before parse (%s)", userID, reason)
-	h.finishInbound(userID, "", "", "ignored:"+reason, historyIgnored, reason, 0, true)
+	log.Printf("inbound: user %d: request rejected before parse (%s)", t.UserID, reason)
+	h.finishInbound(t, "", "", "ignored:"+reason, historyIgnored, reason, 0, true)
 }
 
-func (h *handler) setInboundStatus(userID int64, status string, received bool) {
-	q := `UPDATE expense.inbound_aliases SET last_status = $2 WHERE user_id = $1`
+func (h *handler) setInboundStatus(t inboundTarget, status string, received bool) {
+	q := `UPDATE expense.inbound_aliases SET last_status = $2 WHERE alias = $1`
 	if received {
-		q = `UPDATE expense.inbound_aliases SET last_status = $2, last_received_at = now() WHERE user_id = $1`
+		q = `UPDATE expense.inbound_aliases SET last_status = $2, last_received_at = now() WHERE alias = $1`
 	}
-	if _, err := h.db.Exec(q, userID, status); err != nil {
-		log.Printf("inbound: status update failed for user %d: %v", userID, err)
+	if _, err := h.db.Exec(q, t.Alias, status); err != nil {
+		log.Printf("inbound: status update failed for user %d: %v", t.UserID, err)
 	}
 }
 
@@ -382,7 +402,7 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	raw := p.rawMIME()
 	msg := buildMessage(p, raw)
 
-	userID, profile, alias, paused, err := h.lookupAlias(recipientCandidates(p, msg))
+	target, paused, err := h.lookupAlias(recipientCandidates(p, msg))
 	if errors.Is(err, sql.ErrNoRows) {
 		ignored("unknown_alias") // alias sızdırmamak için sağlayıcıya her zaman 200
 		return
@@ -391,11 +411,12 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		serverError(c)
 		return
 	}
+	userID := target.UserID
 	// Aktarım geçmişi: alias çözüldükten sonraki her çıkış tek satır kaydeder (gövde/ek saklanmaz).
 	// finish: alias geçerliyse sonucu (saved / ignored / failed fark etmez) HEM `inbound_aliases.last_status +
 	// last_received_at` HEM geçmişe tek yerden yazar; ikisi asla ayrışmaz.
 	finish := func(lastStatus, histStatus, reason string, expenseID int64) {
-		h.finishInbound(userID, msg.From, msg.Subject, lastStatus, histStatus, reason, expenseID, true)
+		h.finishInbound(target, msg.From, msg.Subject, lastStatus, histStatus, reason, expenseID, true)
 	}
 	skip := func(reason string) {
 		finish("ignored:"+reason, historyIgnored, reason, 0)
@@ -410,7 +431,7 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	// Duraklatılmış adres: hiçbir şey işlenmez (rate limiter ve Gmail onay tespitinden önce). Mail "son aktarım" sayılmaz
 	// (bump=false), ama geçmişte "paused" nedeniyle görünür.
 	if paused {
-		h.finishInbound(userID, msg.From, msg.Subject, "ignored:paused", historyIgnored, "paused", 0, false)
+		h.finishInbound(target, msg.From, msg.Subject, "ignored:paused", historyIgnored, "paused", 0, false)
 		ignored("paused")
 		return
 	}
@@ -421,7 +442,7 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		skip(rejectedTooLarge)
 		return
 	}
-	if !inboundLimiter.allow(alias, time.Now()) {
+	if !inboundLimiter.allow(target.Alias, time.Now()) {
 		log.Printf("inbound: alias rate limited (user %d)", userID)
 		skip("rate_limited")
 		return
@@ -439,17 +460,17 @@ func (h *handler) inboundEmail(c *gin.Context) {
 			// Google'ın onay göndericisi ama kod/bağlantı okunamadı: fiş olarak denenmez, sessizce atlanır.
 			log.Printf("inbound: user %d: gmail confirmation without readable code/link", userID)
 			// Gmail onay maili fiş aktarımı DEĞİLDİR: last_received_at ilerlemez (kurulum bitmeden sihirbaz "Aktif" demesin).
-			h.finishInbound(userID, msg.From, msg.Subject, "ignored:gmail_confirmation_unreadable", historyIgnored,
+			h.finishInbound(target, msg.From, msg.Subject, "ignored:gmail_confirmation_unreadable", historyIgnored,
 				"gmail_confirmation_unreadable", 0, false)
 			ignored("gmail_confirmation_unreadable")
 			return
 		}
 		log.Printf("inbound: user %d: gmail forwarding confirmation captured (code=%t link=%t)", userID, conf.Code != "", conf.Link != "")
-		if err := h.saveConfirmation(userID, conf); err != nil {
+		if err := h.saveConfirmation(target, conf); err != nil {
 			fail("confirmation_save", err)
 			return
 		}
-		h.finishInbound(userID, msg.From, msg.Subject, "gmail_confirmation", historyIgnored, "gmail_confirmation", 0, false)
+		h.finishInbound(target, msg.From, msg.Subject, "gmail_confirmation", historyIgnored, "gmail_confirmation", 0, false)
 		c.JSON(http.StatusOK, gin.H{"status": "confirmation"})
 		return
 	}
@@ -483,19 +504,15 @@ func (h *handler) inboundEmail(c *gin.Context) {
 		return
 	}
 
-	var profileArg int64
-	if profile.Valid {
-		profileArg = profile.Int64
-	}
-	pid, found, err := h.resolveProfile(userID, profileArg)
-	if err == nil && !found { // hedef profil silinmiş (SET NULL öncesi yarış): varsayılana düş
-		pid, found, err = h.resolveProfile(userID, 0)
-	}
-	if err != nil || !found {
-		if err == nil {
-			err = errors.New("no profile available")
-		}
+	// Fiş doğrudan alias'ın bağlı olduğu profile yazılır. Profil bu arada silindiyse (CASCADE alias'ı da sildi)
+	// adres artık geçersizdir: bilinmeyen alias gibi davranılır.
+	pid, found, err := h.resolveProfile(userID, target.ProfileID)
+	if err != nil {
 		fail("profile_error", err)
+		return
+	}
+	if !found {
+		ignored("unknown_alias")
 		return
 	}
 	itemsJSON, _ := json.Marshal(itemsForStorage(in.Items))
@@ -547,12 +564,14 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": outcome, "id": id})
 }
 
-func (h *handler) saveConfirmation(userID int64, conf digital.GmailConfirmation) error {
-	if _, err := h.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, code, link) VALUES ($1, $2, NULLIF($3, ''))`, userID, conf.Code, conf.Link); err != nil {
+func (h *handler) saveConfirmation(t inboundTarget, conf digital.GmailConfirmation) error {
+	if _, err := h.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, profile_id, code, link) VALUES ($1, $2, $3, NULLIF($4, ''))`,
+		t.UserID, t.ProfileID, conf.Code, conf.Link); err != nil {
 		return err
 	}
 	_, err := h.db.Exec(
-		`DELETE FROM expense.forwarding_confirmations WHERE user_id = $1 AND id NOT IN
-		 (SELECT id FROM expense.forwarding_confirmations WHERE user_id = $1 ORDER BY received_at DESC, id DESC LIMIT $2)`, userID, maxConfirmationsKept)
+		`DELETE FROM expense.forwarding_confirmations WHERE user_id = $1 AND profile_id = $2 AND id NOT IN
+		 (SELECT id FROM expense.forwarding_confirmations WHERE user_id = $1 AND profile_id = $2
+		  ORDER BY received_at DESC, id DESC LIMIT $3)`, t.UserID, t.ProfileID, maxConfirmationsKept)
 	return err
 }

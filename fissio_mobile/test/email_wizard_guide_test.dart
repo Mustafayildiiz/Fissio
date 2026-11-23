@@ -6,7 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_backend.dart';
 
-/// Bağlandıktan sonra uzun kurulum rehberi katlanır; "Adresi Yenile" ile yeniden açılır; yoklama seyrelir.
+/// Kurulum rehberi her zaman açılır-kapanır: bağlı değilken açık, bağlıyken kapalı başlar; kullanıcının seçimi
+/// yoklama/yeniden çizimde korunur, yalnız adres değişince (yenileme) bir kez açılır. Yoklama bağlanınca seyrelir.
 
 const _email = 'ali@x.co';
 
@@ -36,15 +37,26 @@ Future<void> _flush(WidgetTester tester, Harness h) async {
 }
 
 void main() {
-  testWidgets('bağlı değilken rehber satır içi açık (katlanır kutu yok)', (tester) async {
+  testWidgets('bağlı değilken rehber açık başlar; kullanıcı kapatabilir ve yoklamalar boyunca kapalı kalır', (tester) async {
     _tall(tester);
     final h = await _signedIn(tester);
-    await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+    await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
     await _flush(tester, h);
-    expect(find.byKey(const ValueKey('wiz-guide')), findsNothing);
+    expect(find.byKey(const ValueKey('wiz-guide')), findsOneWidget);
     expect(find.byKey(const ValueKey('wiz-step-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('wiz-filter-step-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('wiz-address-compact')), findsNothing);
+
+    await tester.tap(find.text('Kurulum Rehberi'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsNothing, reason: 'kullanıcı kapattı');
+    // Birkaç yoklama + yeniden çizim: kullanıcının kapatma seçimi sıfırlanmaz.
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 150));
+      await _flush(tester, h);
+    }
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -73,12 +85,36 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('adres yenilenince rehber yeniden açık gelir (son aktarım sıfırlandığı için)', (tester) async {
+  testWidgets('bağlıyken açılan rehber yoklama/yeniden çizimde açık kalır; sayfa yeniden açılınca kapalı başlar', (tester) async {
+    _tall(tester);
+    final h = await _signedIn(tester, connected: true);
+    await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(milliseconds: 100))));
+    await _flush(tester, h);
+    await tester.tap(find.text('Kurulum Rehberi'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsOneWidget);
+    h.backend.user(_email).lastStatus = 'created'; // durum değişti -> yeniden çizim
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 150));
+      await _flush(tester, h);
+    }
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsOneWidget, reason: 'kullanıcının açma seçimi korunur');
+    await tester.pumpWidget(const SizedBox());
+
+    await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
+    await _flush(tester, h);
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsNothing, reason: 'yeniden açılışta bağlıyken kapalı');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('adres yenilenince rehber bir kez açık gelir; sonra kullanıcının kapatma seçimi korunur', (tester) async {
     _tall(tester);
     final h = await _signedIn(tester, connected: true);
     await tester.pumpWidget(_app(EmailSetupWizardPage(app: h.app, pollInterval: const Duration(seconds: 30))));
     await _flush(tester, h);
     expect(find.byKey(const ValueKey('wiz-guide')), findsOneWidget);
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsNothing);
 
     await tester.ensureVisible(find.byKey(const ValueKey('wiz-rotate')));
     await tester.tap(find.byKey(const ValueKey('wiz-rotate')));
@@ -90,9 +126,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(h.app.inbound!.active, isFalse);
-    expect(find.byKey(const ValueKey('wiz-guide')), findsNothing);
-    expect(find.byKey(const ValueKey('wiz-step-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('wiz-guide')), findsOneWidget);
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsOneWidget, reason: 'yeni adresin kurulumu için açık');
     expect(find.byKey(const ValueKey('wiz-confirm-waiting')), findsOneWidget);
+
+    await tester.tap(find.text('Kurulum Rehberi'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsNothing);
+    // İlk mail yeni adrese geldi (bağlandı): kullanıcının kapatma seçimi bozulmaz, kendiliğinden açılmaz.
+    h.backend.user(_email).lastReceivedAt = '2026-11-20T21:00:00Z';
+    await tester.runAsync(() => h.app.loadInbound());
+    await tester.pump();
+    expect(h.app.inbound!.active, isTrue);
+    expect(find.byKey(const ValueKey('wiz-step-1')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 

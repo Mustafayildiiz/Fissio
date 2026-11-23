@@ -26,6 +26,7 @@ var userOwnedTables = []string{
 	"budgets",
 	"inbound_aliases",
 	"forwarding_confirmations",
+	"inbound_settings",
 	"profiles",
 }
 

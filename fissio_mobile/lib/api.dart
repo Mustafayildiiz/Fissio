@@ -47,6 +47,10 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Profil sınırı (sunucu `profile_limit` ile aynı: [kMaxProfiles]).
+const kProfileLimitMessage = 'Maksimum $kMaxProfiles profil oluşturabilirsiniz.';
+const kDuplicateProfileNameMessage = 'Bu isimde bir profil zaten var. Farklı bir isim seçin.';
+
 /// Yayın: tek origin (ters vekil/Caddy, bkz. Caddyfile): `--dart-define=API_BASE=https://api.ornek.com`. Verilirse auth ve expense
 /// aynı tabanı kullanır (`/auth/*` auth'a, gerisi expense'e yönlenir) ve API_HOST/8081/8082 yok sayılır.
 const _apiBase = String.fromEnvironment('API_BASE');
@@ -121,12 +125,17 @@ class BulkItemResult {
   bool get ok => status == 'created' || status == 'skipped' || status == 'merged';
 }
 
-/// `GET /inbound-address`: kullanıcıya özel e-posta yönlendirme adresi ve son aktarım durumu. [enabled] false ise sunucuda
-/// özellik yapılandırılmamıştır (INBOUND_EMAIL_DOMAIN boş): diğer alanlar boştur ve arayüz adımı/sihirbazı gizler.
+/// `GET /inbound-address?profile_uid=`: PROFİLE özel e-posta yönlendirme adresi ve son aktarım durumu (her profilin kendi
+/// adresi, onayı ve geçmişi vardır; o adrese gelen fişler o profile kaydedilir). [enabled] false ise sunucuda özellik
+/// yapılandırılmamıştır (INBOUND_EMAIL_DOMAIN boş): diğer alanlar boştur ve arayüz adımı/sihirbazı gizler.
 class InboundAddress {
   final bool enabled;
   final String address;
   final int? profileId;
+
+  /// Adresin bağlı olduğu profilin `client_uid` değeri (= `Profile.id`) ve adı.
+  final String? profileUid;
+  final String? profileName;
 
   /// Son başarılı aktarım (fiş oluştu / birleşti / mükerrer); henüz yoksa null.
   final DateTime? lastReceivedAt;
@@ -138,6 +147,8 @@ class InboundAddress {
     this.enabled = false,
     this.address = '',
     this.profileId,
+    this.profileUid,
+    this.profileName,
     this.lastReceivedAt,
     this.lastStatus,
     this.paused = false,
@@ -153,17 +164,22 @@ class InboundAddress {
       other.enabled == enabled &&
       other.address == address &&
       other.profileId == profileId &&
+      other.profileUid == profileUid &&
+      other.profileName == profileName &&
       other.lastReceivedAt == lastReceivedAt &&
       other.lastStatus == lastStatus &&
       other.paused == paused;
 
   @override
-  int get hashCode => Object.hash(enabled, address, profileId, lastReceivedAt, lastStatus, paused);
+  int get hashCode =>
+      Object.hash(enabled, address, profileId, profileUid, profileName, lastReceivedAt, lastStatus, paused);
 
   factory InboundAddress.fromJson(Map<String, dynamic> j) => InboundAddress(
     enabled: (j['enabled'] as bool?) ?? false,
     address: (j['address'] as String?) ?? '',
     profileId: (j['profile_id'] as num?)?.toInt(),
+    profileUid: j['profile_uid'] as String?,
+    profileName: j['profile_name'] as String?,
     lastReceivedAt: j['last_received_at'] == null ? null : DateTime.tryParse(j['last_received_at'] as String)?.toLocal(),
     lastStatus: j['last_status'] as String?,
     paused: (j['paused'] as bool?) ?? false,
@@ -465,6 +481,9 @@ class ApiClient {
       'duplicate_document': 'Bu dijital fatura zaten eklenmiş.',
       'duplicate_order': 'Bu sipariş zaten eklenmiş.',
       'document_locked': 'Bu kayıt zaten başka bir resmi faturaya bağlı; üzerine yeni belge yazılamaz.',
+      'profile_limit': kProfileLimitMessage,
+      'duplicate_profile_name': kDuplicateProfileNameMessage,
+      'profile_not_found': 'Profil bulunamadı.',
     };
     if (code != null && byCode.containsKey(code)) return byCode[code]!;
     const map = {
@@ -474,7 +493,7 @@ class ApiClient {
       'invalid or expired token': 'Oturum süresi doldu, tekrar giriş yapın.',
       'expense not found': 'Fiş bulunamadı.',
       'profile not found': 'Profil bulunamadı.',
-      'too many profiles': 'En fazla 20 profil oluşturabilirsiniz.',
+      'too many profiles': kProfileLimitMessage,
       'unknown category_id': 'Geçersiz kategori.',
     };
     return map[e] ?? e;
@@ -710,27 +729,32 @@ class ApiClient {
 
   // --- E-posta ile otomatik fiş aktarımı ---
 
-  /// Kullanıcıya özel yönlendirme adresi (yoksa sunucu üretir). Özellik kapalıysa `enabled: false`.
-  Future<InboundAddress> inboundAddress() async =>
-      InboundAddress.fromJson(await _send('GET', _expense, '/inbound-address') as Map<String, dynamic>);
+  /// `?profile_uid=` sorgusu (boş = sunucunun varsayılan profili).
+  static String _profileQuery(String? profileUid, {String sep = '?'}) =>
+      profileUid == null || profileUid.isEmpty ? '' : '${sep}profile_uid=${Uri.encodeQueryComponent(profileUid)}';
 
-  /// Aktarılan fişlerin düşeceği profil (null = en eski/varsayılan profil).
-  Future<InboundAddress> setInboundProfile(int? profileId) async => InboundAddress.fromJson(
-    await _send('PUT', _expense, '/inbound-address', body: {'profile_id': profileId ?? 0}) as Map<String, dynamic>,
+  /// Profile özel yönlendirme adresi (yoksa sunucu üretir). Özellik kapalıysa `enabled: false`.
+  Future<InboundAddress> inboundAddress({String? profileUid}) async => InboundAddress.fromJson(
+    await _send('GET', _expense, '/inbound-address${_profileQuery(profileUid)}') as Map<String, dynamic>,
   );
 
-  /// Adresi yeniler (eski adres hemen geçersiz olur).
-  Future<InboundAddress> rotateInboundAddress() async =>
-      InboundAddress.fromJson(await _send('POST', _expense, '/inbound-address/rotate') as Map<String, dynamic>);
-
-  /// Aktarımı duraklatır / sürdürür (adres ve geçmiş korunur; idempotent).
-  Future<InboundAddress> setInboundPaused(bool paused) async => InboundAddress.fromJson(
-    await _send('POST', _expense, paused ? '/inbound-address/pause' : '/inbound-address/resume') as Map<String, dynamic>,
+  /// Profilin adresini yeniler (eski adres hemen geçersiz olur).
+  Future<InboundAddress> rotateInboundAddress({String? profileUid}) async => InboundAddress.fromJson(
+    await _send('POST', _expense, '/inbound-address/rotate${_profileQuery(profileUid)}') as Map<String, dynamic>,
   );
 
-  /// Son 24 saatteki Gmail yönlendirme onayı; bekleyen yoksa null.
-  Future<ForwardingConfirmation?> forwardingConfirmation() async {
-    final j = await _send('GET', _expense, '/inbound-address/confirmation');
+  /// Profilin aktarımını duraklatır / sürdürür (adres ve geçmiş korunur; idempotent).
+  Future<InboundAddress> setInboundPaused(bool paused, {String? profileUid}) async => InboundAddress.fromJson(
+    await _send(
+      'POST',
+      _expense,
+      '${paused ? '/inbound-address/pause' : '/inbound-address/resume'}${_profileQuery(profileUid)}',
+    ) as Map<String, dynamic>,
+  );
+
+  /// Profilin son 24 saatteki Gmail yönlendirme onayı; bekleyen yoksa null.
+  Future<ForwardingConfirmation?> forwardingConfirmation({String? profileUid}) async {
+    final j = await _send('GET', _expense, '/inbound-address/confirmation${_profileQuery(profileUid)}');
     if (j is! Map<String, dynamic>) return null;
     final code = j['code'];
     final link = j['link'];
@@ -742,9 +766,20 @@ class ApiClient {
     );
   }
 
+  /// Kullanıcı düzeyi e-posta aktarım tercihi: başarısız aktarımda hesabın e-postasına bilgilendirme (varsayılan açık).
+  Future<bool> inboundNotifyFailures() async {
+    final j = await _send('GET', _expense, '/inbound-settings');
+    return j is Map<String, dynamic> ? (j['notify_failures'] as bool?) ?? true : true;
+  }
+
+  Future<bool> setInboundNotifyFailures(bool value) async {
+    final j = await _send('PUT', _expense, '/inbound-settings', body: {'notify_failures': value});
+    return j is Map<String, dynamic> ? (j['notify_failures'] as bool?) ?? value : value;
+  }
+
   /// Son aktarılan e-postalar (yeniden eskiye; sunucu en çok 50 tutar). Özellik kapalıysa boş liste.
-  Future<List<InboundHistoryItem>> inboundHistory({int limit = 20}) async {
-    final j = await _send('GET', _expense, '/inbound-address/history?limit=$limit');
+  Future<List<InboundHistoryItem>> inboundHistory({int limit = 20, String? profileUid}) async {
+    final j = await _send('GET', _expense, '/inbound-address/history?limit=$limit${_profileQuery(profileUid, sep: '&')}');
     if (j is! Map<String, dynamic>) return const [];
     final items = j['items'];
     if (items is! List) return const [];

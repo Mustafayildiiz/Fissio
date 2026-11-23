@@ -104,11 +104,17 @@ components:
       required: [enabled]
       properties:
         enabled: { type: boolean, description: 'false = sunucuda e-posta aktarımı yapılandırılmamış (INBOUND_EMAIL_DOMAIN boş); diğer alanlar yok' }
-        address: { type: string, example: 'k3j9x2m4q7p1w8zt@fis.fissio.app', description: Kullanıcıya özel, tahmin edilemez yönlendirme adresi }
-        profile_id: { type: integer, format: int64, description: 'Aktarılan fişlerin düşeceği profil; yoksa en eski/varsayılan profil' }
+        address: { type: string, example: 'k3j9x2m4q7p1w8zt@fis.fissio.app', description: 'PROFİLE özel, tahmin edilemez yönlendirme adresi (her profilin kendi adresi var); bu adrese gelen fişler doğrudan bu profile kaydedilir' }
+        profile_id: { type: integer, format: int64, description: Adresin bağlı olduğu profil }
+        profile_uid: { type: string, description: Profilin client_uid değeri }
+        profile_name: { type: string, description: Profilin adı }
         last_received_at: { type: string, format: date-time, description: 'Alias geçerli olan SON mailin zamanı (fiş oluşsun, yok sayılsın, mükerrer çıksın ya da hata alsın); Gmail yönlendirme onay maili sayılmaz' }
         last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden> (paused, rate_limited, too_large, unreadable_payload, unknown_category, gmail_confirmation_unreadable, …) | failed:<kod> (ör. failed:internal; ayrıntı geçmişteki reason alanında)' }
         paused: { type: boolean, description: 'true = aktarım duraklatıldı; gelen mailler fişe dönüşmez (alan yoksa false)' }
+    InboundSettings:
+      type: object
+      properties:
+        notify_failures: { type: boolean, description: 'Kullanıcı düzeyi (tüm profiller). true (varsayılan) = işlenemeyen/başarısız e-posta aktarımında hesabın KAYITLI e-posta adresine bilgilendirme maili (saatte en çok 5; mükerrer/Gmail onayı hariç). Dış göndericiye asla yanıt gönderilmez.' }
     Item:
       type: object
       description: >-
@@ -677,7 +683,7 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/Profile' } }
     post:
       tags: [expense]
-      summary: Profil oluştur (client_uid ile idempotent; hesap başına en çok 20)
+      summary: Profil oluştur (client_uid ile idempotent; hesap başına en çok 8, ad hesap içinde benzersiz)
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -691,8 +697,9 @@ paths:
                 client_uid: { type: string }
       responses:
         '201': { description: Oluşturuldu, content: { application/json: { schema: { $ref: '#/components/schemas/Profile' } } } }
-        '200': { description: Aynı client_uid ile profil zaten var }
-        '400': { description: Geçersiz ad / çok fazla profil }
+        '200': { description: Aynı client_uid ile profil zaten var (sınır/ad kontrolünden önce; çevrimdışı kuyruk tekrarı hata değildir) }
+        '400': { description: Geçersiz ad (1-40 karakter) / client_uid }
+        '409': { description: 'code: profile_limit (8 profile ulaşıldı) | duplicate_profile_name (aynı ad; Türkçe katlamalı, büyük/küçük harf ve boşluk duyarsız: "İstanbul" = " istanbul ")' }
   /profiles/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
@@ -707,7 +714,8 @@ paths:
             schema: { type: object, required: [name], properties: { name: { type: string } } }
       responses:
         '200': { description: Güncellendi }
-        '404': { description: Profil yok veya başka hesaba ait }
+        '404': { description: 'Profil yok veya başka hesaba ait (code: profile_not_found)' }
+        '409': { description: 'code: duplicate_profile_name (başka bir profil bu adı kullanıyor; profilin kendi adını harf değiştirerek yeniden adlandırması serbest)' }
     delete:
       tags: [expense]
       summary: Profili ve içindeki tüm fişleri (görseller dahil) sil. Son profil silinemez.
@@ -781,38 +789,52 @@ paths:
         '200': { description: Sonuç, content: { application/json: { schema: { $ref: '#/components/schemas/BulkResult' } } } }
         '400': { description: Boş veya 500 den fazla }
   /inbound-address:
+    parameters:
+      - { name: profile_uid, in: query, required: false, description: 'Profilin client_uid değeri (önerilen). Yoksa profile_id, o da yoksa hesabın varsayılan (en eski) profili. Başka hesabın/olmayan profil 404 profile_not_found', schema: { type: string } }
+      - { name: profile_id, in: query, required: false, description: Profilin sayısal kimliği (profile_uid yoksa), schema: { type: integer, format: int64 } }
     get:
       tags: [expense]
-      summary: Kullanıcıya özel e-posta yönlendirme adresi (yoksa üretilir)
+      summary: Profile özel e-posta yönlendirme adresi (yoksa üretilir)
       description: >-
         E-faturalarını Gmail/Outlook filtresiyle ya da "İlet (Forward)" ile bu adrese gönderen kullanıcının fişleri
-        otomatik kaydedilir. Sunucuda `INBOUND_EMAIL_DOMAIN` boşsa `{ enabled: false }` döner (404 değil).
+        otomatik olarak adresin bağlı olduğu PROFİLE kaydedilir. Her profilin kendi adresi, Gmail onayı, duraklatma
+        durumu ve aktarım geçmişi vardır. Sunucuda `INBOUND_EMAIL_DOMAIN` boşsa `{ enabled: false }` döner (404 değil).
       security: [{ bearer: [] }]
       responses:
         '200': { description: Adres ve son aktarım durumu, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+        '404': { description: 'code: profile_not_found' }
     put:
       tags: [expense]
-      summary: Aktarılan fişlerin düşeceği profili seç
+      summary: Profilin adresini oluştur/döndür (eski istemci uyumu)
+      description: >-
+        Eskiden "fişlerin düşeceği profili seç" anlamındaydı; artık her profilin kendi adresi olduğundan hedef
+        değiştirmez: gövdedeki `profile_id` (ya da sorgu parametreleri) ile seçilen profilin adresini döndürür.
       security: [{ bearer: [] }]
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
               properties:
-                profile_id: { type: integer, format: int64, description: '0/yok = en eski/varsayılan profil' }
+                profile_id: { type: integer, format: int64, description: '0/yok = sorgu parametresi ya da varsayılan profil' }
       responses:
         '200': { description: Güncel durum, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
-        '404': { description: Profil yok veya başka hesaba ait }
+        '404': { description: 'Profil yok veya başka hesaba ait (code: profile_not_found)' }
   /inbound-address/rotate:
+    parameters:
+      - { name: profile_uid, in: query, required: false, description: 'Profilin client_uid değeri (önerilen). Yoksa profile_id, o da yoksa hesabın varsayılan (en eski) profili. Başka hesabın/olmayan profil 404 profile_not_found', schema: { type: string } }
+      - { name: profile_id, in: query, required: false, description: Profilin sayısal kimliği (profile_uid yoksa), schema: { type: integer, format: int64 } }
     post:
       tags: [expense]
-      summary: Adresi yenile (eski adres hemen geçersiz olur)
+      summary: Profilin adresini yenile (eski adres hemen geçersiz olur; yalnız bu profilin Gmail onayları silinir)
       security: [{ bearer: [] }]
       responses:
         '200': { description: Yeni adres, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
   /inbound-address/pause:
+    parameters:
+      - { name: profile_uid, in: query, required: false, description: 'Profilin client_uid değeri (önerilen). Yoksa profile_id, o da yoksa hesabın varsayılan (en eski) profili. Başka hesabın/olmayan profil 404 profile_not_found', schema: { type: string } }
+      - { name: profile_id, in: query, required: false, description: Profilin sayısal kimliği (profile_uid yoksa), schema: { type: integer, format: int64 } }
     post:
       tags: [expense]
       summary: Aktarımı geçici duraklat (adres ve geçmiş korunur)
@@ -821,8 +843,11 @@ paths:
         İdempotenttir. Yenileme (`rotate`) duraklatmayı kaldırır.
       security: [{ bearer: [] }]
       responses:
-        '200': { description: Güncel durum (`paused: true`), content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+        '200': { description: 'Güncel durum (`paused: true`)', content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
   /inbound-address/resume:
+    parameters:
+      - { name: profile_uid, in: query, required: false, description: 'Profilin client_uid değeri (önerilen). Yoksa profile_id, o da yoksa hesabın varsayılan (en eski) profili. Başka hesabın/olmayan profil 404 profile_not_found', schema: { type: string } }
+      - { name: profile_id, in: query, required: false, description: Profilin sayısal kimliği (profile_uid yoksa), schema: { type: integer, format: int64 } }
     post:
       tags: [expense]
       summary: Duraklatılmış aktarımı sürdür
@@ -830,9 +855,12 @@ paths:
       responses:
         '200': { description: Güncel durum, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
   /inbound-address/confirmation:
+    parameters:
+      - { name: profile_uid, in: query, required: false, description: 'Profilin client_uid değeri (önerilen). Yoksa profile_id, o da yoksa hesabın varsayılan (en eski) profili. Başka hesabın/olmayan profil 404 profile_not_found', schema: { type: string } }
+      - { name: profile_id, in: query, required: false, description: Profilin sayısal kimliği (profile_uid yoksa), schema: { type: integer, format: int64 } }
     get:
       tags: [expense]
-      summary: Son Gmail yönlendirme onay kodu/bağlantısı
+      summary: Profilin son Gmail yönlendirme onay kodu/bağlantısı
       description: >-
         Kullanıcı Gmail'de yönlendirme adresini eklediğinde Google'ın `forwarding-noreply@google.com`'dan gönderdiği onay
         maili fiş olarak kaydedilmez; kod ve (yalnızca Google ana makinelerine ait) onay bağlantısı son 24 saat boyunca
@@ -851,11 +879,14 @@ paths:
                   received_at: { type: string, format: date-time }
         '204': { description: Bekleyen onay yok }
   /inbound-address/history:
+    parameters:
+      - { name: profile_uid, in: query, required: false, description: 'Profilin client_uid değeri (önerilen). Yoksa profile_id, o da yoksa hesabın varsayılan (en eski) profili. Başka hesabın/olmayan profil 404 profile_not_found', schema: { type: string } }
+      - { name: profile_id, in: query, required: false, description: Profilin sayısal kimliği (profile_uid yoksa), schema: { type: integer, format: int64 } }
     get:
       tags: [expense]
-      summary: Son aktarılan e-postalar (aktarım geçmişi)
+      summary: Profilin son aktarılan e-postaları (aktarım geçmişi)
       description: >-
-        Webhook'a gelen her mailin akıbeti, yeniden eskiye; kullanıcı başına son 50 kayıt tutulur. Mail gövdesi ve ekleri
+        Webhook'a gelen her mailin akıbeti, yeniden eskiye; PROFİL başına son 50 kayıt tutulur. Mail gövdesi ve ekleri
         saklanmaz; yalnızca gönderici, konu, durum (`saved` | `ignored` | `failed`), neden (`created`, `merged`,
         `no_amount`, `pdf_unreadable`, `rate_limited`, `paused`, `gmail_confirmation`, `duplicate_document`, `duplicate_order`,
         `already_imported`…) ve varsa ilgili fiş (`expense_id`). `INBOUND_EMAIL_DOMAIN` boşsa `{ enabled: false, items: [] }`.
@@ -884,6 +915,25 @@ paths:
                         status: { type: string, enum: [saved, ignored, failed] }
                         reason: { type: string }
                         expense_id: { type: integer, format: int64, description: Kaydedilen/eşleşen fiş (yoksa alan yok) }
+  /inbound-settings:
+    get:
+      tags: [expense]
+      summary: Kullanıcı düzeyi e-posta aktarım tercihleri
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Tercihler (kayıt yoksa varsayılanlar), content: { application/json: { schema: { $ref: '#/components/schemas/InboundSettings' } } } }
+    put:
+      tags: [expense]
+      summary: E-posta aktarım tercihlerini güncelle
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [notify_failures], properties: { notify_failures: { type: boolean } } }
+      responses:
+        '200': { description: Güncel tercihler, content: { application/json: { schema: { $ref: '#/components/schemas/InboundSettings' } } } }
+        '400': { description: notify_failures eksik }
   /webhooks/inbound-email:
     post:
       tags: [expense]
@@ -903,6 +953,9 @@ paths:
         yerine `{to, from, subject, rejected: "too_large", size}` JSON'u gönderebilir (başlıklar RFC 2047 olabilir,
         sunucu çözer); alias geçerliyse geçmişe `ignored/too_large` yazılır, yanıt 200 `ignored`. 413 ya da okunamayan
         gövdede de `?rcpt=` geçerli bir alias'a aitse geçmişe `too_large` / `unreadable_payload` yazılır.
+        Fiş, alias'ın bağlı olduğu profile kaydedilir. Sonuç `ignored` (mükerrer ve Gmail onayı hariç) ya da `failed`
+        ise ve kullanıcının `notify_failures` tercihi açıksa, hesabın KAYITLI e-postasına (auth servisi üzerinden,
+        asenkron, kullanıcı başına saatte en çok 5) bilgilendirme maili gider; dış göndericiye asla yanıt gönderilmez.
       security: []
       responses:
         '200':

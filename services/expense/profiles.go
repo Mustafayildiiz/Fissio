@@ -13,13 +13,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
+
+	"fissio/expense/internal/receiptparse"
 )
 
 // Profiller hesaba (user_id) aittir: User -> Profiles -> Receipts. Her sorgu user_id ile sinirlidir;
 // baska hesabin profili/fisi 404 doner.
 const (
-	maxProfilesPerUser = 20
+	maxProfilesPerUser = 8
 	defaultProfileName = "Kişisel"
+)
+
+// Profil hata kodlari (istemci Turkce mesaji koda gore secer).
+const (
+	codeProfileLimit         = "profile_limit"
+	codeDuplicateProfileName = "duplicate_profile_name"
+	codeProfileNotFound      = "profile_not_found"
 )
 
 var clientUIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
@@ -43,6 +52,38 @@ func cleanProfileName(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	n := len([]rune(s))
 	return s, n >= 1 && n <= 40
+}
+
+// profileNameKey ad karsilastirma anahtari: Turkce katlama (FoldTR; Postgres lower() I/İ'de
+// collation'a baglidir) + bas/son ve ic bosluk sadelestirme. "İstanbul" == " istanbul ".
+func profileNameKey(s string) string {
+	return strings.Join(strings.Fields(receiptparse.FoldTR(s)), " ")
+}
+
+// profileNameTaken: kullanicinin (exceptID haric) ayni anahtarli bir profili var mi?
+// Cagiran profil advisory lock'unu tutmalidir.
+func profileNameTaken(q queryer, userID, exceptID int64, name string) (bool, error) {
+	rows, err := q.Query(`SELECT name FROM expense.profiles WHERE user_id = $1 AND id <> $2`, userID, exceptID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	key := profileNameKey(name)
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return false, err
+		}
+		if profileNameKey(n) == key {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func lockProfiles(tx *sql.Tx, userID int64) error {
+	_, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext($1))`, "profiles|"+strconv.FormatInt(userID, 10))
+	return err
 }
 
 // ensureProfiles kullanicinin profillerini dondurur; hic yoksa varsayilan "Kisisel" profili olusturur.
@@ -167,7 +208,14 @@ func (h *handler) createProfile(c *gin.Context) {
 		return
 	}
 	if n >= maxProfilesPerUser {
-		badRequest(c, "too many profiles")
+		c.JSON(http.StatusConflict, gin.H{"error": "too many profiles", "code": codeProfileLimit})
+		return
+	}
+	if taken, err := profileNameTaken(tx, userID, 0, name); err != nil {
+		serverError(c)
+		return
+	} else if taken {
+		c.JSON(http.StatusConflict, gin.H{"error": "profile name already exists", "code": codeDuplicateProfileName})
 		return
 	}
 	var p profileOut
@@ -202,22 +250,48 @@ func (h *handler) renameProfile(c *gin.Context) {
 		badRequest(c, "name must be 1-40 characters")
 		return
 	}
-	var p profileOut
-	err = h.db.QueryRow(
-		`UPDATE expense.profiles SET name=$1 WHERE id=$2 AND user_id=$3 RETURNING id, name, client_uid, created_at, (CASE WHEN avatar IS NULL THEN 0 ELSE avatar_version END)`,
-		name, id, c.GetInt64("userID")).Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt, &p.AvatarVersion)
-	if errors.Is(err, sql.ErrNoRows) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
+	userID := c.GetInt64("userID")
+	tx, err := h.db.Begin()
+	if err != nil {
+		serverError(c)
 		return
 	}
-	if err != nil {
+	defer tx.Rollback()
+	if err := lockProfiles(tx, userID); err != nil {
+		serverError(c)
+		return
+	}
+	var exists bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM expense.profiles WHERE id=$1 AND user_id=$2)`, id, userID).Scan(&exists); err != nil {
+		serverError(c)
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found", "code": codeProfileNotFound})
+		return
+	}
+	// Kendisi haric: ayni profilin harf degistirerek yeniden adlandirilmasi serbesttir.
+	if taken, err := profileNameTaken(tx, userID, id, name); err != nil {
+		serverError(c)
+		return
+	} else if taken {
+		c.JSON(http.StatusConflict, gin.H{"error": "profile name already exists", "code": codeDuplicateProfileName})
+		return
+	}
+	var p profileOut
+	if err := tx.QueryRow(
+		`UPDATE expense.profiles SET name=$1 WHERE id=$2 AND user_id=$3 RETURNING id, name, client_uid, created_at, (CASE WHEN avatar IS NULL THEN 0 ELSE avatar_version END)`,
+		name, id, userID).Scan(&p.ID, &p.Name, &p.ClientUID, &p.CreatedAt, &p.AvatarVersion); err != nil {
+		serverError(c)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		serverError(c)
 		return
 	}
 	c.JSON(http.StatusOK, p)
 }
 
-// deleteProfile profili ve icindeki tum fisleri (gorseller dahil, ON DELETE CASCADE) siler. Son profil silinemez.
 func (h *handler) deleteProfile(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

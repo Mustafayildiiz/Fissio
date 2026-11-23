@@ -12,9 +12,11 @@ import (
 	"time"
 )
 
-// Mailer dogrulama / sifirlama kodunu e-posta ile gonderir.
+// Mailer dogrulama / sifirlama kodunu ve hesap sahibine yonelik bilgilendirme maillerini gonderir.
 type Mailer interface {
 	SendCode(to, purpose, code string, ttl time.Duration) error
+	// SendNotice duz metin bilgilendirme (or. islenemeyen e-posta aktarimi). Yalniz hesabin kayitli adresine.
+	SendNotice(to, subject, body string) error
 }
 
 // newMailer SMTP_HOST bos ise gelistirme icin kodu loga basan fallback doner.
@@ -30,6 +32,11 @@ type logMailer struct{}
 
 func (logMailer) SendCode(to, purpose, code string, ttl time.Duration) error {
 	log.Printf("[DEV-OTP] email=%s purpose=%s code=%s ttl=%s", to, purpose, code, ttl)
+	return nil
+}
+
+func (logMailer) SendNotice(to, subject, body string) error {
+	log.Printf("[DEV-MAIL] email=%s subject=%q\n%s", to, subject, body)
 	return nil
 }
 
@@ -50,6 +57,12 @@ func mailContent(purpose, code string, ttl time.Duration) (subject, body string)
 
 func (m *smtpMailer) SendCode(to, purpose, code string, ttl time.Duration) error {
 	subject, body := mailContent(purpose, code, ttl)
+	return m.send(to, subject, body)
+}
+
+func (m *smtpMailer) SendNotice(to, subject, body string) error { return m.send(to, subject, body) }
+
+func (m *smtpMailer) send(to, subject, body string) error {
 	from := m.cfg.From
 	if from == "" {
 		from = m.cfg.User

@@ -47,6 +47,10 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
   }
 
   Future<void> _addProfileDialog() async {
+    if (!appState.canAddProfile) {
+      showError(context, kProfileLimitMessage);
+      return;
+    }
     final name = await showTextPrompt(
       context,
       title: 'Yeni profil',
@@ -192,6 +196,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
                           }
                           return _NewProfileCard(
                             busy: _busyId == '__new__',
+                            limitReached: !appState.canAddProfile,
                             onTap: _addProfileDialog,
                           );
                         },
@@ -320,17 +325,23 @@ class _ProfileCard extends StatelessWidget {
 }
 
 class _NewProfileCard extends StatelessWidget {
-  const _NewProfileCard({required this.busy, required this.onTap});
+  const _NewProfileCard({required this.busy, required this.onTap, this.limitReached = false});
   final bool busy;
   final VoidCallback onTap;
+
+  /// [kMaxProfiles]'a ulaşıldı: kart pasif görünür; dokununca uyarı gösterilir.
+  final bool limitReached;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     return InkWell(
+      key: const ValueKey('new-profile-card'),
       onTap: busy ? null : onTap,
       borderRadius: BorderRadius.circular(kRadius),
-      child: DashedBox(
+      child: Opacity(
+        opacity: limitReached ? 0.45 : 1,
+        child: DashedBox(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -353,13 +364,26 @@ class _NewProfileCard extends StatelessWidget {
                       )
                     : Icon(LucideIcons.plus, size: 24, color: c.accentInk),
               ),
-              Text(
-                'Yeni profil',
-                style: FissioText.body(c, size: 17, weight: FontWeight.w600, color: c.accentInk),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Yeni profil',
+                    style: FissioText.body(c, size: 17, weight: FontWeight.w600, color: c.accentInk),
+                  ),
+                  if (limitReached)
+                    Text(
+                      'En fazla $kMaxProfiles profil',
+                      key: const ValueKey('new-profile-limit'),
+                      style: FissioText.body(c, size: 12, color: c.mute),
+                    ),
+                ],
               ),
             ],
           ),
         ),
+      ),
       ),
     );
   }

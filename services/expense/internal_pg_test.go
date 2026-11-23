@@ -73,15 +73,18 @@ func TestPGPurgeUserRemovesOnlyThatUsersData(t *testing.T) {
 		code, _, raw := e.putBudget(uid, p.ID, market, 8000)
 		e.want(code, 200, raw, "put budget")
 		// E-posta aktarimi: takma ad + Gmail onay kodu (user_id tasiyan yeni tablolar da silinmeli).
-		if _, err := e.db.Exec(`INSERT INTO expense.inbound_aliases (user_id, alias) VALUES ($1, $2)`, uid, newAlias()); err != nil {
+		if _, err := e.db.Exec(`INSERT INTO expense.inbound_aliases (user_id, profile_id, alias) VALUES ($1, $2, $3)`, uid, p.ID, newAlias()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, code, link) VALUES ($1, '123456789', NULL)`, uid); err != nil {
+		if _, err := e.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, profile_id, code, link) VALUES ($1, $2, '123456789', NULL)`, uid, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.db.Exec(`INSERT INTO expense.inbound_settings (user_id, notify_failures) VALUES ($1, false)`, uid); err != nil {
 			t.Fatal(err)
 		}
 		// Aktarim gecmisi: fise bagli satir (expense_id FK) hesap silinirken fislerden once temizlenmeli.
-		if _, err := e.db.Exec(`INSERT INTO expense.inbound_history (user_id, from_addr, subject, status, reason, expense_id)
-			VALUES ($1, 'a@b.c', 'Fatura', 'saved', 'created', $2)`, uid, ex.ID); err != nil {
+		if _, err := e.db.Exec(`INSERT INTO expense.inbound_history (user_id, profile_id, from_addr, subject, status, reason, expense_id)
+			VALUES ($1, $2, 'a@b.c', 'Fatura', 'saved', 'created', $3)`, uid, p.ID, ex.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

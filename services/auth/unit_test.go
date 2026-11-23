@@ -201,3 +201,34 @@ func TestRouteLimitersAreIndependentAndIgnoreSpoofedForwardedFor(t *testing.T) {
 		t.Fatal("register must not share login's quota")
 	}
 }
+
+func TestInboundFailureContent(t *testing.T) {
+	subj, body := inboundFailureContent(inboundFailureNotice{
+		MailSubject: strings.Repeat("ş", 300), ReceivedAt: time.Date(2026, 1, 2, 21, 30, 0, 0, time.UTC),
+		Reason: "PDF okunamadı.",
+	})
+	if subj == "" || !strings.Contains(body, "03.01.2026 00:30") || !strings.Contains(body, "PDF okunamadı.") ||
+		strings.Contains(body, "Profil:") || strings.Contains(body, strings.Repeat("ş", noticeSubjectMx+1)) {
+		t.Fatalf("content: %q / %q", subj, body)
+	}
+	if !strings.Contains(body, "Tercihler") {
+		t.Fatal("bildirimi kapatma yolu yazılmalı")
+	}
+}
+
+func TestNoticeSubjectLinksAreDefanged(t *testing.T) {
+	_, body := inboundFailureContent(inboundFailureNotice{
+		MailSubject: "Hesabınız askıya alındı: https://evil.example/login?x=1 ya da www.evil.example veya sub.evil.example tutar 12.345,00",
+		Reason:      "E-postada fiş tutarı bulunamadı.",
+	})
+	for _, bad := range []string{"https://", "evil.example", "www."} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("bağlantı etkisizleştirilmeli (%q): %q", bad, body)
+		}
+	}
+	for _, want := range []string{"[bağlantı kaldırıldı]", "sub[.]evil[.]example", "12.345,00"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%q bekleniyordu: %q", want, body)
+		}
+	}
+}

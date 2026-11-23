@@ -116,6 +116,13 @@ void main() {
     expect(privacy, contains('@fissio.dev'));
     expect(privacy, contains('YALNIZCA fiş/fatura'));
     expect(privacy, contains('Son Aktarılan E-Postalar'));
+    // Profil bazlı adres + başarısız aktarım bildirimi (yalnız hesabın adresine, kapatılabilir, göndericiye yanıt yok).
+    expect(privacy, contains('her profiline özel'));
+    expect(privacy, contains('profil başına son 50 kayıt'));
+    expect(privacy, contains('yalnızca hesabının kayıtlı adresine'));
+    expect(privacy, contains('ilgili profilin adını'));
+    expect(privacy, contains('Başarısız e-posta aktarımlarında e-posta ile bilgilendir'));
+    expect(privacy, contains('hiçbir zaman otomatik yanıt verilmez'));
     expect(InfoTexts.terms.map((s) => s.heading), contains('E-posta yönlendirme'));
     expect(InfoTexts.about.map((s) => s.heading), contains('E-posta ile otomatik fiş aktarımı'));
     expect(all(InfoTexts.about), contains('UBL-TR'));

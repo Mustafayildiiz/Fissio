@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -21,9 +22,25 @@ import (
 // DIKKAT: auth semasini DROP eder (expense testleriyle ayni veritabani); expense testleriyle PARALEL calistirma.
 
 type captureMailer struct {
-	mu    sync.Mutex
-	codes map[string]string
-	sent  int
+	mu      sync.Mutex
+	codes   map[string]string
+	sent    int
+	notices []capturedNotice
+}
+
+type capturedNotice struct{ To, Subject, Body string }
+
+func (m *captureMailer) SendNotice(to, subject, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notices = append(m.notices, capturedNotice{to, subject, body})
+	return nil
+}
+
+func (m *captureMailer) noticeList() []capturedNotice {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]capturedNotice(nil), m.notices...)
 }
 
 func (m *captureMailer) SendCode(to, purpose, code string, _ time.Duration) error {
@@ -666,4 +683,57 @@ func TestPGUnverifiedReRegisterIssuesNewCode(t *testing.T) {
 	// Sifre guncellendi.
 	st, b = e.do("POST", "/auth/login", map[string]any{"email": email, "password": "Another1Pass"}, "")
 	e.expect(st, 200, b, "new password works")
+}
+
+func TestPGInternalInboundFailureNotice(t *testing.T) {
+	e := newEnv(t)
+	e.signup("notice@example.com", "Pixel")
+	var uid int64
+	_ = e.db.QueryRow(`SELECT id FROM auth.users WHERE email='notice@example.com'`).Scan(&uid)
+	r := buildInternalRouter(e.h)
+	post := func(id int64, token string, body any) int {
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest("POST", fmt.Sprintf("/internal/users/%d/inbound-failure", id), bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set(internalTokenHeader, token)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+	n := map[string]any{"profile_name": "İş", "mail_subject": "Fatura\x07 Ekim", "received_at": "2026-11-23T10:00:00Z",
+		"reason": "E-postada fiş tutarı bulunamadı."}
+	if c := post(uid, "", n); c != 401 {
+		t.Fatalf("no token: %d", c)
+	}
+	if c := post(uid, testInternalToken, n); c != 204 {
+		t.Fatalf("notice: %d", c)
+	}
+	got := e.mail.noticeList()
+	if len(got) != 1 || got[0].To != "notice@example.com" || !strings.Contains(got[0].Body, "Fatura Ekim") ||
+		!strings.Contains(got[0].Body, "23.11.2026 13:00") || !strings.Contains(got[0].Body, "tutarı bulunamadı") ||
+		!strings.Contains(got[0].Body, "Profil: İş") || strings.ContainsRune(got[0].Body, '\x07') {
+		t.Fatalf("notice mail: %+v", got)
+	}
+	// Bilinmeyen hesap, dogrulanmamis ve silinmekte olan hesap: 404, mail yok.
+	if c := post(999999, testInternalToken, n); c != 404 {
+		t.Fatalf("unknown user: %d", c)
+	}
+	st, b := e.do("POST", "/auth/register", map[string]any{"email": "unverified@example.com", "password": testPass, "name": "U"}, "")
+	e.expect(st, 201, b, "register")
+	var unverified int64
+	_ = e.db.QueryRow(`SELECT id FROM auth.users WHERE email='unverified@example.com'`).Scan(&unverified)
+	if c := post(unverified, testInternalToken, n); c != 404 {
+		t.Fatalf("unverified: %d", c)
+	}
+	if _, err := e.db.Exec(`UPDATE auth.users SET deleting_at = now() WHERE id = $1`, uid); err != nil {
+		t.Fatal(err)
+	}
+	if c := post(uid, testInternalToken, n); c != 404 {
+		t.Fatalf("deleting: %d", c)
+	}
+	if len(e.mail.noticeList()) != 1 {
+		t.Fatal("reddedilen isteklerde mail gitmemeli")
+	}
 }

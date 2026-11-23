@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -49,7 +50,17 @@ func (e *xenv) hook(secret string, payload any) (int, map[string]any) {
 
 func (e *xenv) inboundAddress(uid int64) inboundInfo {
 	e.t.Helper()
-	code, b := e.as(uid, "GET", "/inbound-address", nil)
+	return e.inboundAddressFor(uid, "")
+}
+
+// inboundAddressFor profilin (client_uid; boş = varsayılan profil) adresi.
+func (e *xenv) inboundAddressFor(uid int64, profileUID string) inboundInfo {
+	e.t.Helper()
+	path := "/inbound-address"
+	if profileUID != "" {
+		path += "?profile_uid=" + profileUID
+	}
+	code, b := e.as(uid, "GET", path, nil)
 	e.want(code, 200, b, "inbound-address")
 	var info inboundInfo
 	if err := json.Unmarshal(b, &info); err != nil {
@@ -109,16 +120,39 @@ func TestPGInboundAddressEndpoints(t *testing.T) {
 		t.Fatal("kullanıcılar farklı adres almalı")
 	}
 
-	// Profil seçimi: başkasının profili 404, kendisininki kabul.
+	// Profil bazlı adres: her profilin kendi adresi var; başkasının profili 404 (uid, id ve eski PUT gövdesiyle).
 	bobProfile := e.profiles(bob)[0]
+	code, b = e.as(alice, "GET", "/inbound-address?profile_uid="+bobProfile.ClientUID, nil)
+	e.want(code, 404, b, "başkasının profili (uid)")
+	code, b = e.as(alice, "GET", fmt.Sprintf("/inbound-address?profile_id=%d", bobProfile.ID), nil)
+	e.want(code, 404, b, "başkasının profili (id)")
 	code, b = e.as(alice, "PUT", "/inbound-address", map[string]any{"profile_id": bobProfile.ID})
-	e.want(code, 404, b, "başkasının profili")
+	e.want(code, 404, b, "başkasının profili (PUT)")
+	code, b = e.as(alice, "GET", "/inbound-address?profile_id=abc", nil)
+	e.want(code, 400, b, "hatalı profile_id")
+	def := e.profiles(alice)[0]
+	if a1.ProfileID == nil || *a1.ProfileID != def.ID || a1.ProfileUID != def.ClientUID || a1.ProfileName != def.Name {
+		t.Fatalf("parametresiz = varsayılan profil: %+v", a1)
+	}
 	own := e.newProfile(alice, "İş")
+	ownAddr := e.inboundAddressFor(alice, own.ClientUID)
+	if ownAddr.Address == a1.Address || ownAddr.ProfileUID != own.ClientUID || ownAddr.ProfileName != "İş" ||
+		ownAddr.ProfileID == nil || *ownAddr.ProfileID != own.ID {
+		t.Fatalf("profilin kendi adresi: %+v (varsayılan %s)", ownAddr, a1.Address)
+	}
+	// Eski istemci uyumu: PUT {profile_id} artık hedef değiştirmez, o profilin adresini döndürür.
 	code, b = e.as(alice, "PUT", "/inbound-address", map[string]any{"profile_id": own.ID})
 	e.want(code, 200, b, "kendi profili")
-	if got := e.inboundAddress(alice); got.ProfileID == nil || *got.ProfileID != own.ID {
-		t.Fatalf("profil seçilmedi: %+v", got)
+	var put inboundInfo
+	_ = json.Unmarshal(b, &put)
+	if put.Address != ownAddr.Address {
+		t.Fatalf("PUT profilin adresini dönmeli: %+v", put)
 	}
+	if got := e.inboundAddress(alice); got.Address != a1.Address {
+		t.Fatalf("varsayılan profilin adresi değişmemeli: %+v", got)
+	}
+	code, b = e.as(alice, "PUT", "/inbound-address?profile_uid="+own.ClientUID, nil)
+	e.want(code, 200, b, "PUT gövdesiz")
 
 	// Yenileme: eski adres geçersiz olur.
 	code, b = e.as(alice, "POST", "/inbound-address/rotate", nil)
@@ -127,6 +161,9 @@ func TestPGInboundAddressEndpoints(t *testing.T) {
 	_ = json.Unmarshal(b, &rotated)
 	if rotated.Address == a1.Address || rotated.Address == "" {
 		t.Fatalf("rotate: %+v", rotated)
+	}
+	if got := e.inboundAddressFor(alice, own.ClientUID); got.Address != ownAddr.Address {
+		t.Fatalf("rotate yalnız seçilen profilin adresini değiştirir: %+v", got)
 	}
 	st, out := e.hook(testWebhookSecret, map[string]any{"to": a1.Address, "html": yemeksepetiHTML})
 	if st != 200 || out["status"] != "ignored" || out["reason"] != "unknown_alias" {
@@ -395,29 +432,6 @@ func TestPGInboundRecipientResolution(t *testing.T) {
 	}
 }
 
-func TestPGInboundTargetProfileAndTwoUsers(t *testing.T) {
-	e := newXEnv(t)
-	e.enableInbound()
-	const alice, bob = int64(1), int64(2)
-	own := e.newProfile(alice, "İş")
-	code, b := e.as(alice, "PUT", "/inbound-address", map[string]any{"profile_id": own.ID})
-	e.want(code, 200, b, "profil")
-	if st, out := e.mail(alice, map[string]any{"html": yemeksepetiHTML}); st != 200 || out["status"] != "created" {
-		t.Fatalf("%d %v", st, out)
-	}
-	got := e.list(alice, "")
-	if len(got) != 1 || got[0].ProfileID != own.ID {
-		t.Fatalf("fiş seçilen profile düşmeli: %+v", got)
-	}
-	// Aynı mail Bob'un adresine gelirse Bob'un hesabına yazılır; Alice'in kaydı mükerrer sayılmaz.
-	if st, out := e.mail(bob, map[string]any{"html": yemeksepetiHTML}); st != 200 || out["status"] != "created" {
-		t.Fatalf("bob: %d %v", st, out)
-	}
-	if len(e.list(bob, "")) != 1 || len(e.list(alice, "")) != 1 {
-		t.Fatal("hesaplar izole olmalı")
-	}
-}
-
 func TestPGInboundGmailConfirmationIsNotAReceipt(t *testing.T) {
 	e := newXEnv(t)
 	e.enableInbound()
@@ -467,7 +481,8 @@ func TestPGInboundGmailConfirmationIsNotAReceipt(t *testing.T) {
 	e.want(code, 204, b, "süresi dolmuş onay")
 
 	// Adres yenilenince eski adrese ait (24 saat içindeki) onaylar da silinir: sihirbaz yeniden açılsa eski kod görünmez.
-	if _, err := e.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, code, link) VALUES ($1, '555666777', NULL)`, u); err != nil {
+	if _, err := e.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, profile_id, code, link)
+		VALUES ($1, (SELECT min(id) FROM expense.profiles WHERE user_id = $1), '555666777', NULL)`, u); err != nil {
 		t.Fatal(err)
 	}
 	code, b = e.as(u, "GET", "/inbound-address/confirmation", nil)

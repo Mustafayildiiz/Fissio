@@ -275,7 +275,7 @@ class SettingsPage extends StatelessWidget {
                     GroupedCard(
                       children: [
                         _row(context, LucideIcons.slidersHorizontal, 'Tercihler',
-                            () => _push(context, const PreferencesPage())),
+                            () => _push(context, PreferencesPage(app: inboundApp))),
                         // Bağımsız interaktif rehber: e-posta kurulum sihirbazı. "Yeni" rozeti sihirbaz/kart açılınca kaybolur.
                         const EmailImportSettingsRow(),
                         _row(context, LucideIcons.database, 'Veri Yönetimi',
