@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../services/deep_links.dart';
+import 'digital_import.dart';
 import '../widgets.dart';
 import 'home_page.dart';
 import 'receipts_page.dart';
@@ -23,24 +24,57 @@ class _ShellPageState extends State<ShellPage> {
   @override
   void initState() {
     super.initState();
-    appState.refresh();
+    // Oturum açma/açılış yenilemesinin hemen ardından yinelenmez. Build SIRASINDA başlatılmaz: yenileme `loading=true`
+    // bildirimini senkron yayar ve ağaçta önceki bir dalda appState dinleyen widget "setState during build" atardı.
+    Future.microtask(appState.refreshIfStale);
     // Ana ekran widget'ından gelen "hızlı tara" (fissio://scan): soğuk açılışta bekleyen istek ilk karede,
     // sıcak açılışta (arka plandan) geldiği anda tüketilir.
-    deepLinks.addListener(_maybeOpenScan);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenScan());
+    deepLinks.addListener(_maybeOpenDeepLink);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenDeepLink());
   }
 
   @override
   void dispose() {
-    deepLinks.removeListener(_maybeOpenScan);
+    deepLinks.removeListener(_maybeOpenDeepLink);
     _filter.dispose();
     super.dispose();
   }
 
-  void _maybeOpenScan() {
+  /// Bekleyen hızlı eylem: `fissio://scan` → kamera; `fissio://import-digital` ya da paylaşılan PDF → dijital fiş akışı.
+  void _maybeOpenDeepLink() {
     if (!mounted || !appState.loggedIn || appState.activeProfile == null) return;
-    if (!deepLinks.consumeScan()) return;
-    _addReceipt();
+    // Tarama zaten açıkken gelen "tara" yinelenen istektir: atılır (bekletilirse tarama fiş formuyla değişince
+    // yarım formun üstünde ikinci bir tarama sayfası açılırdı).
+    if (_scanOpen) deepLinks.consumeScan();
+    // Bir akış açıkken diğer istekleri TÜKETME: (ör. paylaşılan PDF yolu) bekler ve akış kapanınca işlenir; aksi halde
+    // sessizce kaybolurdu.
+    if (_scanOpen || _importOpen) return;
+    if (deepLinks.consumeScan()) {
+      _addReceipt();
+      return;
+    }
+    final imp = deepLinks.consumeImport();
+    if (imp != null) _importDigital(imp.path);
+  }
+
+  bool _importOpen = false;
+
+  /// Dijital fiş / PDF akışı (kamera sayfasına uğramadan): paylaşılan dosya varsa doğrudan okunur, yoksa seçici açılır.
+  Future<void> _importDigital(String? path) async {
+    // Widget'a art arda dokunulursa ikinci akış üst üste açılmasın.
+    if (_importOpen || _scanOpen) return;
+    _importOpen = true;
+    try {
+      await runDigitalImport(context, path: path);
+    } finally {
+      _importOpen = false;
+      _afterFlow();
+    }
+  }
+
+  /// Akış kapandı: o sırada gelip bekleyen hızlı eylem varsa şimdi açılır.
+  void _afterFlow() {
+    if (mounted && deepLinks.hasPendingAction) WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenDeepLink());
   }
 
   void _openCategory(int? categoryId) {
@@ -51,12 +85,14 @@ class _ShellPageState extends State<ShellPage> {
   bool _scanOpen = false;
 
   void _addReceipt() {
-    // Widget'a art arda dokunulursa ikinci bir tarama sayfası üst üste açılmasın.
-    if (_scanOpen) return;
+    // Widget'a art arda dokunulursa ikinci bir tarama sayfası üst üste açılmasın; dijital içe aktarma sürerken de
+    // açılmaz (ilerleme penceresinin üstüne binerdi).
+    if (_scanOpen || _importOpen) return;
     _scanOpen = true;
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const ScanPage()))
-        .whenComplete(() => _scanOpen = false);
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScanPage())).whenComplete(() {
+      _scanOpen = false;
+      _afterFlow();
+    });
   }
 
   @override

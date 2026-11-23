@@ -9,6 +9,7 @@ import '../profile_avatar.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'avatar_picker.dart';
+import 'profile_edit_page.dart';
 import 'shell_page.dart';
 
 /// "Profil seçin": 2'li kare kartlar ve kesikli çerçeveli "Yeni profil" kartı.
@@ -39,7 +40,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       if (!mounted) return;
       _openShell();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busyId = null);
     }
@@ -52,35 +53,20 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
       hint: 'Örn: Ev, İş, Kişisel',
       confirmLabel: 'Oluştur',
     );
-    if (name == null || name.isEmpty) return;
+    if (name == null || name.isEmpty || !mounted) return;
     setState(() => _busyId = '__new__');
     try {
       await appState.createProfile(name);
       if (!mounted) return;
       _openShell();
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busyId = null);
     }
   }
 
-  Future<void> _renameDialog(Profile p) async {
-    final name = await showTextPrompt(
-      context,
-      title: 'Profili yeniden adlandır',
-      hint: 'Örn: Ev, İş, Kişisel',
-      initial: p.name,
-      confirmLabel: 'Kaydet',
-    );
-    if (name != null && name.isNotEmpty) {
-      try {
-        await appState.renameProfile(p.id, name);
-      } on ApiException catch (e) {
-        if (mounted) showMessage(context, e.message);
-      }
-    }
-  }
+  Future<void> _renameDialog(Profile p) => renameProfileWithDialog(context, p);
 
   Future<void> _deleteProfile(Profile p) async {
     final ok = await showConfirmDialog(
@@ -94,7 +80,7 @@ class _ProfileSelectPageState extends State<ProfileSelectPage> {
     try {
       await appState.deleteProfile(p.id);
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     }
   }
 

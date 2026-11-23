@@ -1,0 +1,96 @@
+{
+  "expect": {
+    "amount": 1423.28,
+    "date": null,
+    "discount_total": 0,
+    "item_count": 20,
+    "items": [
+      {
+        "name": "EYIDOGLUGRECEL700",
+        "amount": 69.99
+      },
+      {
+        "name": "ORSAN KASAR PEYNR TAM YA",
+        "amount": 139.9
+      },
+      {
+        "name": "EBEL YESIL CIZIK ZEYTIN K",
+        "amount": 49.99
+      },
+      {
+        "name": "JLKER COKOMELPOFTIDEV SAX",
+        "amount": 14.97
+      },
+      {
+        "name": "SAKIKOYXREMALIYAFLIB",
+        "amount": 34.99
+      },
+      {
+        "name": "3AY MARAS YOGURT 4KG",
+        "amount": 134.9
+      },
+      {
+        "name": "UMURTA30LU-L 11",
+        "amount": 134.9
+      },
+      {
+        "name": "IRMACISIYAH AYCEKIROEGI",
+        "amount": 49.99
+      },
+      {
+        "name": "1NERO110GR18 x1",
+        "amount": 27
+      },
+      {
+        "name": "FURP x1",
+        "amount": 19.8
+      },
+      {
+        "name": "XOMATES.1",
+        "amount": 90.57
+      },
+      {
+        "name": "EMER PATLICAN",
+        "amount": 47.49
+      },
+      {
+        "name": "HAR_1",
+        "amount": 77.9
+      },
+      {
+        "name": "ELMA1 11",
+        "amount": 54.79
+      },
+      {
+        "name": "LISKA SOGAN x1",
+        "amount": 25.61
+      },
+      {
+        "name": "HAVUC",
+        "amount": 18.76
+      },
+      {
+        "name": "ATATESTAZE 11",
+        "amount": 44.03
+      },
+      {
+        "name": "IYVA 12",
+        "amount": 37.91
+      },
+      {
+        "name": "SUZ_YERL 11",
+        "amount": 38.42
+      },
+      {
+        "name": "HANDALIN_1",
+        "amount": 64.29
+      }
+    ],
+    "merchant": "",
+    "needs_review": true
+  },
+  "known_divergence": [],
+  "name": "manav_iptal",
+  "note": "Gercek PaddleOCR ciktisi (manav): miktar satiri kalemin USTUNDE (0,795 X 24,90 TL, sol kenar kirpik), '** IPTAL **' geri alma (KIVI) iptal edilen kalemle birlikte dusulur, baslik kirpik (isletme yok). Fiyati okunamayan 3 kalem eksik: needs_review.",
+  "text": "ORKU BANADACAM400GR 1%1 5669\nEYIDOGLUGRECEL700 69,99\nORSAN KASAR PEYNR TAM YA *139,90\nEBEL YESIL CIZIK ZEYTIN K *49,99\nXALF NEK CIGSUT3LT 66'56x\n3ADETX4.99TL\nJLKER COKOMELPOFTIDEV SAX *14,97\nSAKIKOYXREMALIYAFLIB 34,99\n3AY MARAS YOGURT 4KG 134,90\nUMURTA30LU-L 11 *134.90\nIRMACISIYAH AYCEKIROEGI *49.99\nADETX13.50TL\n1NERO110GR18 x1 *27,00\n,795X24,90TL\nFURP x1 *19,80\n270X3990TL\nXOMATES.1 90,57\n.865X54.90\nEMER PATLICAN *47.49\n1735X44.90TL\nHAR_1 *77,90\n.570X34.90TL\nELMA1 11 *54,79\n1.025X24,99\nLISKA SOGAN x1 25,61\n.785X23.90TL\nHAVUC %1 18,76\n,955X14.90TL\nATATESTAZE 11 *44.03\n.950X39.90TL\nIYVA 12 37.91\n.770X89.90TL\nCIVA 1% *69,22\nIPTAL**\n-0.770X89,90TL\nKIVI 59,22\n770X49.90TL\nSUZ_YERL 11 *38,42\n,150.X2990TL\nHANDALIN_1 %1 *64,29\n.015X79,90TL\nHURRA_A 07'18x\nTOPKDY *14,09\nTOPLAM 1.423,28"
+}

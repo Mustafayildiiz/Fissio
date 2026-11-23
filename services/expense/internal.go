@@ -20,9 +20,12 @@ const internalTokenHeader = "X-Internal-Token"
 // semasina dokunmaz; bu liste yalnizca expense'e aittir.
 var userOwnedTables = []string{
 	"receipt_images",
+	"inbound_history", // expenses'a FK (SET NULL): fislerden once silinir
 	"expenses",
 	"category_rules",
 	"budgets",
+	"inbound_aliases",
+	"forwarding_confirmations",
 	"profiles",
 }
 

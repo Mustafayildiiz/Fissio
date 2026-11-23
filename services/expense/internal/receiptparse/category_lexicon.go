@@ -82,7 +82,7 @@ var lexicon = map[catKey]lexEntry{
 		items:  terms("kursunsuz, benzin, motorin, dizel, euro diesel, diesel, lpg, v power, adblue, otopark, taksi, hgs, ogs, yakit, akaryakit, otoyol, kopru, gecis ucreti, istanbulkart, jeton"),
 	},
 	keyFood: {
-		brands: terms("starbucks, mcdonald, mcdonalds, burger king, kfc, dominos, domino, popeyes, simit sarayi, kahve dunyasi, gloria jeans, caffe nero, tavuk dunyasi, baydoner, kafe, cafe, restoran, restaurant, lokanta, kebap, pizza, burger, doner, kofteci, ocakbasi, pastane, pastanesi, kafeterya, bufe, cigkofte, balikci, meyhane, kahvalti"),
+		brands: terms("uber eats, trendyol go, trendyolgo, yemeksepeti, getiryemek, starbucks, mcdonald, mcdonalds, burger king, kfc, dominos, domino, popeyes, simit sarayi, kahve dunyasi, gloria jeans, caffe nero, tavuk dunyasi, baydoner, kafe, cafe, restoran, restaurant, lokanta, kebap, pizza, burger, doner, kofteci, ocakbasi, pastane, pastanesi, kafeterya, bufe, cigkofte, balikci, meyhane, kahvalti"),
 		items:  terms("adana, urfa kebap, iskender, lahmacun, pide, kebap, doner, kofte, tantuni, corba, mercimek corbasi, servis, latte, espresso, cappuccino, americano, mocha, filtre kahve, frappe, cheesecake, tiramisu, sufle, baklava, kunefe, ayran, limonata, turk kahvesi, cay, kola, cola, su, gazoz, tatli, menu, porsiyon, tost, hamburger, cheeseburger, patates kizartmasi, nugget, pizza, sinitli, kahve, salata, tavuk sis, et doner, kanat, wrap, makarna, bira, pilav, ekmek arasi, sandvic, sandwich, cikolata sicak, sicak cikolata, hizmet bedeli, kuver, bahsis"),
 	},
 	keyHealth: {

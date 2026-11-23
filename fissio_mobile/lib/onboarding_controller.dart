@@ -6,7 +6,7 @@ import 'theme_controller.dart' show PrefsStore, SecurePrefsStore;
 ///
 /// Tek bayrak tutulur: `onboarding_seen:<e-posta>` — o hesap kayıt sırasında akışı bir kez açtı;
 /// otomatik gösterim bir daha olmaz (tamamlansa da atlansa da, uygulama yeniden başlasa da).
-/// Ayarlar'daki "Tanıtım Rehberini Görüntüle" satırı her zaman görünür; durum bayrağına bağlı değildir.
+/// Ayarlar'daki "Uygulama Rehberi / Tanıtımı" satırı her zaman görünür; durum bayrağına bağlı değildir.
 ///
 /// Giriş (login) ve oturum geri yükleme bu denetleyiciye hiç dokunmaz → onboarding açılmaz.
 class OnboardingController extends ChangeNotifier {

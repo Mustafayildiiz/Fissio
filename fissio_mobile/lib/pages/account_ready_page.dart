@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../app_state.dart';
 import '../onboarding_controller.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -11,15 +12,31 @@ import 'profile_select_page.dart';
 /// Doğrulama sonrası "Hesap hazır" (tasarım 1e). İlk profil ("Kişisel") sunucuda otomatik oluşturulur;
 /// profil seçiminde kendi profillerini ekleyip yönetebilir. İlk kayıtta tanıtım (onboarding) gösterilir.
 class AccountReadyPage extends StatelessWidget {
-  const AccountReadyPage({super.key, this.email});
+  const AccountReadyPage({super.key, this.email, this.app, this.onboarding});
   final String? email;
 
+  /// Verilmezse global [onboardingController] (testlerde sahte depolu denetleyici verilir).
+  final OnboardingController? onboarding;
+
+  /// Verilmezse global [appState].
+  final AppState? app;
+
   Future<void> _continue(BuildContext context) async {
-    final showOnboarding = await onboardingController.shouldShowAfterSignUp(email);
+    final a = app ?? appState;
+    final showOnboarding = await (onboarding ?? onboardingController).shouldShowAfterSignUp(email);
+    // E-posta adımı: yalnızca bulut senkronu açık ve sunucuda özellik yapılandırılmışsa. Karar sayfa AÇILMADAN verilir (adım
+    // sayacı akış boyunca sabit kalır); aynı çağrı kullanıcının yönlendirme adresini de (yoksa) üretir.
+    var emailStep = false;
+    if (showOnboarding) {
+      await a.loadInbound();
+      emailStep = a.emailImportAvailable;
+    }
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
-        builder: (_) => showOnboarding ? OnboardingPage(email: email) : const ProfileSelectPage(),
+        builder: (_) => showOnboarding
+            ? OnboardingPage(controller: onboarding, email: email, includeEmailStep: emailStep, app: app)
+            : const ProfileSelectPage(),
       ),
       (_) => false,
     );

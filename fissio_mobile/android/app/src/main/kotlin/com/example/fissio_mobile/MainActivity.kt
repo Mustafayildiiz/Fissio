@@ -4,11 +4,16 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
+    private var shareChannel: MethodChannel? = null
+
     /**
      * Uygulama arka plandayken (ya da süreci sistem tarafından öldürülmüşken) widget'a dokunulunca görev zaten
      * vardır ve `singleTop` yüzünden yeni intent [onNewIntent]'e gelir. `Activity.getIntent()` güncellenmezse
@@ -18,10 +23,99 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // Uygulama açıkken başka bir uygulamadan "Paylaş → Fissio" ile PDF/.eml/HTML geldi: Dart tarafına yerel yolu ilet.
+        extractSharedFile(intent)?.let { path ->
+            shareChannel?.invokeMethod("onFile", path)
+            clearSharedIntent()
+        }
+    }
+
+    /**
+     * "Paylaş → Fissio" (ACTION_SEND) ve "Birlikte aç" (ACTION_VIEW) ile gelen dijital fişi (PDF, .eml e-posta ya da HTML
+     * sipariş özeti) uygulama önbelleğine kopyalar ve yerel yolunu döner (yoksa null). Önbellek dosyasının UZANTISI MIME türünden
+     * gelir (.pdf / .eml / .html): Dart tarafı dosyayı uzantısına göre ayrıştırır. Dosya hiçbir yere gönderilmez; okuma cihaz
+     * içidir. 20 MB üstü ve desteklenmeyen türler reddedilir. Eski kopyalar (>1 gün) silinir.
+     *
+     * `ACTION_SEND` + `text/html` çoğu zaman `EXTRA_STREAM` olmadan, HTML'i `EXTRA_HTML_TEXT` / `EXTRA_TEXT` içinde taşır: bu
+     * durumda metin `.html` dosyasına yazılır.
+     */
+    private fun extractSharedFile(intent: Intent?): String? {
+        if (intent == null) return null
+        val uri: Uri? = when (intent.action) {
+            Intent.ACTION_SEND ->
+                if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            Intent.ACTION_VIEW -> intent.data
+            else -> null
+        }
+        if (uri?.scheme == "fissio") return null
+        return try {
+            val type = (intent.type ?: uri?.let { contentResolver.getType(it) })?.lowercase()
+            val ext = SHARED_TYPES[type] ?: return null
+            val dir = File(cacheDir, "shared").apply { mkdirs() }
+            val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+            dir.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
+            val out = File(dir, "shared_${System.currentTimeMillis()}.$ext")
+            if (uri == null) {
+                // Akış yok: HTML gövde metin olarak gelmiştir.
+                if (intent.action != Intent.ACTION_SEND || ext != "html") return null
+                val body = intent.getStringExtra(Intent.EXTRA_HTML_TEXT) ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                if (body.isNullOrBlank()) return null
+                val bytes = body.toByteArray(Charsets.UTF_8)
+                if (bytes.size > MAX_SHARED_BYTES) return null
+                out.writeBytes(bytes)
+                return out.absolutePath
+            }
+            var total = 0L
+            contentResolver.openInputStream(uri)?.use { input ->
+                out.outputStream().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        total += n
+                        if (total > MAX_SHARED_BYTES) {
+                            out.delete()
+                            return null
+                        }
+                        output.write(buf, 0, n)
+                    }
+                }
+            } ?: return null
+            out.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Tüketilen paylaşım intent'i yeniden işlenmesin (ekran dönmesi / yeniden oluşturma). */
+    private fun clearSharedIntent() {
+        setIntent(Intent(intent).apply {
+            action = Intent.ACTION_MAIN
+            data = null
+            type = null
+            removeExtra(Intent.EXTRA_STREAM)
+            removeExtra(Intent.EXTRA_TEXT)
+            removeExtra(Intent.EXTRA_HTML_TEXT)
+        })
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        PdfChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL).also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // Soğuk açılış: uygulama paylaşılan dosyayla (PDF/.eml/HTML) başlatıldıysa yolu ver (bir kez).
+                    "getInitialFile" -> {
+                        val path = extractSharedFile(intent)
+                        if (path != null) clearSharedIntent()
+                        result.success(path)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "supported" -> result.success(!isDebuggable())
@@ -82,7 +176,16 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        /** Paylaşım ile kabul edilen MIME türleri → önbellek dosyası uzantısı (AndroidManifest filtreleriyle aynı küme). */
+        private val SHARED_TYPES = mapOf(
+            "application/pdf" to "pdf",
+            "message/rfc822" to "eml",
+            "text/html" to "html",
+        )
+
         const val CHANNEL = "fissio/launcher_icon"
+        const val SHARE_CHANNEL = "fissio/share_intent"
+        const val MAX_SHARED_BYTES = 20L * 1024 * 1024
 
         /** Dart tarafındaki `kBrandPalette` anahtarları → başlatıcı girişi (bileşen) adları. */
         val ALIASES = mapOf(

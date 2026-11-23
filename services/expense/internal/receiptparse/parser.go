@@ -80,14 +80,25 @@ var (
 	)
 	amountRe = regexp.MustCompile(`(?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2}\b`)
 	// Etiketle yapisik yazilan tarihler de (TARIH12.12.2019) yakalansin: \b yerine rakam-olmayan sinir.
-	dateRe = regexp.MustCompile(`(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$)`)
+	// Saat tarihe bosluksuz yapisik olabilir ("18/10/202617:06"): yilin ardindan SS:DD de kabul edilir.
+	dateRe = regexp.MustCompile(`(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$|\d{2}:\d{2})`)
+	// Tutara yapisik para birimi: "5.00t" (TL simgesi OCR'da t), "24,90TL", "5,00₺" -> "5.00" / "24,90".
+	currencySuffixRe = regexp.MustCompile(`(\d[.,]\d{2})(?:TL|tl|[tT₺])\b`)
+	// Satir SONUNDA ondaliksiz tutar + acik para birimi: "355TRY", "665 TRY", "-310 TRY", "1.250 TL" -> "355,00" ...
+	// (dijital fis/e-posta tablolari). Satir sonu sarti "10 TL indirim kuponu" gibi aciklamalari bozmaz; ondalikli
+	// bicimler currencySuffixRe'nin isidir. Grup 1 = onceki karakter (rakam/nokta/virgul OLAMAZ), grup 2 = tutar.
+	intCurrencyRe = regexp.MustCompile(`(?i)(^|[^\d.,])(-?(?:\d{1,3}(?:\.\d{3})+|\d+))\s?(?:TRY|TL|₺)\s*$`)
+	// Urun satiri izi: KDV orani sutunu (%08, x08) ya da satir sonunda tutar; baslik/isletme adi olamaz.
+	itemRowRe = regexp.MustCompile(`%\s*\d{1,2}|(?:^|\s)[xX]\d{2}\b|\d[.,]\d{2}\s*[*tT₺]?\s*$`)
 	// OCR ondalik ayiraci sonrasina bosluk koyabilir ("+24, 90" -> "24,90").
 	spacedDecimalRe = regexp.MustCompile(`(\d[.,])\s(\d{2})\b`)
 	// Adet/miktar satiri: "4Adt X 0,90", "3 X 1,00", "4AdtX0.90", OCR bozugu "3A0.25",
 	// "2 ADET X 15,00 = 30,00", "0,535 KG X 89,90". Grup 1 = miktar, grup 2 = birim fiyat.
 	// BIM'de kalemden ONCE, bircok fiste ad satirinin ALTINDA gelir. Birimli (KG/GR/LT) ve "*"
 	// bicimlerinde carpi isareti zorunludur ("1L SUT", "08 *3,95" adet satiri sanilmasin).
-	qtyPrefixRe = regexp.MustCompile(`(?i)^\s*(\d+(?:[.,]\d{1,3})?)\s*(?:(?:adet|adt|ad|ag|a)\.?\s*[x×*]?|(?:kg|kq|gr|g|lt|l)\.?\s*[x×*]|[x×])\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})`)
+	// Sol kenari kirpilmis fislerde miktar rakami dusebilir ("ADET X 13,50 TL"): sayi yalniz "adet/adt + x"
+	// biciminde istege baglidir (grup 1 bos kalir, miktar bilinmez).
+	qtyPrefixRe = regexp.MustCompile(`(?i)^\s*(?:(\d+(?:[.,]\d{1,3})?)\s*(?:(?:adet|adt|ad|ag|a)\.?\s*[x×*]?|(?:kg|kq|k9|gr|g|lt|l)\.?\s*[x×*]|[x×])|(?:adet|adt)\.?\s*[x×*])\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})`)
 	// Kalem adi sonundaki KDV orani ve sutun kalintilari (%08, 08, 808, 80%, %18, *).
 	trailingXRe = regexp.MustCompile(`(?i)\s+x$`)
 	// Ondalik ayiraci dusmus tutar: "%08 *070" -> 0,70; "%08 100" -> 1,00 (satirsonu, 3-4 hane).
@@ -144,6 +155,10 @@ func ParseWith(text string, cats []Category, now time.Time, opts ParseOptions) P
 	}
 	res.Items = recoverBareAmounts(res.Items, bare, res.Amount, discount)
 	o := reconcile(res.Items, res.Amount, discount, skipped)
+	if o.needsReview && res.Amount != nil && vatExcludedItems(lines, o.items, o.discount, *res.Amount) {
+		// E-fatura: kalem tutarlari KDV'siz; toplam = kalemler + KDV ve "Odenecek Tutar" etiketli. Uyusmazlik degil.
+		o.needsReview, o.itemsTotal, o.info = false, nil, &Reconciliation{Status: recOK, Reason: "items_exclude_vat"}
+	}
 	res.Items, res.NeedsReview, res.ItemsTotal, res.Reconciliation = o.items, o.needsReview, o.itemsTotal, o.info
 	if o.discount > 0 {
 		res.DiscountTotal = ptr(o.discount)
@@ -159,7 +174,9 @@ func ParseWith(text string, cats []Category, now time.Time, opts ParseOptions) P
 func splitLines(text string) []string {
 	var out []string
 	for _, l := range strings.Split(strings.ReplaceAll(text, "\r", ""), "\n") {
-		if l = strings.TrimSpace(fixTurkishGlyphs(spacedDecimalRe.ReplaceAllString(l, "$1$2"))); l != "" {
+		l = currencySuffixRe.ReplaceAllString(spacedDecimalRe.ReplaceAllString(l, "$1$2"), "$1")
+		l = intCurrencyRe.ReplaceAllString(l, "${1}${2},00")
+		if l = strings.TrimSpace(fixTurkishGlyphs(l)); l != "" {
 			out = append(out, l)
 		}
 	}
@@ -225,6 +242,20 @@ func extractAmount(lines []string) (float64, float64, bool) {
 					return a[len(a)-1], tier.conf - 0.1, true
 				}
 			}
+			// Uygulama fislerinde (Toplam:) tutar etiketin ustune yerlesebilir: yalnizca tutardan
+			// olusan onceki satir da etiketin degeridir.
+			if i > 0 && isAmountOnlyLine(lines[i-1]) {
+				if a := amountsIn(lines[i-1]); len(a) == 1 {
+					return a[0], tier.conf - 0.2, true
+				}
+			}
+			// Sutunlar yer degistirmis: KDV satiri hem KDV'yi hem toplami tasir ("TOPKDV 307.85 22,79" + bos
+			// "TOPLAM"). KDV toplamdan cok kucuktur (en fazla ~%20): buyuk tutar toplamdir.
+			if i > 0 && isKDVLine(lines[i-1]) {
+				if hi, _, ok := vatAndTotal(amountsIn(lines[i-1])); ok {
+					return hi, tier.conf - 0.2, true
+				}
+			}
 		}
 	}
 	// Son care: KDV/yuzde satirlari disindaki en buyuk tutar.
@@ -241,6 +272,25 @@ func extractAmount(lines []string) (float64, float64, bool) {
 		}
 	}
 	return best, 0.3, found
+}
+
+// vatAndTotal, iki tutardan buyugu (toplam) ve kucugu (KDV) dondurur; buyuk >= 5 x kucuk degilse ok=false.
+func vatAndTotal(a []float64) (hi, lo float64, ok bool) {
+	if len(a) != 2 {
+		return 0, 0, false
+	}
+	hi, lo = math.Max(a[0], a[1]), math.Min(a[0], a[1])
+	return hi, lo, lo > 0 && hi >= lo*5
+}
+
+// isAmountOnlyLine, satirin yalnizca bir tutardan (ve "*", "TL" gibi sutun isaretlerinden) olustugunu soyler.
+func isAmountOnlyLine(l string) bool {
+	m := amountRe.FindAllStringIndex(l, -1)
+	if len(m) != 1 {
+		return false
+	}
+	rest := l[:m[0][0]] + l[m[0][1]:]
+	return strings.Trim(rest, " *+$=:-") == ""
 }
 
 func extractDate(lines []string, now time.Time) (string, bool) {
@@ -268,6 +318,9 @@ var skipMerchantWords = []string{"elektrik", "kesildi", "eku", "fis", "tarih", "
 func extractMerchant(header []string, cats []Category) (string, float64) {
 	// Bilinen bir marka anahtar kelimesi iceren ilk satir en guvenilir adaydir.
 	for _, l := range header {
+		if itemRowRe.MatchString(l) {
+			continue // urun satiri ("KASAR PEYNIR %01 *139,90") marka eslesmesinden de dislanir
+		}
 		f := FoldTR(l)
 		for _, c := range cats {
 			for _, kw := range c.Keywords {
@@ -288,6 +341,9 @@ func extractMerchant(header []string, cats []Category) (string, float64) {
 		}
 		if isStarBanner(l) {
 			continue // "** ELEKTRIK KESILDI **" gibi bilgi satirlari isletme adi degildir
+		}
+		if itemRowRe.MatchString(l) {
+			break // baslik bitti (kirpilmis fiste ilk urun satiri): sonraki satirlar isletme adi olamaz
 		}
 		letters, digits := 0, 0
 		for _, r := range l {
@@ -395,14 +451,30 @@ func extractItemsWithBare(lines []string, totalAmount *float64) ([]Item, []bareC
 	var cands []bareCandidate
 	var skipped []Item
 	pendingName := "" // ustteki satir yalnizca urun adi (alttaki adet satirinin kalemi olabilir)
+	rev := reversalLines(lines)
 	for li, l := range lines {
 		if isTotalLabel(l) {
 			break // Toplam satirindan sonrasi odeme/alt bilgi
 		}
+		if isCancelMarker(l) {
+			pendingName = "" // "** IPTAL **" bir urun adi degildir
+			continue
+		}
+		if rev[li] {
+			// Geri alma satiri ("KIVI *-69,22"): kalem eklenmez, iptal edilen onceki kalem dusulur.
+			if name, v, ok := nameAndAmount(l); ok {
+				items = applyReversal(items, name, v)
+			}
+			pendingName = ""
+			continue
+		}
 		pending := pendingName
 		pendingName = ""
 		if q := qtyPrefixRe.FindStringSubmatchIndex(l); q != nil {
-			qty, _ := strconv.ParseFloat(strings.ReplaceAll(l[q[2]:q[3]], ",", "."), 64)
+			qty := 0.0
+			if q[2] >= 0 {
+				qty, _ = strconv.ParseFloat(strings.ReplaceAll(l[q[2]:q[3]], ",", "."), 64)
+			}
 			unit, _ := parseAmount(l[q[4]:q[5]])
 			rest := strings.TrimSpace(l[q[1]:])
 			if m := amountRe.FindAllStringIndex(maskDates(rest), -1); len(m) > 0 &&

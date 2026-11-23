@@ -39,7 +39,10 @@ components:
           description: >-
             Makine okunur kod: unauthorized, session_revoked (401); auth_unavailable (503, expense auth'a ulaşamıyor,
             `Retry-After`); internal (500); conflict (409, `PUT /expenses/{id}` eşzamanlılık); scan_busy | scan_rate (429,
-            tarama sınırı, `Retry-After`); ocr_unavailable (502, tüm sayfalar okunamadı). Bazı uçlar ek koda sahiptir.
+            tarama sınırı, `Retry-After`); ocr_unavailable (502, tüm sayfalar okunamadı); duplicate_document (409,
+            `POST|PUT /expenses`: aynı dijital fatura `document_no` zaten ekli); duplicate_order (409, aynı `order_id` + aynı
+            belge türü zaten ekli); document_locked (409, `PUT /expenses/{id}`: kayıt zaten başka bir `document_no`'ya bağlı —
+            resmi kayıt kilitlidir). Bazı uçlar ek koda sahiptir.
     Credentials:
       type: object
       required: [email, password]
@@ -84,6 +87,7 @@ components:
       properties:
         created: { type: integer }
         skipped: { type: integer, description: client_uid zaten kayıtlı olanlar (mükerrer oluşturulmaz) }
+        merged: { type: integer, description: 'Resmi fatura mevcut bir ön özet kaydına birleştirildi (sonuçta id = hedef kayıt)' }
         failed: { type: integer }
         results:
           type: array
@@ -92,9 +96,19 @@ components:
             properties:
               index: { type: integer }
               client_uid: { type: string }
-              status: { type: string, enum: [created, skipped, error] }
+              status: { type: string, enum: [created, skipped, merged, error] }
               id: { type: integer, format: int64 }
               error: { type: string }
+    InboundAddress:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean, description: 'false = sunucuda e-posta aktarımı yapılandırılmamış (INBOUND_EMAIL_DOMAIN boş); diğer alanlar yok' }
+        address: { type: string, example: 'k3j9x2m4q7p1w8zt@fis.fissio.app', description: Kullanıcıya özel, tahmin edilemez yönlendirme adresi }
+        profile_id: { type: integer, format: int64, description: 'Aktarılan fişlerin düşeceği profil; yoksa en eski/varsayılan profil' }
+        last_received_at: { type: string, format: date-time, description: 'Alias geçerli olan SON mailin zamanı (fiş oluşsun, yok sayılsın, mükerrer çıksın ya da hata alsın); Gmail yönlendirme onay maili sayılmaz' }
+        last_status: { type: string, description: 'created | merged | duplicate_document | duplicate_order | gmail_confirmation | ignored:<neden> (paused, rate_limited, too_large, unreadable_payload, unknown_category, gmail_confirmation_unreadable, …) | failed:<kod> (ör. failed:internal; ayrıntı geçmişteki reason alanında)' }
+        paused: { type: boolean, description: 'true = aktarım duraklatıldı; gelen mailler fişe dönüşmez (alan yoksa false)' }
     Item:
       type: object
       description: >-
@@ -180,6 +194,41 @@ components:
             Fişi okuyan OCR motoru (`paddleocr`, `custom`, cihaz içi Google ML Kit için `mlkit`); yalnızca bilgi
             amaçlıdır. Küçük harfe çevrilir; biçime uymayan değer 400 döner. Yok/null/boş = manuel girilen ya da eski
             kayıt: oluşturmada NULL yazılır, PUT'ta mevcut değer KORUNUR (alanı atlayan düzenleme silmez).
+            Dijital fatura (PDF) ayrıştırıcısı için `pdf`.
+        document_no:
+          type: string
+          nullable: true
+          example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+          pattern: '^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]{10,11}_[A-Z0-9-]{3,32})$'
+          description: >-
+            Dijital fatura kimliği: YALNIZCA 36 karakterli standart ETTN UUID'si (küçük harf) ya da `VKN_FaturaNo`
+            birleşimi (10/11 haneli VKN/TCKN + `_` + fatura no, büyük harf). Kısa fiş/sipariş/Z numaraları kabul
+            edilmez (400 `invalid document_no`). Hesap içinde tekildir: aynı belge ikinci kez eklenirse 409
+            `duplicate_document` (toplu yüklemede o kalem `error: duplicate_document`). Yok/null/boş = belge numarası
+            yok: oluşturmada NULL, PUT'ta mevcut değer KORUNUR.
+        order_id:
+          type: string
+          nullable: true
+          example: GPA.3345-1234-5678-12345
+          pattern: '^[A-Z0-9][A-Z0-9.-]{3,40}$'
+          description: >-
+            Platform sipariş kodu (Yemeksepeti, Trendyol, Google Play, Spotify…); metin/HTML/PDF'te YALNIZCA etiketli
+            ("Sipariş No", "Order ID"…) değer olarak çıkarılır, büyük harfe çevrilir (biçime uymayan değer 400
+            `invalid order_id`). Hesap içinde (`order_id`, belge türü) tekildir: aynı sipariş + aynı tür ikinci kez
+            eklenirse 409 `duplicate_order`. Yok/null/boş = yok: oluşturmada NULL, PUT'ta mevcut değer KORUNUR.
+        has_official_invoice:
+          type: boolean
+          readOnly: true
+          description: >-
+            Kayıt resmi bir E-Arşiv/E-Fatura belgesine dayanıyor mu: `document_no` doluysa true (sunucu türetir; istekte
+            gönderilirse yok sayılır). **Akıllı birleştirme:** `document_no` ya da `order_id` taşıyan bir fiş
+            `POST /expenses`, `/expenses/bulk` veya e-posta webhook'u ile geldiğinde (1) aynı `document_no` ya da aynı
+            `order_id`+aynı tür → mükerrer (409 / bulk `error`), (2) resmi (`document_no`'lu) belge, resmi bağlanmamış TEK
+            bir ön özete `order_id` ile (yoksa aynı işletme + aynı tutar + ±3 gün + kalem benzerliğiyle) eşleşirse yeni
+            kayıt açılmaz: ön özet güncellenir (`document_no`, boşsa `order_id`, `amount`, kalem yoksa kalemler) ve
+            `has_official_invoice=true` ile kilitlenir (200, `status: merged`, id = hedef). Farklı `order_id`, ön özet
+            gelen belge ya da birden fazla aday asla birleşmez. Birleştirilen isteğin `client_uid`'si hedefte saklanır: yanıtı
+            kaybolan isteğin tekrarı aynı hedefe `merged` olarak çözülür (hata değil, ikinci güncelleme değil).
         items:
           type: array
           items: { $ref: '#/components/schemas/Item' }
@@ -731,6 +780,143 @@ paths:
       responses:
         '200': { description: Sonuç, content: { application/json: { schema: { $ref: '#/components/schemas/BulkResult' } } } }
         '400': { description: Boş veya 500 den fazla }
+  /inbound-address:
+    get:
+      tags: [expense]
+      summary: Kullanıcıya özel e-posta yönlendirme adresi (yoksa üretilir)
+      description: >-
+        E-faturalarını Gmail/Outlook filtresiyle ya da "İlet (Forward)" ile bu adrese gönderen kullanıcının fişleri
+        otomatik kaydedilir. Sunucuda `INBOUND_EMAIL_DOMAIN` boşsa `{ enabled: false }` döner (404 değil).
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Adres ve son aktarım durumu, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+    put:
+      tags: [expense]
+      summary: Aktarılan fişlerin düşeceği profili seç
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile_id: { type: integer, format: int64, description: '0/yok = en eski/varsayılan profil' }
+      responses:
+        '200': { description: Güncel durum, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+        '404': { description: Profil yok veya başka hesaba ait }
+  /inbound-address/rotate:
+    post:
+      tags: [expense]
+      summary: Adresi yenile (eski adres hemen geçersiz olur)
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Yeni adres, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+  /inbound-address/pause:
+    post:
+      tags: [expense]
+      summary: Aktarımı geçici duraklat (adres ve geçmiş korunur)
+      description: >-
+        Duraklatılmış adrese gelen mailler fişe dönüşmez; `inbound_history`'ye `status=ignored`, `reason=paused` yazılır.
+        İdempotenttir. Yenileme (`rotate`) duraklatmayı kaldırır.
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Güncel durum (`paused: true`), content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+  /inbound-address/resume:
+    post:
+      tags: [expense]
+      summary: Duraklatılmış aktarımı sürdür
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Güncel durum, content: { application/json: { schema: { $ref: '#/components/schemas/InboundAddress' } } } }
+  /inbound-address/confirmation:
+    get:
+      tags: [expense]
+      summary: Son Gmail yönlendirme onay kodu/bağlantısı
+      description: >-
+        Kullanıcı Gmail'de yönlendirme adresini eklediğinde Google'ın `forwarding-noreply@google.com`'dan gönderdiği onay
+        maili fiş olarak kaydedilmez; kod ve (yalnızca Google ana makinelerine ait) onay bağlantısı son 24 saat boyunca
+        buradan çekilir. Mobil sihirbaz bu ucu yoklar.
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Onay
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: '123456789', description: Onay kodu (mailde kod yoksa alan yok) }
+                  link: { type: string, description: Doğrulanmış Google onay bağlantısı (yoksa alan yok) }
+                  received_at: { type: string, format: date-time }
+        '204': { description: Bekleyen onay yok }
+  /inbound-address/history:
+    get:
+      tags: [expense]
+      summary: Son aktarılan e-postalar (aktarım geçmişi)
+      description: >-
+        Webhook'a gelen her mailin akıbeti, yeniden eskiye; kullanıcı başına son 50 kayıt tutulur. Mail gövdesi ve ekleri
+        saklanmaz; yalnızca gönderici, konu, durum (`saved` | `ignored` | `failed`), neden (`created`, `merged`,
+        `no_amount`, `pdf_unreadable`, `rate_limited`, `paused`, `gmail_confirmation`, `duplicate_document`, `duplicate_order`,
+        `already_imported`…) ve varsa ilgili fiş (`expense_id`). `INBOUND_EMAIL_DOMAIN` boşsa `{ enabled: false, items: [] }`.
+      security: [{ bearer: [] }]
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: Geçmiş
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, format: int64 }
+                        source: { type: string, example: email }
+                        from: { type: string }
+                        subject: { type: string }
+                        received_at: { type: string, format: date-time }
+                        status: { type: string, enum: [saved, ignored, failed] }
+                        reason: { type: string }
+                        expense_id: { type: integer, format: int64, description: Kaydedilen/eşleşen fiş (yoksa alan yok) }
+  /webhooks/inbound-email:
+    post:
+      tags: [expense]
+      summary: Harici posta yönlendiricisinden gelen e-posta (webhook)
+      description: >-
+        Cloudflare Email Worker / Mailgun / SendGrid benzeri bir yönlendiricinin çağırdığı, JWT'siz uç; `X-Webhook-Secret`
+        (INBOUND_WEBHOOK_SECRET) ile korunur. Gövde: JSON (`to|recipient|envelope.to`, `from`, `subject`, `text`, `html`,
+        `raw` / `raw_base64` (MIME), `attachments[{filename, content_type, content_base64}]`), multipart/form-data
+        (Mailgun `recipient`, `body-mime`, `body-html`, `body-plain`; SendGrid `email`, `envelope`) ya da ham
+        `message/rfc822` (`?rcpt=`; büyük ekli mailler için önerilen yol — hazır Cloudflare Worker: docs/cloudflare-email-worker.js). Alias, ZARF alıcısından çözülür (otomatik yönlendirmede `To:` kullanıcının kendi
+        adresidir), sonra `Delivered-To`/`X-Original-To`/`To`/`Cc`. Kaynak önceliği: UBL-TR `.xml` eki (e-Fatura/e-Arşiv;
+        zip içindeki dahil; satıcı, tarih, ödenecek tutar ve kalemler yapılandırılmış okunur) > PDF eki (metin katmanı) >
+        HTML gövde (platform sipariş tablolarından ad/adet/tutar kalemleri dahil) > düz metin; mail tek fiş olarak
+        kaydedilir. Metinsiz (taranmış) PDF OCR'a gönderilmez. "İlet" önsözü atılır. Gmail onay maili fiş olmaz. Bilinmeyen alias, okunamayan
+        mail ve mükerrer belge hata DEĞİLDİR: 200 `{status: ignored|duplicate}` (yeniden deneme fırtınası ve alias sızdırma
+        olmasın). Yalnızca yanlış secret 401, aşırı boyut 413. Boyut bildirimi: yönlendirici sınırı aşan maili göndermek
+        yerine `{to, from, subject, rejected: "too_large", size}` JSON'u gönderebilir (başlıklar RFC 2047 olabilir,
+        sunucu çözer); alias geçerliyse geçmişe `ignored/too_large` yazılır, yanıt 200 `ignored`. 413 ya da okunamayan
+        gövdede de `?rcpt=` geçerli bir alias'a aitse geçmişe `too_large` / `unreadable_payload` yazılır.
+      security: []
+      responses:
+        '200':
+          description: 'status: created | merged | duplicate (reason: duplicate_document | duplicate_order | already_imported) | confirmation | ignored'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [created, merged, duplicate, confirmation, ignored] }
+                  id: { type: integer, format: int64 }
+                  reason: { type: string }
+        '401': { description: Secret yok/yanlış }
+        '413': { description: "Gövde INBOUND_MAX_BYTES'tan büyük (?rcpt= geçerli alias ise geçmişe too_large yazılır)" }
   /categories:
     get:
       tags: [expense]
@@ -968,8 +1154,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Expense' }
-        '200': { description: Aynı client_uid ile fiş zaten kayıtlı; mevcut kayıt döner (mükerrer oluşmaz) }
+        '200': { description: 'Aynı client_uid ile fiş zaten kayıtlı; mevcut kayıt döner (mükerrer oluşmaz). Ya da resmi fatura mevcut bir ön özete birleştirildi: gövdede status: merged, id = hedef kayıt' }
         '404': { description: profile_id hesaba ait değil }
+        '409': { description: 'Aynı dijital fatura (`document_no`) bu hesapta zaten ekli (`code: duplicate_document`) ya da aynı sipariş + aynı belge türü zaten ekli (`code: duplicate_order`)' }
   /expenses/ids:
     get:
       tags: [expense]
@@ -1063,7 +1250,10 @@ paths:
         '200': { description: Güncellendi }
         '404': { description: Bulunamadı }
         '409':
-          description: 'Kayıt başka yerde değişti (`code: conflict`); gövdede `current` = sunucudaki güncel fiş'
+          description: >-
+            Kayıt başka yerde değişti (`code: conflict`; gövdede `current` = sunucudaki güncel fiş) ya da `document_no`
+            hesaptaki başka bir fişte zaten var (`code: duplicate_document`) ya da `order_id` + belge türü başka fişte var (`code: duplicate_order`) ya da kayıt zaten FARKLI bir `document_no`'ya bağlı
+            (`code: document_locked`; aynı değeri yeniden göndermek ya da alanı atlamak serbesttir)
           content:
             application/json:
               schema:

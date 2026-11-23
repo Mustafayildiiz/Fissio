@@ -144,10 +144,11 @@ func extractSummary(lines []string) (ReceiptSummary, float64) {
 		}
 		return a[len(a)-1], true
 	}
+	rev := reversalLines(lines)
 	for i, l := range lines {
 		v, ok := last(l)
-		if !ok {
-			continue
+		if !ok || rev[i] {
+			continue // iptal geri alma satiri indirim degildir (kalem olarak dusulur)
 		}
 		switch {
 		case isDiscountLine(l):

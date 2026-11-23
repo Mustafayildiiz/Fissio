@@ -36,6 +36,13 @@ class InfoTexts {
           'okunur. Okunan alanları kaydetmeden önce her zaman kontrol edip düzeltebilirsin.',
     ),
     InfoSection(
+      'E-posta ile otomatik fiş aktarımı',
+      'Bulut senkronu açıkken sana özel, tahmin edilemez bir yönlendirme adresi (…@fissio.dev) verilir. E-fatura, '
+          'e-arşiv ve sipariş özeti maillerini bu adrese yönlendirdiğinde fişler kendiliğinden eklenir: ekteki UBL-TR XML '
+          'fatura, PDF eki ya da mail gövdesi (ürün adı, adet ve tutarlarıyla) okunur. Aktarılan e-postaları '
+          'Ayarlar > E-Posta ile Otomatik Fiş Aktarımı ekranındaki "Son Aktarılan E-Postalar" listesinden izleyebilirsin.',
+    ),
+    InfoSection(
       'Verilerin sende',
       'Fişlerini JSON veya CSV olarak dışa aktarabilir, yedekten geri yükleyebilirsin. Hesabını ve tüm verilerini '
           'dilediğin an kalıcı olarak silebilirsin.',
@@ -68,6 +75,16 @@ class InfoTexts {
           'pazarlama amacıyla kullanılmaz ve üçüncü kişilerle paylaşılmaz.',
     ),
     InfoSection(
+      'E-posta ile fiş aktarımı',
+      'İstersen sana özel @fissio.dev yönlendirme adresini açarsın; bu adrese gelen e-postalar YALNIZCA fiş/fatura '
+          'ayrıştırma amacıyla işlenir (tutar, tarih, işletme ve kalemler çıkarılır). Mail gövdesi ve ekleri (XML/PDF) '
+          'kaydedilmez; saklanan yalnızca ortaya çıkan fiş verisi ile "Son Aktarılan E-Postalar" geçmişidir: gönderici, '
+          'konu, tarih, durum ve ilgili fiş (son 50 kayıt). Gmail yönlendirme onay maili fiş sayılmaz; onay kodu '
+          'yalnızca kurulum için kısa süre tutulur. Adresin sızdığını düşünürsen "Adresi yenile" ile eskisini anında '
+          'geçersiz kılabilirsin. Adres, geçmiş ve aktarılan fişler hesabını sildiğinde de kalıcı olarak silinir. '
+          'Senkron kapalıyken adres kullanılamaz.',
+    ),
+    InfoSection(
       'Haklarınız (KVKK / GDPR)',
       'Verilerine erişme, düzeltme, dışa aktarma (JSON/CSV) ve silme hakkına sahipsin. Ayarlar > Hesap > '
           '"Hesabımı kalıcı olarak sil" ile hesabın, profillerin, fişlerin, fotoğrafların ve açık oturumların '
@@ -91,6 +108,12 @@ class InfoTexts {
       'Sorumluluk',
       'Uygulama resmi bir muhasebe, fatura veya vergi belgesi yerine geçmez. Hesabının güvenliğinden ve '
           'şifrenin gizliliğinden sen sorumlusun.',
+    ),
+    InfoSection(
+      'E-posta yönlendirme',
+      'Yönlendirme adresine yalnızca kendi fiş ve faturalarını ilet; başkalarına ait kişisel verileri içeren mailleri '
+          'göndermemelisin. Gmail/Outlook filtresini ve yönlendirmeyi sen kurar ve yönetirsin; adresin gizliliği sana '
+          'aittir. Otomatik okunan fişler hatalı olabilir; kaydedilen tutar, tarih ve kalemleri kontrol etmek sana aittir.',
     ),
   ];
 }

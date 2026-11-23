@@ -88,6 +88,7 @@ void main() {
     final reopened = Harness(backend: h.backend, prefs: h.prefs, local: h.local);
     final full = h.backend.fullListCalls;
     expect(await reopened.app.restoreSession(), isTrue);
+    await reopened.app.restoreSettled; // yenileme arka planda sürer
     expect(h.backend.fullListCalls, full, reason: 'yeniden açılışta tüm geçmiş indirilmez');
     expect(reopened.app.expenses.map((e) => e.merchant).toSet(), {'Migros', 'Şok', 'BIM', 'A101'});
     expect(reopened.app.expenses.firstWhere((e) => e.merchant == 'BIM').amount, 33);

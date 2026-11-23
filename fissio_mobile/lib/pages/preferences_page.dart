@@ -7,8 +7,9 @@ import '../ocr/ocr_engine.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets.dart';
+import 'home_layout_page.dart';
 
-/// Tercihler: tema modu, vurgu rengi ve fiş detayı görünümü. Değişiklikler anında uygulanır.
+/// Tercihler: üç grupta — Görünüm ve Tema, Tarama ve OCR Motoru, Bildirimler ve Genel. Değişiklikler anında uygulanır.
 class PreferencesPage extends StatelessWidget {
   const PreferencesPage({super.key});
 
@@ -32,6 +33,7 @@ class PreferencesPage extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
                   children: [
+                    const _GroupHeader('Görünüm ve Tema', first: true),
                     const SectionLabel('Tema'),
                     const SizedBox(height: 8),
                     SegmentedControl<ThemeMode>(
@@ -70,6 +72,32 @@ class PreferencesPage extends StatelessWidget {
                     const SizedBox(height: 8),
                     const _LogoSection(),
                     const SizedBox(height: 24),
+                    const SectionLabel('Widget renk teması'),
+                    const SizedBox(height: 8),
+                    SegmentedControl<WidgetTheme>(
+                      key: const ValueKey('widget-theme'),
+                      value: themeController.widgetTheme,
+                      onChanged: themeController.setWidgetTheme,
+                      items: const [
+                        SegmentItem(WidgetTheme.system, 'Sistem'),
+                        SegmentItem(WidgetTheme.light, 'Açık'),
+                        SegmentItem(WidgetTheme.dark, 'Koyu'),
+                        SegmentItem(WidgetTheme.brand, 'Marka'),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        switch (themeController.widgetTheme) {
+                          WidgetTheme.system => 'Ana ekran widget\'ları telefonun açık/koyu temasını izler.',
+                          WidgetTheme.light => 'Ana ekran widget\'ları her zaman açık renkte olur.',
+                          WidgetTheme.dark => 'Ana ekran widget\'ları her zaman koyu renkte olur.',
+                          WidgetTheme.brand => 'Ana ekran widget\'ları logo rengini arka plan olarak kullanır.',
+                        },
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     const SectionLabel('Fiş detayı'),
                     const SizedBox(height: 8),
                     SegmentedControl<ReceiptStyle>(
@@ -89,7 +117,7 @@ class PreferencesPage extends StatelessWidget {
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const _GroupHeader('Tarama ve OCR Motoru'),
                     const SectionLabel('Fiş okuma'),
                     const SizedBox(height: 8),
                     SegmentedControl<OcrMode>(
@@ -132,6 +160,68 @@ class PreferencesPage extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
                       child: Text(
                         'Sunucu OCR kullanıldığında fişi okuyacak motor. Tarama ekranında otomatik uygulanır.',
+                        style: FissioText.body(c, size: 13, color: c.mute),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    GroupedCard(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Fiş detayında OCR motorunu göster',
+                                    style: FissioText.body(c, weight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Fişin altında “İşleyen Motor: …” notunu gösterir.',
+                                    style: FissioText.body(c, size: 13, color: c.mute),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              key: const Key('show-ocr-engine-switch'),
+                              value: themeController.showOcrEngine,
+                              activeTrackColor: c.accent,
+                              onChanged: themeController.setShowOcrEngine,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const _GroupHeader('Bildirimler ve Genel'),
+                    const SectionLabel('Özet ekranı'),
+                    const SizedBox(height: 8),
+                    GroupedCard(
+                      children: [
+                        ListRow(
+                          key: const ValueKey('home-layout-row'),
+                          leading: IconTile(LucideIcons.layoutDashboard, size: 30, radius: 8),
+                          title: 'Özet Görünümünü Özelleştir',
+                          subtitle: themeController.hiddenHomeCards.isEmpty
+                              ? 'Kartları aç/kapat ve sırala'
+                              : '${themeController.hiddenHomeCards.length} kart gizli',
+                          chevron: true,
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const HomeLayoutPage()),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const SectionLabel('Bildirimler'),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        'Bütçe uyarıları (%80 / %100) ve sabit gider hatırlatıcıları yerel bildirim olarak gelir. '
+                        'Bildirim iznini telefonun uygulama ayarlarından yönetebilirsin.',
+                        key: const ValueKey('prefs-notifications-note'),
                         style: FissioText.body(c, size: 13, color: c.mute),
                       ),
                     ),
@@ -284,6 +374,33 @@ class _Swatch extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Tercihler'in üç ana grubunun belirgin başlığı (altındaki `SectionLabel`'lardan büyük, ince çizgi + üst boşluk).
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader(this.title, {this.first = false});
+  final String title;
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(4, first ? 0 : 34, 4, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            key: ValueKey('prefs-group-$title'),
+            style: FissioText.title(c).copyWith(fontSize: 19),
+          ),
+          const SizedBox(height: 6),
+          Container(height: 2, width: 28, color: c.accent),
+        ],
       ),
     );
   }

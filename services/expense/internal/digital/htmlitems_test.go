@@ -1,0 +1,122 @@
+package digital
+
+import "testing"
+
+func TestHTMLTableItemsYemeksepetiStyle(t *testing.T) {
+	src := `<html><body><table><tr><td>
+	<table>
+	  <tr><th>Ürün</th><th>Adet</th><th>Fiyat</th></tr>
+	  <tr><td>Tavuk Döner Porsiyon</td><td>2</td><td>92,50 TL</td><td>185,00 TL</td></tr>
+	  <tr><td>Ayran</td><td>1</td><td>15,00 TL</td></tr>
+	  <tr><td>Teslimat Ücreti</td><td>12,90 TL</td></tr>
+	  <tr><td>Poşet</td><td>2,00 TL</td></tr>
+	  <tr><td>Ara Toplam</td><td>214,90 TL</td></tr>
+	  <tr><td>KDV (%10)</td><td>19,54 TL</td></tr>
+	  <tr><td>İndirim</td><td>10,00 TL</td></tr>
+	  <tr><td>Genel Toplam</td><td>214,90 TL</td></tr>
+	</table></td></tr></table></body></html>`
+	got := HTMLTableItems(src)
+	want := []TableItem{
+		{"Tavuk Döner Porsiyon", 2, 18500},
+		{"Ayran", 1, 1500},
+		{"Teslimat Ücreti", 1, 1290},
+		{"Poşet", 1, 200},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("item %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if got[0].DisplayName() != "2 x Tavuk Döner Porsiyon" || got[1].DisplayName() != "Ayran" {
+		t.Errorf("display: %q %q", got[0].DisplayName(), got[1].DisplayName())
+	}
+}
+
+func TestHTMLTableItemsQtyForms(t *testing.T) {
+	src := `<table>
+	  <tr><td>3 x Lahmacun</td><td>90,00 TL</td></tr>
+	  <tr><td>2x Kola</td><td>40,00 ₺</td></tr>
+	  <tr><td>1</td><td>Künefe</td><td>1.250,50 TL</td></tr>
+	  <tr><td>KARTON SÜT</td><td>30,00 TL</td></tr>
+	  <tr><td>Toplam</td><td>1.410,50 TL</td></tr>
+	  <tr><td>Toplam Tutar:</td><td>1.410,50 TL</td></tr>
+	</table>`
+	got := HTMLTableItems(src)
+	want := []TableItem{{"Lahmacun", 3, 9000}, {"Kola", 2, 4000}, {"Künefe", 1, 125050}, {"KARTON SÜT", 1, 3000}}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("item %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// GetirYemek sipariş özeti: tutarlar ondalıksız ve para birimi bitişik/boşluklu; kampanya indirimi NEGATİF satırdır.
+// Hiçbiri kalem olmamalı (özet satırları + sıfır teslimat + negatif indirim); ürün satırında fiyat yok.
+func TestHTMLTableItemsGetirOrderSummary(t *testing.T) {
+	src := `<table><tr>
+	<td>Tavukburger® Menü Alana Tavukburger® Menü Hediye - (Adet: 1)</td>
+	<td><table>
+	  <tr><td>Sipariş Özeti</td></tr>
+	  <tr><td>Ara Toplam</td><td>665 TRY</td></tr>
+	  <tr><td>Teslimat Ücreti</td><td>0 TRY</td></tr>
+	  <tr><td>Tavukburger® Menü Alana Tavukburger® Menü Hediye</td><td>-310 TRY</td></tr>
+	  <tr><td><b>Toplam</b></td><td><b>355TRY</b></td></tr>
+	</table></td></tr></table>`
+	if got := HTMLTableItems(src); len(got) != 0 {
+		t.Fatalf("özet/indirim/sıfır teslimat kalem olmamalı: %+v", got)
+	}
+}
+
+func TestMoneyCentsIntegerWithCurrency(t *testing.T) {
+	ok := map[string]int64{
+		"665 TRY": 66500, "355TRY": 35500, "0 TRY": 0, "-310 TRY": -31000, "−310 TRY": -31000, "1.250 TL": 125000,
+		"- 310 TRY": -31000, "12,50 TL": 1250, "185,00 TL": 18500, "₺ 20,00": 2000,
+	}
+	for in, want := range ok {
+		if got, k := moneyCents(in); !k || got != want {
+			t.Errorf("moneyCents(%q) = %d,%v want %d", in, got, k, want)
+		}
+	}
+	for _, in := range []string{"2", "12", "Ayran", "355", "TRY", "-"} {
+		if _, k := moneyCents(in); k {
+			t.Errorf("moneyCents(%q) para sayılmamalı (adet/metin)", in)
+		}
+	}
+}
+
+func TestHTMLTableItemsIntegerPricedRows(t *testing.T) {
+	src := `<table>
+	  <tr><td>Lahmacun</td><td>2</td><td>90 TL</td></tr>
+	  <tr><td>Ayran</td><td>15TRY</td></tr>
+	  <tr><td>Kampanya</td><td>-20 TRY</td></tr>
+	</table>`
+	got := HTMLTableItems(src)
+	want := []TableItem{{"Lahmacun", 2, 9000}, {"Ayran", 1, 1500}}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("item %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestHTMLTableItemsIgnoresHiddenAndNonMoney(t *testing.T) {
+	src := `<table>
+	  <tr style="display:none"><td>Gizli</td><td>5,00 TL</td></tr>
+	  <tr><td>Sipariş No</td><td>ABC123</td></tr>
+	  <tr><td>Tutar yok</td><td>-</td></tr>
+	  <tr><td>Pizza</td><td>99,90 TL</td></tr>
+	</table>`
+	got := HTMLTableItems(src)
+	if len(got) != 1 || got[0].Name != "Pizza" || got[0].AmountCents != 9990 {
+		t.Fatalf("got %+v", got)
+	}
+}

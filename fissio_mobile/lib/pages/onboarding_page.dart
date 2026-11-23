@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../app_state.dart';
 import '../onboarding_controller.dart';
 import '../theme.dart';
+import 'email_setup_wizard.dart';
 import 'profile_select_page.dart';
 
 /// Tanıtım akışının sayfa içerikleri (Fissio Onboarding tasarımı: tara → ekle → takip et).
@@ -17,7 +21,13 @@ const _kBodies = [
   'Haftalık harcama ve kategori dağılımı, tek ekranlık bir özette.',
 ];
 
-/// 3 adımlı tanıtım. İlk kayıttan sonra (`signUp: true`) Profil seçiminden önce açılır;
+/// Opsiyonel 4. adım (bulut senkronu açık ve sunucuda e-posta aktarımı yapılandırılmışsa; ilk kayıtta ve Ayarlar'daki rehberde).
+const _kEmailTitle = 'E-Faturaların Otomatik Gelsin mi?';
+const _kEmailBody =
+    'Sana özel bir adres veriyoruz: e-fatura, e-arşiv ve sipariş özeti maillerini bu adrese yönlendir; ekteki XML/PDF faturalar '
+    'dahil fişlerin kalemleriyle kendiliğinden eklensin.';
+
+/// 3 adımlı tanıtım (+ opsiyonel e-posta adımı). İlk kayıttan sonra (`signUp: true`) Profil seçiminden önce açılır;
 /// Ayarlar'dan (`signUp: false`) açıldığında bitince yalnızca kapanır.
 ///
 /// Renklerin hepsi `context.c` (FissioColors) tokenlarından gelir; açık/koyu mod ve
@@ -29,6 +39,8 @@ class OnboardingPage extends StatefulWidget {
     this.signUp = true,
     this.email,
     this.onDone,
+    this.includeEmailStep = false,
+    this.app,
   });
 
   /// Verilmezse global [onboardingController].
@@ -41,6 +53,14 @@ class OnboardingPage extends StatefulWidget {
   /// Verilirse bitişte varsayılan gezinme yerine bu çağrılır (testler için).
   final VoidCallback? onDone;
 
+  /// Sonuna "E-Faturaların Otomatik Gelsin mi?" adımı eklenir. Adımın varlığı sayfa AÇILMADAN belirlenir (bkz.
+  /// `AccountReadyPage` ve Ayarlar'daki rehber): "1 / N" sayacı akış sırasında değişmez. Özellik kullanılamıyorsa
+  /// (senkron kapalı / sunucuda kapalı) adım hiç eklenmez.
+  final bool includeEmailStep;
+
+  /// Verilmezse global [appState] (e-posta adımındaki adres ve sihirbaz için).
+  final AppState? app;
+
   @override
   State<OnboardingPage> createState() => _OnboardingPageState();
 }
@@ -51,7 +71,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
   bool _finishing = false;
 
   OnboardingController get _ctrl => widget.controller ?? onboardingController;
-  bool get _last => _page == _kTitles.length - 1;
+  AppState get _app => widget.app ?? appState;
+  int get _count => _kTitles.length + (widget.includeEmailStep ? 1 : 0);
+  bool get _last => _page == _count - 1;
+  bool get _emailStep => widget.includeEmailStep && _page == _kTitles.length;
 
   @override
   void initState() {
@@ -71,6 +94,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
       );
+
+  /// "Şimdi Kur": interaktif sihirbazı açar; dönünce tanıtım tamamlanır.
+  Future<void> _setupEmail() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => EmailSetupWizardPage(app: widget.app)),
+    );
+    if (!mounted) return;
+    await _finish(skipped: false);
+  }
 
   Future<void> _finish({required bool skipped}) async {
     if (_finishing) return;
@@ -116,7 +148,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '${_page + 1} / ${_kTitles.length}',
+                        '${_page + 1} / $_count',
                         key: const ValueKey('onb-counter'),
                         style: FissioText.body(c, size: 15, weight: FontWeight.w600, color: c.mute),
                       ),
@@ -145,18 +177,50 @@ class _OnboardingPageState extends State<OnboardingPage> {
               Expanded(
                 child: PageView.builder(
                   controller: _pages,
-                  itemCount: _kTitles.length,
-                  onPageChanged: (i) => setState(() => _page = i),
-                  itemBuilder: (_, i) => _OnboardingStep(index: i),
+                  itemCount: _count,
+                  onPageChanged: (i) {
+                    setState(() => _page = i);
+                    // E-posta adımı gösterildi: özellik tanıtıldı, ana sayfada ayrıca "Yeni" kartı çıkmaz.
+                    if (widget.includeEmailStep && i == _kTitles.length) unawaited(_app.markEmailImportSeen());
+                  },
+                  itemBuilder: (_, i) => i >= _kTitles.length
+                      ? _EmailStep(address: _app.inbound?.address)
+                      : _OnboardingStep(index: i),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                child: _last
+                child: _emailStep
                     ? Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _Dots(index: _page, count: _kTitles.length),
+                          _Dots(index: _page, count: _count),
+                          const SizedBox(height: 18),
+                          _OnbButton(
+                            key: const ValueKey('onb-email-setup'),
+                            label: 'Şimdi Kur',
+                            expand: true,
+                            onTap: _setupEmail,
+                          ),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton(
+                              key: const ValueKey('onb-email-later'),
+                              onPressed: () => _finish(skipped: false),
+                              child: Text(
+                                'Daha Sonra Ayarlardan Kur',
+                                style: FissioText.body(c, size: 16, weight: FontWeight.w600, color: c.accentInk),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : _last
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _Dots(index: _page, count: _count),
                           const SizedBox(height: 18),
                           _OnbButton(
                             key: const ValueKey('onb-primary'),
@@ -169,7 +233,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          _Dots(index: _page, count: _kTitles.length),
+                          _Dots(index: _page, count: _count),
                           _OnbButton(
                             key: const ValueKey('onb-primary'),
                             label: 'Devam',
@@ -223,6 +287,73 @@ class _OnboardingStep extends StatelessWidget {
           Text(
             _kBodies[index],
             key: ValueKey('onb-body-$index'),
+            style: FissioText.body(c, size: 17, color: c.mute).copyWith(height: 1.45),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Opsiyonel 4. adım: e-posta ile otomatik aktarım ────────────────────────
+
+class _EmailStep extends StatelessWidget {
+  const _EmailStep({this.address});
+  final String? address;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 380,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(kRadius),
+              child: Container(
+                key: const ValueKey('onb-hero-email'),
+                color: c.surf2,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 84,
+                      height: 84,
+                      decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
+                      child: Icon(LucideIcons.mail, size: 40, color: c.onAccent),
+                    ),
+                    const SizedBox(height: 22),
+                    Text('SANA ÖZEL ADRES', style: FissioText.label(c)),
+                    const SizedBox(height: 10),
+                    Container(
+                      key: const ValueKey('onb-email-address'),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(color: c.surf, borderRadius: BorderRadius.circular(kRadiusSm)),
+                      child: Text(
+                        address ?? '…',
+                        textAlign: TextAlign.center,
+                        style: FissioText.body(c, size: 15, weight: FontWeight.w700).copyWith(fontFamily: 'monospace'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text(_kEmailTitle, key: const ValueKey('onb-title-email'), style: FissioText.title(c)),
+          const SizedBox(height: 14),
+          Container(height: 2, color: c.rule),
+          const SizedBox(height: 14),
+          Text(
+            _kEmailBody,
+            key: const ValueKey('onb-body-email'),
             style: FissioText.body(c, size: 17, color: c.mute).copyWith(height: 1.45),
           ),
           const SizedBox(height: 8),

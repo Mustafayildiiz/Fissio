@@ -1,0 +1,16 @@
+{
+  "name": "windows1254_base64",
+  "note": "Tek parça text/plain, windows-1254 + base64 (Türkçe ş/ğ/İ).",
+  "eml": "From: a@b.com\r\nTo: x@fis.fissio.app\r\nSubject: Fiş\r\nContent-Type: text/plain; charset=windows-1254\r\nContent-Transfer-Encoding: base64\r\n\r\n3mn+bGkgTWFya2V0Ct1uZGlyaW0gNSwwMApUb3BsYW0gOTUsMDA=\r\n",
+  "expect": {
+    "subject": "Fiş",
+    "from": "a@b.com",
+    "message_id": "",
+    "text": "Şişli Market\nİndirim 5,00\nToplam 95,00",
+    "html": "",
+    "pdf_names": [],
+    "recipients": [
+      "x@fis.fissio.app"
+    ]
+  }
+}

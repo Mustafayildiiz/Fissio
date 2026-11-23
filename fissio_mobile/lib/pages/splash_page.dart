@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../app_state.dart';
 import '../logo.dart';
 import '../services/deep_links.dart';
@@ -28,16 +29,20 @@ class _SplashPageState extends State<SplashPage> {
     // Splash en az 1,2 sn görünür; ama widget'tan "hızlı tara" ile açıldıysa kamerayı geciktirmemek için beklenmez.
     final minDelay = Future<void>.delayed(const Duration(milliseconds: 1200));
     final ok = await restore;
-    if (!deepLinks.hasPendingScan) await minDelay;
+    if (!deepLinks.hasPendingAction) await minDelay;
     if (!mounted) return;
     // Hızlı tara + oturum var ama aktif profil seçili değilse (ilk açılış / silinmiş profil) ilk profili seç:
     // kullanıcı profil seçiciye düşmeden doğrudan kameraya gitsin.
-    if (ok && deepLinks.hasPendingScan && appState.activeProfile == null && appState.profiles.isNotEmpty) {
-      await appState.selectProfile(appState.profiles.first);
+    if (ok && deepLinks.hasPendingAction && appState.activeProfile == null && appState.profiles.isNotEmpty) {
+      try {
+        await appState.selectProfile(appState.profiles.first);
+      } on ApiException {
+        // Seçilemedi (ağ/sunucu): splash'te takılı kalma; aşağıda profil seçicisine düşülür.
+      }
       if (!mounted) return;
     }
     // Widget'tan "hızlı tara" ile açıldıysa ve aktif profil varsa profil seçimi atlanır; kabuk taramayı açar.
-    final direct = ok && deepLinks.hasPendingScan && appState.activeProfile != null;
+    final direct = ok && deepLinks.hasPendingAction && appState.activeProfile != null;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => direct

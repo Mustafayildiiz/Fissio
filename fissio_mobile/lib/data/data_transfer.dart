@@ -6,6 +6,8 @@ import '../app_state.dart';
 import '../models.dart';
 import '../money.dart';
 import '../ocr/ocr_engine.dart' show ocrEngineDisplayName;
+import '../receipt_parser/digital_ids.dart' show normalizeOrderId;
+import '../receipt_parser/digital_receipt.dart' show normalizeDocumentNo;
 import '../receipt_parser/normalize.dart' show foldTR;
 import 'uid.dart';
 
@@ -49,6 +51,13 @@ class BackupExpense {
 
   /// Fişi okuyan OCR motoru (`paddleocr` | `custom` | `mlkit`); yalnızca JSON yedeğinde taşınır, bilinmiyorsa null.
   final String? ocrEngine;
+
+  /// Dijital fatura kimliği (ETTN / VKN_FaturaNo); yalnızca JSON yedeğinde taşınır, yoksa null.
+  final String? documentNo;
+
+  /// Platform sipariş kodu (ön özet + resmi fatura eşleştirmesi); yalnızca JSON yedeğinde taşınır, yoksa null. Eski yedeklerde
+  /// alan yoktur (null olarak yüklenir). `has_official_invoice` ayrıca saklanmaz: `documentNo` doluysa true türetilir.
+  final String? orderId;
   const BackupExpense({
     required this.uid,
     required this.date,
@@ -62,6 +71,8 @@ class BackupExpense {
     this.recurringKind = RecurringKind.fixed,
     this.recurringEstimate = 0,
     this.ocrEngine,
+    this.documentNo,
+    this.orderId,
   });
 }
 
@@ -185,6 +196,8 @@ BackupData buildBackup(
             recurringKind: e.recurringKind,
             recurringEstimate: e.recurringEstimate,
             ocrEngine: e.ocrEngine,
+            documentNo: e.documentNo,
+            orderId: e.orderId,
           ),
       ]),
     );
@@ -215,6 +228,9 @@ String exportJson(BackupData b) => const JsonEncoder.withIndent('  ').convert({
               if (e.recurringDay > 0) 'recurring_kind': e.recurringKind.name,
               if (e.recurringDay > 0 && e.recurringEstimate > 0) 'recurring_estimate': e.recurringEstimate,
               if (e.ocrEngine != null) 'ocr_engine': e.ocrEngine,
+              if (e.documentNo != null) 'document_no': e.documentNo,
+              if (e.orderId != null) 'order_id': e.orderId,
+              if (e.documentNo != null) 'has_official_invoice': true,
               'items': [
                 for (final i in e.items) {'name': i.name, 'amount': i.amount, 'category': i.category},
               ],
@@ -324,6 +340,8 @@ BackupData _parseJson(String text) {
           recurringKind: recurringKindFrom(e['recurring_kind'] is String ? e['recurring_kind'] as String : null),
           recurringEstimate: e['recurring_estimate'] is num ? (e['recurring_estimate'] as num).toDouble() : 0,
           ocrEngine: e['ocr_engine'] is String ? e['ocr_engine'] as String : null,
+          documentNo: e['document_no'] is String ? e['document_no'] as String : null,
+          orderId: e['order_id'] is String ? e['order_id'] as String : null,
           rawItems: [
             if (e['items'] is List)
               for (final i in e['items'] as List)
@@ -362,6 +380,8 @@ bool _uidOk(String s) => RegExp(r'^[A-Za-z0-9._:-]{1,64}$').hasMatch(s);
   RecurringKind recurringKind = RecurringKind.fixed,
   double recurringEstimate = 0,
   String? ocrEngine,
+  String? documentNo,
+  String? orderId,
 }) {
   final date = parseDate(dateRaw);
   if (date == null) return (value: null, error: 'tarih okunamadı ("$dateRaw").');
@@ -387,6 +407,10 @@ bool _uidOk(String s) => RegExp(r'^[A-Za-z0-9._:-]{1,64}$').hasMatch(s);
       recurringEstimate: recurringEstimate > 0 && recurringEstimate < 1e10 ? (recurringEstimate * 100).round() / 100 : 0,
       // Yalnızca bilinen motor kimlikleri (dosya elle düzenlenmiş olabilir); aksi halde yok sayılır.
       ocrEngine: ocrEngineDisplayName(ocrEngine) != null ? ocrEngine : null,
+      // Yalnızca geçerli biçim (ETTN UUID / VKN_FaturaNo); aksi halde yok sayılır (sunucu 400 verirdi).
+      documentNo: normalizeDocumentNo(documentNo),
+      // Yalnızca geçerli biçim (büyük harf, 4-41 karakter); aksi halde yok sayılır (sunucu 400 verirdi).
+      orderId: normalizeOrderId(orderId),
     ),
     error: null,
   );
@@ -535,6 +559,11 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
         for (final i in e.items) BackupItem(i.name, i.amount, ''),
       ]),
   };
+  // Dijital belge / sipariş mükerreri: aynı document_no ya da aynı (order_id + belge türü) zaten varsa sunucu 409 verirdi ve fiş
+  // kuyrukta takılırdı; bu yüzden içe aktarmada baştan atlanır.
+  final existingDocs = {for (final e in app.allExpenses) if (e.documentNo != null) e.documentNo!};
+  String? orderKey(String? orderId, bool official) => orderId == null ? null : '$orderId|$official';
+  final existingOrders = {for (final e in app.allExpenses) ?orderKey(e.orderId, e.hasOfficialInvoice)};
   int? catId(String name) {
     final n = foldTR(name.trim());
     if (n.isNotEmpty) {
@@ -559,12 +588,18 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
     for (final be in bp.expenses) {
       final fp = fingerprint(profile.name, be.date, be.merchant, be.amount, be.items);
       final uid = be.uid.isNotEmpty ? be.uid : uidFromFingerprint(fp);
-      if (existingUids.contains(uid) || existingFp.contains(fp)) {
+      final ok = orderKey(be.orderId, be.documentNo != null);
+      if (existingUids.contains(uid) ||
+          existingFp.contains(fp) ||
+          (be.documentNo != null && existingDocs.contains(be.documentNo)) ||
+          (ok != null && existingOrders.contains(ok))) {
         skipped++;
         continue;
       }
       existingUids.add(uid);
       existingFp.add(fp);
+      if (be.documentNo != null) existingDocs.add(be.documentNo!);
+      if (ok != null) existingOrders.add(ok);
       final cid = catId(be.category) ?? 0;
       await app.addImportedExpense(
         Expense(
@@ -591,6 +626,8 @@ Future<ImportSummary> importBackup(AppState app, BackupData data) async {
           recurringKind: be.recurringKind,
           recurringEstimate: be.recurringEstimate,
           ocrEngine: be.ocrEngine,
+          documentNo: be.documentNo,
+          orderId: be.orderId,
         ),
       );
       imported++;

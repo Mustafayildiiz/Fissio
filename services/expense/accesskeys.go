@@ -83,6 +83,10 @@ func checkProductionSecrets(getenv func(string) string) error {
 	if weak(getenv("INTERNAL_TOKEN"), 24) {
 		problems = append(problems, "INTERNAL_TOKEN en az 24 karakter ve varsayilan olmayan bir deger olmali")
 	}
+	// E-posta aktarimi aciksa (INBOUND_EMAIL_DOMAIN dolu) webhook sirri guclu olmali; bos domain = ozellik kapali.
+	if strings.TrimSpace(getenv("INBOUND_EMAIL_DOMAIN")) != "" && weak(getenv("INBOUND_WEBHOOK_SECRET"), 24) {
+		problems = append(problems, "INBOUND_EMAIL_DOMAIN doluyken INBOUND_WEBHOOK_SECRET en az 24 karakter ve varsayilan olmayan bir deger olmali")
+	}
 	if u, err := url.Parse(getenv("DATABASE_URL")); err == nil && u.User != nil {
 		if pw, _ := u.User.Password(); weak(pw, 16) {
 			problems = append(problems, "veritabani parolasi en az 16 karakter ve varsayilan olmayan bir deger olmali")

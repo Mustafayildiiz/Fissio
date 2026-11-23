@@ -7,11 +7,16 @@ düzenleyin, üç test paketi de okur.
 | Dosya | Mantık | Okuyanlar |
 |---|---|---|
 | `glyphs.json` | `fixTurkishGlyphs` (`$`→Ş) | Go `accuracy_test.go`, Python `tests/test_preprocess.py`, Dart `test/receipt_parser_test.dart` |
-| `rows.json` | satır birleştirme (blok → satır, eğim düzeltmeli) | Python `tests/test_preprocess.py`, Dart `test/on_device_rows_test.dart` |
+| `rows.json` | satır birleştirme (blok → satır; eğim kutu kenarlarından, sonra satır çiftlerinden kestirilir — `curved_paper_slope_grows_down_the_page` kıvrık kâğıt vektörü eski algoritmada başarısızdır) | Python `tests/test_preprocess.py`, Dart `test/on_device_rows_test.dart` |
 | `merge.json` | `mergePageTexts` (sayfa dikişi) | Go `merge_golden_test.go`, Dart `test/merge_pages_test.dart` |
 | `recurring_due.json` | tekrarlayan gider vadesi + gecikmiş | Go `recurring_due_golden_test.go`, Dart `test/recurring_logic_test.dart` |
 | `recurring_series.json` | tekrarlayan seri penceresi/bitişi/gecikmiş | Go `recurring_series_golden_test.go`, Dart `test/recurring_series_golden_test.dart` |
 | `parse/*.json` | fiş ayrıştırma (işletme, tutar, tarih, kalemler, `needs_review`, `discount_total`); beklenenler Go `Parse` çıktısıdır (üretim seed kategorileriyle) | Go `golden_parse_test.go`, Dart `test/golden_parse_test.dart` |
+| `html/*.json` | dijital fiş: HTML e-posta gövdesi → temiz metin (`HTMLToText` + `StripForwardPreamble`), `order_id`/`document_no` çıkarımı; `expect.text` Go çıktısıdır (`go test ./internal/digital -run Golden -update` ile yeniden üretilir, elle gözden geçirilir) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `preamble.json` | "İlet (Forward)" önsözü temizliği (Gmail / Outlook / Apple / Türkçe / `>` alıntı) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `digital_ids.json` | `ExtractDocumentNo` (ETTN / `VKN_FaturaNo`) + `ExtractOrderID` (YALNIZCA etiketli sipariş kodu) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `merge_decision.json` | ön özet + resmi fatura birleştirme kararı `DecideMerge` (kural A mükerrer / B birleştir / C asla; tutar TL → kuruşa yuvarlanır) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
+| `eml/*.json` | `.eml` (RFC 5322/MIME) ayrıştırma: QP/base64, windows-1254, RFC 2047, multipart, `message/rfc822` eki, PDF ve zip içi PDF. Dart tarafı alıcı (`recipients`) alanını sınamaz (alias çözümü yalnızca sunucuda) | Go `internal/digital/golden_test.go`, Dart `test/digital_golden_test.dart` |
 | `merchant_brands.json` | başlıkta işletme satırı seçen marka listesi (Go sözlüğünün `brands` birleşimi = Dart `receipt_parser/brands.dart`) | Go `golden_parse_test.go`, Dart `test/golden_parse_test.dart` |
 
 ## Yol çözümü
@@ -23,3 +28,11 @@ düzenleyin, üç test paketi de okur.
 Bilinen ve kabul edilmiş sapmalar `"known_divergence": ["dart"]` gibi etiketlenir; ilgili dilin testi o vektörü
 atlar ve nedenini `"note"` alanında taşır. `parse/*.json` vektörlerinde atlama alan bazındadır: `"skip": ["items", …]`
 listesindeki alanlar yalnızca o dilde doğrulanmaz (geri kalanı yine doğrulanır).
+
+## Yeni gerçek fiş vektörleri (OCR kalite turu)
+`parse/` altındaki `bim_kirli_tam`, `manav_iptal`, `market_tam`, `market_alt_kirpik`, `trendyol_go` gerçek PaddleOCR
+çıktılarıdır (görseller `services/ocr/eval/receipts/`, beklenen değerler `services/ocr/eval/ground_truth.json`);
+`e_arsiv_fatura` metin katmanlı bir e-Arşiv PDF'inden çıkan metindir. Beklenenler Go `Parse` çıktısıdır ve elle
+doğrulanmıştır: eksik kalan kalemler (fiyatı okunamayan satırlar) `needs_review` ile açıkça işaretlidir, uydurulmaz.
+ML Kit çıktısı masaüstünde üretilemediğinden cihaz tarafı bu vektörlerle (Dart `golden_parse_test.dart`) sınanır;
+gerçek cihaz doğruluğu elle denenmelidir.

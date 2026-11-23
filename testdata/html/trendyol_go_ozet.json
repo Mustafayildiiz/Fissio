@@ -1,0 +1,10 @@
+{
+  "name": "trendyol_go_ozet",
+  "note": "Trendyol Go: etiket ile değer ayrı satırda (td → ayrı satır değil, aynı satır) ve sipariş numarası.",
+  "html": "<html><body><div><p>Merhaba Ahmet,</p><p>Siparişin hazırlanıyor.</p><table><tr><td>Sipariş Numarası:</td><td>1234567890</td></tr><tr><td>Migros Sanal Market</td></tr><tr><td>Süt 1 L</td><td>32,50 ₺</td></tr><tr><td>Ekmek</td><td>12,00 ₺</td></tr><tr><td>Toplam Tutar</td><td>44,50 ₺</td></tr></table></div></body></html>",
+  "expect": {
+    "text": "Merhaba Ahmet,\nSiparişin hazırlanıyor.\nSipariş Numarası: 1234567890\nMigros Sanal Market\nSüt 1 L 32,50 ₺\nEkmek 12,00 ₺\nToplam Tutar 44,50 ₺",
+    "order_id": "1234567890",
+    "document_no": ""
+  }
+}

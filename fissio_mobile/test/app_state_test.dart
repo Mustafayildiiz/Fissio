@@ -105,6 +105,7 @@ void main() {
       final offlineApp = Harness(backend: h.backend, prefs: h.prefs, local: h.local);
       h.backend.offline = true;
       expect(await offlineApp.app.restoreSession(), isTrue);
+      await offlineApp.app.restoreSettled;
       expect(offlineApp.app.email, 'ali@x.co');
       expect(offlineApp.app.profiles.map((p) => p.name), containsAll(['Kişisel', 'Ev']), reason: 'önbellekten');
 
@@ -112,9 +113,35 @@ void main() {
       h.backend.offline = false;
       h.backend.revokeSession(h.app.api.token!);
       final revoked = Harness(backend: h.backend, prefs: h.prefs, local: h.local);
-      expect(await revoked.app.restoreSession(), isFalse);
+      var expired = 0;
+      revoked.app.onSessionExpired = () => expired++;
+      // Önbellek varken açılış doğrulamayı beklemez (hemen true); iptal arka planda anlaşılır ve giriş ekranına dönülür.
+      expect(await revoked.app.restoreSession(), isTrue, reason: 'önbellekli veri hemen gösterilir');
+      await revoked.app.restoreSettled;
+      await Future<void>.delayed(Duration.zero);
       expect(revoked.app.loggedIn, isFalse);
+      expect(expired, 1, reason: 'oturum düşünce giriş ekranına dönüş bildirilir');
       expect(h.prefs.data.containsKey('auth_tokens'), isFalse);
+    });
+
+    test('geçici sunucu hatası (me() 500): önbellekli ve önbelleksiz açılışta oturum DÜŞMEZ', () async {
+      await h.signIn('ali@x.co');
+      // Önbellekli açılış.
+      final cached = Harness(backend: h.backend, prefs: h.prefs, local: h.local);
+      var expired = 0;
+      cached.app.onSessionExpired = () => expired++;
+      h.backend.failPaths.add('GET /auth/me');
+      expect(await cached.app.restoreSession(), isTrue);
+      await cached.app.restoreSettled;
+      await Future<void>.delayed(Duration.zero);
+      expect(cached.app.loggedIn, isTrue);
+      expect(expired, 0);
+      expect(h.prefs.data.containsKey('auth_tokens'), isTrue);
+
+      // Önbelleksiz açılış (yerel veri yok).
+      final bare = Harness(backend: h.backend, prefs: h.prefs);
+      expect(await bare.app.restoreSession(), isTrue, reason: 'me() 500 oturumu bitirmez');
+      expect(h.prefs.data.containsKey('auth_tokens'), isTrue);
     });
 
     test('hesap silme: sunucu hesabı, yerel dosyalar ve tercihler kalıcı temizlenir', () async {

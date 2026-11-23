@@ -88,16 +88,15 @@ double Function(double) localSlopeFn(List<RecognizedLine> lines, {double maxSlop
   };
 }
 
-/// ML Kit satırlarını fiş satırlarına dizer: aynı hizadaki parçalar (kalem adı solda, tutar sağda) tek satırda
-/// soldan sağa birleşir. Sunucudaki `PaddleOcrEngine._reconstruct_receipt_lines`'in aynısıdır (ortak vektörler
-/// `testdata/rows.json`): satır merkezi yerel eğimle düzeltilir (y_adj = y - s(y)·x), satır toleransı satırın
-/// ortalama yüksekliğine göre belirlenir (en az 8 px).
-List<String> reconstructRows(List<RecognizedLine> lines) {
-  final items = lines.where((l) => l.text.trim().isNotEmpty).toList();
-  if (items.isEmpty) return [];
-  final slopeAt = localSlopeFn(items);
+/// Satır grubu girdisi (Python `postprocess.RowEntry`): satır, eğim düzeltmeli y, x_min, yükseklik, x merkezi,
+/// ham y merkezi ve kararlı sıralama için özgün sıra.
+typedef _RowEntry = ({RecognizedLine line, double y, double x, double h, double xc, double yRaw, int i});
 
-  final entries = <({RecognizedLine line, double y, double x, double h, int i})>[];
+/// Python `postprocess.group_receipt_rows`'un aynısı: y_adj = y - s(y)·x ile eğim düzeltilir, (y_adj, x_min)
+/// sırasına dizilir ve satırın ortalama y'sine yeterince yakın (eşik = max(8, 0.55 x ort. yükseklik)) parçalar aynı
+/// satıra eklenir.
+List<List<_RowEntry>> _groupRows(List<RecognizedLine> items, double Function(double) slopeAt) {
+  final entries = <_RowEntry>[];
   for (var i = 0; i < items.length; i++) {
     final l = items[i];
     final c = l.corners;
@@ -114,8 +113,16 @@ List<String> reconstructRows(List<RecognizedLine> lines) {
       maxY = l.rect.bottom;
     }
     final yRaw = (minY + maxY) / 2.0;
-    final yCenter = yRaw - slopeAt(yRaw) * ((minX + maxX) / 2.0);
-    entries.add((line: l, y: yCenter, x: minX, h: (maxY - minY) < 1.0 ? 1.0 : (maxY - minY), i: i));
+    final xc = (minX + maxX) / 2.0;
+    entries.add((
+      line: l,
+      y: yRaw - slopeAt(yRaw) * xc,
+      x: minX,
+      h: (maxY - minY) < 1.0 ? 1.0 : (maxY - minY),
+      xc: xc,
+      yRaw: yRaw,
+      i: i,
+    ));
   }
   // Python: sort(key=(y_center, x_min)) kararlı → eşitlikte özgün sıra.
   entries.sort((a, b) {
@@ -124,7 +131,7 @@ List<String> reconstructRows(List<RecognizedLine> lines) {
     return c != 0 ? c : a.i.compareTo(b.i);
   });
 
-  final rows = <List<({RecognizedLine line, double y, double x, double h, int i})>>[];
+  final rows = <List<_RowEntry>>[];
   for (final e in entries) {
     if (rows.isNotEmpty) {
       final row = rows.last;
@@ -138,6 +145,68 @@ List<String> reconstructRows(List<RecognizedLine> lines) {
     }
     rows.add([e]);
   }
+  return rows;
+}
+
+double _median(List<double> v) {
+  final s = [...v]..sort();
+  final n = s.length;
+  return n.isOdd ? s[n ~/ 2] : (s[n ~/ 2 - 1] + s[n ~/ 2]) / 2.0;
+}
+
+/// Python `postprocess.refine_slope_fn`'in aynısı: eğimi satır ÇİFTLERİNDEN (en sol ad - en sağ tutar, aralarında
+/// >= [minSpan] x yükseklik) yeniden kestirir; konuma göre en yakın [neighbors] ölçümün ortancası. Kıvrık fişte tek
+/// kutunun üst kenar eğimi gerçek satır eğimini hafife alır ve sağ sütun bir satır kayar. >= 3 geniş satır yoksa
+/// [base] aynen döner.
+double Function(double) refineSlopeFn(
+  List<RecognizedLine> items,
+  double Function(double) base, {
+  int iterations = 2,
+  int neighbors = 7,
+  double maxSlope = 0.3,
+  double minSpan = 8.0,
+}) {
+  var fn = base;
+  for (var it = 0; it < iterations; it++) {
+    final samples = <({double y, double slope})>[];
+    for (final row in _groupRows(items, fn)) {
+      if (row.length < 2) continue;
+      // Python sorted(key=x_center) kararlı: eşit x merkezinde özgün sıra.
+      final ordered = [...row]..sort((a, b) {
+          final c = a.xc.compareTo(b.xc);
+          return c != 0 ? c : a.i.compareTo(b.i);
+        });
+      final left = ordered.first, right = ordered.last;
+      final height = _median([for (final e in row) e.h]);
+      final dx = right.xc - left.xc;
+      if (dx < minSpan * height) continue;
+      final slope = (right.yRaw - left.yRaw) / dx;
+      if (slope.abs() <= maxSlope) samples.add((y: (left.yRaw + right.yRaw) / 2.0, slope: slope));
+    }
+    if (samples.length < 3) break;
+    samples.sort((a, b) => a.y != b.y ? a.y.compareTo(b.y) : a.slope.compareTo(b.slope));
+    final pts = samples;
+    fn = (double y) {
+      final order = List<int>.generate(pts.length, (i) => i)
+        ..sort((i, j) {
+          final c = (pts[i].y - y).abs().compareTo((pts[j].y - y).abs());
+          return c != 0 ? c : i.compareTo(j);
+        });
+      return _median([for (final i in order.take(neighbors)) pts[i].slope]);
+    };
+  }
+  return fn;
+}
+
+/// ML Kit satırlarını fiş satırlarına dizer: aynı hizadaki parçalar (kalem adı solda, tutar sağda) tek satırda
+/// soldan sağa birleşir. Sunucudaki `PaddleOcrEngine._reconstruct_receipt_lines`'in aynısıdır (ortak vektörler
+/// `testdata/rows.json`): satır merkezi yerel eğimle düzeltilir (y_adj = y - s(y)·x; eğim önce kutu kenarlarından,
+/// sonra satır çiftlerinden kestirilir), satır toleransı satırın ortalama yüksekliğine göre belirlenir (en az 8 px).
+List<String> reconstructRows(List<RecognizedLine> lines) {
+  final items = lines.where((l) => l.text.trim().isNotEmpty).toList();
+  if (items.isEmpty) return [];
+  final slopeAt = refineSlopeFn(items, localSlopeFn(items));
+  final rows = _groupRows(items, slopeAt);
   return [
     for (final row in rows)
       (row..sort((a, b) {

@@ -213,7 +213,15 @@ class SyncService {
             final r = res.result;
             if (!r.ok || r.id == null) {
               partial = true; // geçersiz/reddedilen kayıt: kuyrukta kalır (kullanıcı düzenleyebilir ya da silebilir)
-              _bump(snap.expenses, e.clientUid, r.error ?? 'Sunucu kaydı kabul etmedi.');
+              _bump(
+                snap.expenses,
+                e.clientUid,
+                r.error == 'duplicate_document'
+                    ? 'Bu dijital fatura hesabında zaten ekli; bu kaydı silebilirsin.'
+                    : r.error == 'duplicate_order'
+                    ? 'Bu sipariş hesabında zaten ekli; bu kaydı silebilirsin.'
+                    : (r.error ?? 'Sunucu kaydı kabul etmedi.'),
+              );
               await _persist(uid);
               onChanged?.call();
               continue;
@@ -224,7 +232,9 @@ class SyncService {
                 // düzenlediyse içerik farklıdır: yerel kopyayı silmeden önce sunucuya yansıt (düzenleme kaybolmasın).
                 await _reconcileSkipped(e, r.id!, otherId);
               }
-              await _finishImages(e, r.id!, created: r.status == 'created');
+              // `merged`: resmi fatura sunucuda mevcut bir ön özet kaydına işlendi (id = hedef); yerel kopya kuyruktan çıkar,
+              // fotoğrafları hedefe yüklenir (yerel içerik hedefin işletme/tarih/kalemlerini EZMEZ: PUT yok).
+              await _finishImages(e, r.id!, created: r.status == 'created' || r.status == 'merged');
             } on ApiException catch (x) {
               if (x.network) rethrow;
               partial = true;
@@ -242,7 +252,7 @@ class SyncService {
             // Sunucudaki kopyayı hemen önbelleğe ekle: kuyruktan çıkan fiş, refresh gelene (ya da başarısız olursa) kadar
             // listelerden ve açık detay sayfasından kaybolmasın. Fotoğraf yüklendiyse sunucudan taze kopya alınır (imageIds).
             var serverCopy = e.copyWith(id: r.id!, syncState: SyncState.synced, localImages: const [], clearSyncError: true);
-            if (e.localImages.isNotEmpty) {
+            if (e.localImages.isNotEmpty || r.status == 'merged') {
               try {
                 serverCopy = (await api.expense(r.id!)).copyWith(profileUid: e.profileUid, syncState: SyncState.synced);
               } on ApiException catch (x) {
@@ -491,5 +501,10 @@ class SyncService {
       'recurring_estimate': e.recurringEstimate,
     // Fişi okuyan OCR motoru (yalnızca bilgi); null ise gönderilmez, sunucudaki değer korunur.
     if (e.ocrEngine != null) 'ocr_engine': e.ocrEngine,
+    // Dijital fatura kimliği (ETTN / VKN_FaturaNo): sunucu mükerrer eklemeyi 409 ile engeller.
+    if (e.documentNo != null) 'document_no': e.documentNo,
+    // Platform sipariş kodu: sunucu (sipariş, belge türü) mükerrerini 409/`duplicate_order` ile engeller ve resmi faturayı
+    // aynı siparişin ön özetine birleştirir (`merged`).
+    if (e.orderId != null) 'order_id': e.orderId,
   };
 }

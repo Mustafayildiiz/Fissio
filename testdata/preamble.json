@@ -1,0 +1,40 @@
+{
+  "note": "StripForwardPreamble: Go otorite, Dart ikizi (html_text.dart). out alanları Go -update ile doldurulur.",
+  "cases": [
+    {
+      "name": "gmail_forward",
+      "text": "Bak şuna\n\n---------- Forwarded message ---------\nFrom: Trendyol Go <noreply@trendyolgo.com>\nDate: Sat, 14 Nov 2026 at 13:12\nSubject: Sipariş Özeti\nTo: <ahmet@gmail.com>\n\nBim Market\nMakarna 36,00\nToplam 36,00",
+      "out": "Bim Market\nMakarna 36,00\nToplam 36,00"
+    },
+    {
+      "name": "outlook_gonderen",
+      "text": "Gönderen: Yemeksepeti <info@yemeksepeti.com>\nGönderilme: 14 Kasım 2026 13:12\nKime: ahmet@outlook.com\nKonu: Siparişiniz\n\nKöşebaşı Döner\nToplam 210,00",
+      "out": "Köşebaşı Döner\nToplam 210,00"
+    },
+    {
+      "name": "apple_mail",
+      "text": "Begin forwarded message:\n\nFrom: Google Play <googleplay-noreply@google.com>\nSubject: Makbuz\nDate: 12 November 2026 at 10:00:00 GMT+3\nTo: a@b.com\n\nPremium Abonelik 59,99\nToplam 59,99",
+      "out": "Premium Abonelik 59,99\nToplam 59,99"
+    },
+    {
+      "name": "turkce_iletilen",
+      "text": "İletilen ileti\nKimden: Migros <fatura@migros.com.tr>\nTarih: 12.11.2026\nKonu: Fişiniz\nKime: ahmet@x.com\n\nMigros\nSüt 32,50\nToplam 32,50",
+      "out": "Migros\nSüt 32,50\nToplam 32,50"
+    },
+    {
+      "name": "alinti_isaretli",
+      "text": "> ---------- Forwarded message ---------\n> From: BIM <a@bim.com>\n> Subject: Fiş\n>\n> BIM\n> Ekmek 5,00\n> Toplam 5,00",
+      "out": "BIM\nEkmek 5,00\nToplam 5,00"
+    },
+    {
+      "name": "baslik_blogu_isaretsiz",
+      "text": "From: Getir <noreply@getir.com>\nSent: Monday, November 16, 2026 9:00 AM\nTo: ahmet@x.com\nSubject: Getir siparişiniz\n\nGetir\nSu 10,00\nToplam 10,00",
+      "out": "Getir\nSu 10,00\nToplam 10,00"
+    },
+    {
+      "name": "degisiklik_yok",
+      "text": "Migros\nTarih: 12.11.2026\nSüt 32,50\nToplam 32,50",
+      "out": "Migros\nTarih: 12.11.2026\nSüt 32,50\nToplam 32,50"
+    }
+  ]
+}

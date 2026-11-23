@@ -165,6 +165,11 @@ func uniqueAmountIndex(items []Item, v float64) int {
 // ARA TOPLAM ve INDIRIM satirlarinin tutarlari havuza girmez: indirimli fiste kalem toplami ara
 // toplama esittir ve dogru (indirimli) toplami ezerdi. Kalem toplami indirim dusulerek karsilastirilir.
 func resolveTotal(lines []string, items []Item, discount float64, current *float64) (float64, bool) {
+	// Acikca "ODENECEK TUTAR / VERGILER DAHIL TOPLAM / GENEL TOPLAM" etiketli satirdaki tutar kesin toplamdir
+	// (e-fatura: kalem toplami KDV'siz ara toplamdir ve alt blokta gecer; toplam olarak ezilmemeli).
+	if current != nil && labeledGrandTotal(lines, *current) {
+		return 0, false
+	}
 	// Yalnizca toplam/KDV etiketli ilk satirdan itibaren olan odeme blogu: kalem fiyatlari
 	// tesadufen odenen-para ustu iliskisini saglayabilir (5,00 + 32,50 = 37,50).
 	start := -1
@@ -219,6 +224,58 @@ func resolveTotal(lines []string, items []Item, discount float64, current *float
 		}
 	}
 	return best, found
+}
+
+// vatExcludedItems, kalem tutarlari KDV'siz yazilmis faturalari (e-fatura / e-arsiv) taniyip uyusmazlik saymaz:
+// toplam kesin "odenecek / vergiler dahil / genel toplam" etiketli ve (toplam - kalemler) farki bir KDV satirinin
+// (ya da KDV satirlarinin toplaminin) tutarina esit. Etiket sart: yalniz tesadufen KDV'ye esit fark yeterli degildir.
+func vatExcludedItems(lines []string, items []Item, discount, total float64) bool {
+	if !labeledGrandTotal(lines, total) {
+		return false
+	}
+	missing := round2(total - (sumItems(items) - discount))
+	if missing <= 0.005 {
+		return false
+	}
+	var each []float64
+	sum := 0.0
+	for _, l := range lines {
+		if !isKDVLine(l) {
+			continue
+		}
+		a := amountsIn(l)
+		if len(a) == 0 {
+			continue
+		}
+		v := a[len(a)-1]
+		each = append(each, v)
+		if !hasPhrase(l, "topkdv") && !hasKeyword(l, "toplam", fuzzyMinLen) {
+			sum += v
+		}
+	}
+	each = append(each, round2(sum))
+	for _, v := range each {
+		if v > 0 && approxEq(v, missing) {
+			return true
+		}
+	}
+	return false
+}
+
+// labeledGrandTotal, v tutarinin kesin genel-toplam etiketli (odenecek / vergiler dahil / genel toplam) bir satirda
+// gectigini soyler.
+func labeledGrandTotal(lines []string, v float64) bool {
+	for _, l := range lines {
+		if !(hasKeyword(l, "odenecek", fuzzyMinLen) || hasPhrase(l, "vergilerdahil") || hasPhrase(l, "geneltoplam")) {
+			continue
+		}
+		for _, a := range amountsIn(l) {
+			if math.Abs(a-v) < 0.005 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // bareCandidate, tutari ondalik ayiraci olmadan okunmus bir satirdir ("*070" -> 0,70).

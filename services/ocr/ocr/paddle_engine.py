@@ -20,7 +20,13 @@ from .base import (
     OcrTextBlock,
 )
 from .config import OcrConfig
-from .postprocess import dedupe_blocks, fix_turkish_glyphs, local_slope_fn
+from .postprocess import (
+    dedupe_blocks,
+    fix_turkish_glyphs,
+    group_receipt_rows,
+    local_slope_fn,
+    refine_slope_fn,
+)
 from .preprocess import preprocess_receipt, upscale_if_small
 
 logger = logging.getLogger(__name__)
@@ -337,42 +343,16 @@ class PaddleOcrEngine(OcrEngine):
         if not blocks:
             return "", []
 
-        # Eğik çekilmiş fişlerde sol etiket ile sağ tutar farklı Y'de görünür; satır merkezini
-        # yerel eğimle düzelt (y_adj = y - s(y) * x).
-        slope_at = local_slope_fn(blocks)
+        # Eğik/kıvrık fişlerde sol etiket ile sağ tutar farklı Y'de görünür; satır merkezini yerel eğimle
+        # düzelt (y_adj = y - s(y) * x). Eğim önce kutu kenarlarından, sonra satır çiftlerinden kestirilir.
+        slope_at = refine_slope_fn(blocks, local_slope_fn(blocks))
 
-        def _box_metrics(b: OcrTextBlock) -> tuple[float, float, float]:
-            if not b.bbox:
-                return (0.0, 0.0, 20.0)
-            xs = [pt[0] for pt in b.bbox]
-            ys = [pt[1] for pt in b.bbox]
-            y_raw = (min(ys) + max(ys)) / 2.0
-            y_center = y_raw - slope_at(y_raw) * ((min(xs) + max(xs)) / 2.0)
-            x_min = min(xs)
-            height = max(1.0, max(ys) - min(ys))
-            return (y_center, x_min, height)
-
-        annotated = [(b, *_box_metrics(b)) for b in blocks]
         # If none of the blocks have bounding boxes, preserve original order
         if all(b.bbox is None for b in blocks):
             raw_text = "\n".join(b.text for b in blocks)
             return raw_text, list(blocks)
 
-        annotated.sort(key=lambda item: (item[1], item[2]))
-
-        rows: list[list[tuple[OcrTextBlock, float, float, float]]] = []
-        for entry in annotated:
-            if not rows:
-                rows.append([entry])
-                continue
-            current_row = rows[-1]
-            avg_y = sum(e[1] for e in current_row) / len(current_row)
-            avg_h = sum(e[3] for e in current_row) / len(current_row)
-            threshold = max(8.0, avg_h * 0.55)
-            if abs(entry[1] - avg_y) <= threshold:
-                current_row.append(entry)
-            else:
-                rows.append([entry])
+        rows = group_receipt_rows(blocks, slope_at)
 
         ordered_blocks: list[OcrTextBlock] = []
         text_lines: list[str] = []

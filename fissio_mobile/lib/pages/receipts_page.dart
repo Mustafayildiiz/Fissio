@@ -78,7 +78,7 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
       options: [for (final s in _Sort.values) (s, s.sheet)],
       selected: _sort,
     );
-    if (r != null) setState(() => _sort = r);
+    if (r != null && mounted) setState(() => _sort = r);
   }
 
   Future<void> _pickCategory() async {
@@ -91,7 +91,8 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
       ],
       selected: widget.categoryFilter.value ?? -1,
     );
-    if (r != null) widget.categoryFilter.value = r == -1 ? null : r;
+    // Filtre ShellPage'in ValueNotifier'ı: sayfa (ve kabuk) kapandıysa dispose edilmiş olabilir.
+    if (r != null && mounted) widget.categoryFilter.value = r == -1 ? null : r;
   }
 
   Future<void> _pickRange() async {
@@ -102,20 +103,21 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
         options: const [(false, 'Aralığı değiştir'), (true, 'Filtreyi temizle')],
         selected: null,
       );
-      if (action == null) return;
+      if (action == null || !mounted) return;
       if (action) {
         setState(() => _range = null);
         return;
       }
     }
     if (!mounted) return;
+    final last = pickableToday();
     final r = await showDateRangePicker(
       context: context,
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-      initialDateRange: _range,
+      firstDate: kPickerFirstDate,
+      lastDate: last,
+      initialDateRange: clampPickerRange(_range, last),
     );
-    if (r != null) setState(() => _range = r);
+    if (r != null && mounted) setState(() => _range = r);
   }
 
   @override
@@ -269,10 +271,9 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
 
     return RefreshIndicator(
       onRefresh: appState.refresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
-        children: [
+      // Lazy: yalnızca görünen satırlar kurulur (binlerce fişte sekme geçişi/yeniden çizim takılmasın).
+      child: Builder(builder: (context) {
+        final rows = <Widget>[
           if (appState.error != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -290,8 +291,14 @@ class _ReceiptsPageState extends State<ReceiptsPage> {
               ),
             ),
           ...children,
-        ],
-      ),
+        ];
+        return ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(20, 0, 20, FissioTabBar.heightOf(context) + 16),
+          itemCount: rows.length,
+          itemBuilder: (context, i) => rows[i],
+        );
+      }),
     );
   }
 }

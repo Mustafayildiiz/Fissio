@@ -7,6 +7,7 @@
 // eklediği ek marka `keywords`'leri.
 import '../models.dart';
 import 'brands.dart';
+import 'cancel.dart';
 import 'normalize.dart';
 import 'reconcile.dart';
 import 'summary.dart';
@@ -15,10 +16,21 @@ export 'brands.dart' show merchantBrands;
 export 'reconcile.dart' show LocalReconciliation;
 
 final RegExp amountRe = RegExp(r'(?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2}\b');
-final RegExp dateRe = RegExp(r'(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$)');
+// Saat tarihe boşluksuz yapışık olabilir ("18/10/202617:06"): yılın ardından SS:DD de kabul edilir.
+final RegExp dateRe = RegExp(r'(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?:\D|$|\d{2}:\d{2})');
+// Tutara yapışık para birimi: "5.00t" (TL simgesi OCR'da t), "24,90TL", "5,00₺" → "5.00" / "24,90".
+final RegExp currencySuffixRe = RegExp(r'(\d[.,]\d{2})(?:TL|tl|[tT₺])\b');
+// Satır SONUNDA ondalıksız tutar + açık para birimi: "355TRY", "665 TRY", "-310 TRY", "1.250 TL" → "355,00" … (dijital
+// fiş/e-posta tabloları; Go `intCurrencyRe` ikizi). Satır sonu şartı "10 TL indirim kuponu" gibi açıklamaları bozmaz.
+// Grup 1 = önceki karakter (rakam/nokta/virgül OLAMAZ), grup 2 = tutar.
+final RegExp intCurrencyRe = RegExp(r'(^|[^\d.,])(-?(?:\d{1,3}(?:\.\d{3})+|\d+))\s?(?:TRY|TL|₺)\s*$', caseSensitive: false);
+// Ürün satırı izi: KDV oranı sütunu (%08, x08) ya da satır sonunda tutar; başlık/işletme adı olamaz.
+final RegExp itemRowRe = RegExp(r'%\s*\d{1,2}|(?:^|\s)[xX]\d{2}\b|\d[.,]\d{2}\s*[*tT₺]?\s*$');
 final RegExp spacedDecimalRe = RegExp(r'(\d[.,])\s(\d{2})\b');
+// Sol kenarı kırpılmış fişlerde miktar rakamı düşebilir ("ADET X 13,50 TL"): sayı yalnız "adet/adt + x"
+// biçiminde isteğe bağlıdır (grup 1 boş kalır, miktar bilinmez).
 final RegExp qtyPrefixRe = RegExp(
-  r'^\s*(\d+(?:[.,]\d{1,3})?)\s*(?:(?:adet|adt|ad|ag|a)\.?\s*[x×*]?|(?:kg|kq|gr|g|lt|l)\.?\s*[x×*]|[x×])\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})',
+  r'^\s*(?:(\d+(?:[.,]\d{1,3})?)\s*(?:(?:adet|adt|ad|ag|a)\.?\s*[x×*]?|(?:kg|kq|k9|gr|g|lt|l)\.?\s*[x×*]|[x×])|(?:adet|adt)\.?\s*[x×*])\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})',
   caseSensitive: false,
 );
 final RegExp trailingXRe = RegExp(r'\s+x$', caseSensitive: false);
@@ -110,6 +122,12 @@ LocalParseResult parseReceiptText(String text, {DateTime? now}) {
   if (resolved != null) amount = resolved;
   final items = recoverBareAmounts(ex.items, ex.bare, amount, discount);
   final o = reconcile(items, amount, discount, ex.skipped);
+  if (o.needsReview && amount != null && vatExcludedItems(lines, o.items, o.discount, amount)) {
+    // E-fatura: kalem tutarları KDV'siz; toplam = kalemler + KDV ve "Ödenecek Tutar" etiketli. Uyuşmazlık değil.
+    o.needsReview = false;
+    o.itemsTotal = null;
+    o.info = const LocalReconciliation(recOK, reason: 'items_exclude_vat');
+  }
   return LocalParseResult(
     merchant: merchant,
     amount: amount,
@@ -126,7 +144,12 @@ LocalParseResult parseReceiptText(String text, {DateTime? now}) {
 List<String> splitLines(String text) {
   final out = <String>[];
   for (final l in text.replaceAll('\r', '').split('\n')) {
-    final t = fixTurkishGlyphs(l.replaceAllMapped(spacedDecimalRe, (m) => '${m[1]}${m[2]}')).trim();
+    final t = fixTurkishGlyphs(
+      l
+          .replaceAllMapped(spacedDecimalRe, (m) => '${m[1]}${m[2]}')
+          .replaceAllMapped(currencySuffixRe, (m) => m[1]!)
+          .replaceAllMapped(intCurrencyRe, (m) => '${m[1]}${m[2]},00'),
+    ).trim();
     if (t.isNotEmpty) out.add(t);
   }
   return out;
@@ -177,6 +200,21 @@ double? extractAmount(List<String> lines) {
         final b = amountsIn(lines[i + 1]);
         if (b.isNotEmpty) return b.last;
       }
+      // Uygulama fişlerinde (Toplam:) tutar etiketin üstüne yerleşebilir: yalnızca tutardan oluşan önceki satır
+      // da etiketin değeridir.
+      if (i > 0 && isAmountOnlyLine(lines[i - 1])) {
+        final c = amountsIn(lines[i - 1]);
+        if (c.length == 1) return c.first;
+      }
+      // Sütunlar yer değiştirmiş: KDV satırı hem KDV'yi hem toplamı taşır ("TOPKDV 307.85 22,79" + boş "TOPLAM").
+      // KDV toplamdan çok küçüktür (en fazla ~%20): büyük tutar toplamdır.
+      if (i > 0 && isKDVLine(lines[i - 1])) {
+        final d = amountsIn(lines[i - 1]);
+        if (d.length == 2) {
+          final hi = d[0] > d[1] ? d[0] : d[1], lo = d[0] > d[1] ? d[1] : d[0];
+          if (lo > 0 && hi >= lo * 5) return hi;
+        }
+      }
     }
   }
   // Son çare: KDV/yüzde satırları dışındaki en büyük tutar.
@@ -188,6 +226,14 @@ double? extractAmount(List<String> lines) {
     }
   }
   return best;
+}
+
+/// Satırın yalnızca bir tutardan (ve "*", "TL" gibi sütun işaretlerinden) oluştuğunu söyler.
+bool isAmountOnlyLine(String l) {
+  final m = amountRe.allMatches(l).toList();
+  if (m.length != 1) return false;
+  final rest = l.substring(0, m.first.start) + l.substring(m.first.end);
+  return trimChars(rest, ' *+\$=:-').isEmpty;
 }
 
 String? extractDate(List<String> lines, DateTime now) {
@@ -209,6 +255,7 @@ String? extractDate(List<String> lines, DateTime now) {
 String extractMerchant(List<String> header) {
   // Bilinen bir marka içeren ilk satır en güvenilir adaydır (Go: atlama/yıldız/harf filtreleri yok).
   for (final l in header) {
+    if (itemRowRe.hasMatch(l)) continue; // ürün satırı ("KASAR PEYNIR %01 *139,90") marka eşleşmesinden de dışlanır
     final f = foldTR(l);
     if (merchantBrands.any((kw) => containsWordFuzzy(f, kw))) return cleanMerchant(l);
   }
@@ -216,6 +263,7 @@ String extractMerchant(List<String> header) {
     final f = foldTR(l);
     if (skipMerchantWords.any(f.contains)) continue;
     if (isStarBanner(l)) continue; // "** ELEKTRIK KESILDI **" bilgi satırı işletme adı değildir
+    if (itemRowRe.hasMatch(l)) break; // başlık bitti (kırpılmış fişte ilk ürün satırı): sonrası işletme adı olamaz
     final cs = [for (final r in l.runes) String.fromCharCode(r)];
     final letters = cs.where(isLetterCh).length;
     final digits = cs.where(isDigitCh).length;
@@ -269,14 +317,26 @@ List<LocalItem> extractItems(List<String> lines, double? totalAmount) => extract
   final cands = <BareCandidate>[];
   final skipped = <LocalItem>[];
   var pendingName = ''; // üstteki satır yalnızca ürün adı (alttaki adet satırının kalemi olabilir)
+  final rev = reversalLines(lines);
   for (var li = 0; li < lines.length; li++) {
     var l = lines[li];
     if (isTotalLabel(l)) break; // Toplam satırından sonrası ödeme/alt bilgi
+    if (isCancelMarker(l)) {
+      pendingName = ''; // "** IPTAL **" bir ürün adı değildir
+      continue;
+    }
+    if (rev.contains(li)) {
+      // Geri alma satırı ("KIVI *-69,22"): kalem eklenmez, iptal edilen önceki kalem düşülür.
+      final na = nameAndAmount(l);
+      if (na != null) applyReversal(items, na.name, na.amount);
+      pendingName = '';
+      continue;
+    }
     final pending = pendingName;
     pendingName = '';
     final q = qtyPrefixRe.firstMatch(l);
     if (q != null) {
-      final qty = double.tryParse(q[1]!.replaceAll(',', '.')) ?? 0;
+      final qty = q[1] == null ? 0.0 : (double.tryParse(q[1]!.replaceAll(',', '.')) ?? 0);
       final unit = parseAmount(q[2]!) ?? 0;
       final rest = l.substring(q.end).trim();
       final m = amountRe.allMatches(maskDates(rest)).toList();

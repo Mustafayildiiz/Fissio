@@ -154,13 +154,14 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
   }
 
   Future<void> _pickDate() async {
+    final last = pickableToday();
     final d = await showDatePicker(
       context: context,
-      initialDate: _draft.date,
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
+      initialDate: clampPickerDate(_draft.date, last),
+      firstDate: kPickerFirstDate,
+      lastDate: last,
     );
-    if (d != null) setState(() => _draft.date = d);
+    if (d != null && mounted) setState(() => _draft.date = d);
   }
 
   Future<void> _pickCategory() async {
@@ -170,7 +171,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (final c in _app.categories) (c.id, c.name)],
       selected: _draft.categoryId,
     );
-    if (id != null) _setCategory(id);
+    if (id != null && mounted) _setCategory(id);
   }
 
   /// Fiş kategorisini kullanıcı seçti: "kontrol edin" uyarısı kalkar. Otomatik öneriden farklıysa
@@ -212,7 +213,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (final c in _app.categories) (c.id, c.name)],
       selected: _rows[i].categoryId,
     );
-    if (id != null) {
+    // Sayfa kapandıysa ya da satır bu arada silindiyse (i artık geçersiz) yapılacak bir şey yok.
+    if (id != null && mounted && i < _rows.length) {
       setState(() {
         _rows[i].categoryId = id;
         _rows[i].review = false;
@@ -259,7 +261,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       options: [for (var d = 1; d <= 31; d++) (d, 'Ayın $d. günü')],
       selected: _draft.recurringDay,
     );
-    if (day != null) {
+    if (day != null && mounted) {
       _recurringTouched = true;
       setState(() => _draft.recurringDay = day);
     }
@@ -407,6 +409,8 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
         context,
         !res.imagesOk
             ? 'Fiş kaydedildi ancak fotoğraflar yüklenemedi; fiş detayından tekrar ekleyin.'
+            : res.merged
+            ? 'Resmi fatura, mevcut sipariş kaydıyla birleştirildi (yeni fiş oluşturulmadı).'
             : res.queued
             ? 'Çevrimdışı kaydedildi. Bağlantı gelince otomatik yüklenecek.'
             : res.localOnly
@@ -415,7 +419,7 @@ class _ReceiptFormPageState extends State<ReceiptFormPage> {
       );
     } on ApiException catch (e) {
       // Ağ dışı hata (doğrulama, yetki): form ekranda kalır. Ağ hatasında fiş zaten cihaz kuyruğuna alınır.
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

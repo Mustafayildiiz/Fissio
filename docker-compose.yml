@@ -107,6 +107,10 @@ services:
       CATEGORY_MIN_CONFIDENCE: ${CATEGORY_MIN_CONFIDENCE:-0.5}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev_internal_token_change_me}
       AUTH_INTERNAL_URL: ${AUTH_INTERNAL_URL:-http://auth:9090}
+      # E-posta ile otomatik fis aktarimi (bos INBOUND_EMAIL_DOMAIN = kapali). Webhook: POST /webhooks/inbound-email.
+      INBOUND_EMAIL_DOMAIN: ${INBOUND_EMAIL_DOMAIN:-}
+      INBOUND_WEBHOOK_SECRET: ${INBOUND_WEBHOOK_SECRET:-}
+      INBOUND_MAX_BYTES: ${INBOUND_MAX_BYTES:-15728640}
       GIN_MODE: release
     depends_on:
       postgres:

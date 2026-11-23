@@ -1,3 +1,4 @@
+import 'api.dart' show ApiException;
 import 'models.dart';
 import 'money.dart';
 import 'theme.dart' show fmtMoney;
@@ -33,6 +34,14 @@ class BudgetProgress {
 
   /// Harcama / limit (1'i aşabilir).
   double get ratio => budget.limit <= 0 ? 0 : spent / budget.limit;
+
+  /// Gösterilen yüzde (aşağı yuvarlanmış), kuruş tamsayılarıyla: `0.57 * 100` = 56,999… olduğundan oranın kayan
+  /// noktalı tabanı 57/100 için "%56" gösteriyordu. Eşiklerle ([budgetLevel]) aynı aritmetik: %80 görünüyorsa sarıdır.
+  int get percent {
+    final l = (budget.limit * 100).round();
+    if (l <= 0) return 0;
+    return (spent * 100).round() * 100 ~/ l;
+  }
   BudgetLevel get level => budgetLevel(spent, budget.limit);
   double get remaining => budget.limit - spent;
 }
@@ -73,6 +82,94 @@ List<BudgetProgress> computeBudgetProgress(
       return a.budget.categoryName.compareTo(b.budget.categoryName);
     });
   return out;
+}
+
+enum BudgetLimitIssue {
+  ok,
+
+  /// Toplam bütçe düşürülürken kategori limitlerinin toplamının altında kalıyor.
+  totalBelowCategories,
+
+  /// Kategori limiti eklenirken/artırılırken kategori toplamı toplam bütçeyi aşıyor.
+  categoriesExceedTotal,
+}
+
+class BudgetLimitCheck {
+  const BudgetLimitCheck(this.issue, {this.categorySum = 0, this.totalLimit});
+  final BudgetLimitIssue issue;
+
+  /// Değişiklikten SONRAki kategori limitleri toplamı.
+  final double categorySum;
+
+  /// Değişiklikten sonraki toplam bütçe (yoksa null).
+  final double? totalLimit;
+
+  bool get ok => issue == BudgetLimitIssue.ok;
+
+  /// Tutarsızlığı gideren en küçük toplam bütçe (kategori toplamına eşitleme).
+  double get suggestedTotal => categorySum;
+
+  String get message => switch (issue) {
+    BudgetLimitIssue.ok => '',
+    BudgetLimitIssue.totalBelowCategories =>
+      'Toplam aylık bütçe, kategori limitlerinin toplamından (${fmtMoney(categorySum)}) küçük olamaz.',
+    BudgetLimitIssue.categoriesExceedTotal =>
+      'Kategori limitlerinin toplamı (${fmtMoney(categorySum)}) toplam aylık bütçeyi (${fmtMoney(totalLimit ?? 0)}) aşıyor.',
+  };
+}
+
+/// Tutarlılık kuralı: toplam aylık bütçe, kategori limitlerinin toplamından KÜÇÜK olamaz (eşit olabilir).
+///
+/// [categoryId] için [newLimit] konursa ([kTotalBudgetCategoryId] = toplam bütçe) durum kuruş üzerinden
+/// değerlendirilir; yalnızca durumu KÖTÜLEŞTİREN değişiklik reddedilir (`fazla = max(0, kategoriToplamı − toplam)`
+/// artıyorsa). Böylece eski bir senkronizasyondan kalan tutarsız veri, kullanıcının bir kategoriyi silmesini/
+/// düşürmesini ya da toplamı yükseltmesini engellemez. Toplam bütçe yoksa kategoriler serbesttir; silme her zaman serbesttir
+/// (bu fonksiyon silmede çağrılmaz). Yalnızca [profileUid] profilinin (bekleyen kuyruk dahil) limitlerine bakar.
+BudgetLimitCheck checkBudgetLimit({
+  required List<Budget> budgets,
+  required String profileUid,
+  required int categoryId,
+  required double newLimit,
+}) {
+  int cents(double v) => (v * 100).round();
+  var oldCat = 0;
+  int? oldTotal;
+  for (final b in budgets) {
+    if (b.profileUid != profileUid) continue;
+    if (b.isTotal) {
+      oldTotal = cents(b.limit);
+    } else {
+      oldCat += cents(b.limit);
+    }
+  }
+  var newCat = oldCat;
+  var newTotal = oldTotal;
+  if (categoryId == kTotalBudgetCategoryId) {
+    newTotal = cents(newLimit);
+  } else {
+    final prev = budgets
+        .where((b) => b.profileUid == profileUid && b.categoryId == categoryId)
+        .firstOrNull;
+    newCat = oldCat - (prev == null ? 0 : cents(prev.limit)) + cents(newLimit);
+  }
+  int excess(int cat, int? total) => total == null || cat <= total ? 0 : cat - total;
+  final worse = excess(newCat, newTotal) > excess(oldCat, oldTotal);
+  double lira(int c) => c / 100;
+  if (!worse) return BudgetLimitCheck(BudgetLimitIssue.ok, categorySum: lira(newCat), totalLimit: newTotal == null ? null : lira(newTotal));
+  return BudgetLimitCheck(
+    categoryId == kTotalBudgetCategoryId ? BudgetLimitIssue.totalBelowCategories : BudgetLimitIssue.categoriesExceedTotal,
+    categorySum: lira(newCat),
+    totalLimit: newTotal == null ? null : lira(newTotal),
+  );
+}
+
+/// Sunucunun kabul ettiği en büyük aylık limit (`budgets.go maxBudgetLimit`, hariç).
+const kMaxBudgetLimit = 1e9;
+
+/// [AppState.setBudget] tutarlılık kuralına takıldığında atılır (arayüz `check`'e göre "toplamı eşitle" önerir).
+class BudgetLimitException extends ApiException {
+  BudgetLimitException(this.check) : super(check.message);
+  final BudgetLimitCheck check;
 }
 
 /// Gönderilecek tek bir bütçe bildirimi.

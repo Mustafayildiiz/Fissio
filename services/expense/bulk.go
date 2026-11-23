@@ -24,7 +24,7 @@ type bulkInput struct {
 type bulkResult struct {
 	Index     int    `json:"index"`
 	ClientUID string `json:"client_uid"`
-	Status    string `json:"status"` // created | skipped | error
+	Status    string `json:"status"` // created | skipped | merged (mevcut on ozete birlestirildi; id = hedef) | error
 	ID        int64  `json:"id,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -79,7 +79,7 @@ func (h *handler) bulkExpenses(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	created, skipped, failed := 0, 0, 0
+	created, skipped, merged, failed := 0, 0, 0, 0
 	for i := range in.Expenses {
 		e := &in.Expenses[i]
 		res := bulkResult{Index: i, ClientUID: e.ClientUID}
@@ -121,9 +121,19 @@ func (h *handler) bulkExpenses(c *gin.Context) {
 			serverError(c)
 			return
 		}
-		id, wasCreated, err := insertExpense(tx, userID, pid, e.ClientUID, *e, d, string(itemsJSON))
-		if err == nil && wasCreated {
+		id, outcome, dup, err := writeExpense(tx, userID, pid, e.ClientUID, *e, d, string(itemsJSON))
+		if err == nil && outcome == writeCreated {
 			err = saveRules(tx, userID, collectRuleUpdates(*e))
+		}
+		if dup != "" {
+			// Mukerrer belge/siparis: yazilmadi; unique ihlali islemi bozmus olabilir, SAVEPOINT'e don ve istemciye bildir
+			// (istemci kuyruktan atar, tekrar denemez).
+			if _, rerr := tx.Exec(`ROLLBACK TO SAVEPOINT bulk_item`); rerr != nil {
+				serverError(c)
+				return
+			}
+			fail(dup)
+			continue
 		}
 		if err != nil {
 			var pqErr *pq.Error
@@ -144,10 +154,14 @@ func (h *handler) bulkExpenses(c *gin.Context) {
 			return
 		}
 		res.ID = id
-		if wasCreated {
+		switch outcome {
+		case writeCreated:
 			res.Status = "created"
 			created++
-		} else {
+		case writeMerged:
+			res.Status = "merged"
+			merged++
+		default:
 			res.Status = "skipped"
 			skipped++
 		}
@@ -157,7 +171,7 @@ func (h *handler) bulkExpenses(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"created": created, "skipped": skipped, "failed": failed, "results": results})
+	c.JSON(http.StatusOK, gin.H{"created": created, "skipped": skipped, "merged": merged, "failed": failed, "results": results})
 }
 
 func categoryKnown(id int, cats []Category) bool {

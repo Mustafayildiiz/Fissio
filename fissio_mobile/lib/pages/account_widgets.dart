@@ -398,6 +398,17 @@ class _OtpFieldState extends State<OtpField> {
     widget.controller.addListener(_rebuild);
   }
 
+  /// Üst widget denetleyiciyi değiştirirse dinleyici yenisine taşınır (eskisinde kalırsa alan güncellenmez ve
+  /// eski denetleyici dispose edildiğinde sızar).
+  @override
+  void didUpdateWidget(OtpField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      oldWidget.controller.removeListener(_rebuild);
+      widget.controller.addListener(_rebuild);
+    }
+  }
+
   @override
   void dispose() {
     widget.controller.removeListener(_rebuild);
@@ -405,7 +416,9 @@ class _OtpFieldState extends State<OtpField> {
     super.dispose();
   }
 
-  void _rebuild() => setState(() {});
+  void _rebuild() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -32,8 +32,17 @@ class ApiException implements Exception {
     this.current,
   });
 
+  /// Sunucu kimliği/oturumu reddetti (401/403). 5xx ve ağ hataları geçicidir ve oturumu bitirmemelidir.
+  bool get sessionRejected => status == 401 || status == 403;
+
   /// Düzenleme, dayandığı sürümden (`base_updated_at`) sonra sunucuda değişmiş bir fişe yapıldı; yazılmadı.
   bool get conflict => status == 409 && code == 'conflict';
+
+  /// Aynı dijital fatura (ETTN / VKN_FaturaNo) hesapta zaten ekli (`POST|PUT /expenses` 409).
+  bool get duplicateDocument => status == 409 && code == 'duplicate_document';
+
+  /// Aynı sipariş + aynı belge türü hesapta zaten var.
+  bool get duplicateOrder => status == 409 && code == 'duplicate_order';
   @override
   String toString() => message;
 }
@@ -100,7 +109,8 @@ class DeviceSession {
   );
 }
 
-/// `POST /expenses/bulk` yanıtı: fiş başına sonuç (created | skipped | error).
+/// `POST /expenses/bulk` yanıtı: fiş başına sonuç (created | skipped | merged | error). `merged`: resmi fatura sunucuda
+/// mevcut bir ön özet kaydına birleştirildi (id = hedef kayıt).
 class BulkItemResult {
   final int index;
   final String clientUid;
@@ -108,7 +118,114 @@ class BulkItemResult {
   final int? id;
   final String? error;
   const BulkItemResult(this.index, this.clientUid, this.status, this.id, this.error);
-  bool get ok => status == 'created' || status == 'skipped';
+  bool get ok => status == 'created' || status == 'skipped' || status == 'merged';
+}
+
+/// `GET /inbound-address`: kullanıcıya özel e-posta yönlendirme adresi ve son aktarım durumu. [enabled] false ise sunucuda
+/// özellik yapılandırılmamıştır (INBOUND_EMAIL_DOMAIN boş): diğer alanlar boştur ve arayüz adımı/sihirbazı gizler.
+class InboundAddress {
+  final bool enabled;
+  final String address;
+  final int? profileId;
+
+  /// Son başarılı aktarım (fiş oluştu / birleşti / mükerrer); henüz yoksa null.
+  final DateTime? lastReceivedAt;
+  final String? lastStatus;
+
+  /// Kullanıcı aktarımı duraklattı: gelen mailler fişe dönüşmez (adres ve geçmiş korunur).
+  final bool paused;
+  const InboundAddress({
+    this.enabled = false,
+    this.address = '',
+    this.profileId,
+    this.lastReceivedAt,
+    this.lastStatus,
+    this.paused = false,
+  });
+
+  /// Aktarım çalışıyor mu: en az bir e-posta işlenmiş.
+  bool get active => enabled && lastReceivedAt != null;
+
+  /// Değer eşitliği: sihirbazın 5 sn'lik yoklaması değişmemiş durumda uygulamayı yeniden çizdirmesin.
+  @override
+  bool operator ==(Object other) =>
+      other is InboundAddress &&
+      other.enabled == enabled &&
+      other.address == address &&
+      other.profileId == profileId &&
+      other.lastReceivedAt == lastReceivedAt &&
+      other.lastStatus == lastStatus &&
+      other.paused == paused;
+
+  @override
+  int get hashCode => Object.hash(enabled, address, profileId, lastReceivedAt, lastStatus, paused);
+
+  factory InboundAddress.fromJson(Map<String, dynamic> j) => InboundAddress(
+    enabled: (j['enabled'] as bool?) ?? false,
+    address: (j['address'] as String?) ?? '',
+    profileId: (j['profile_id'] as num?)?.toInt(),
+    lastReceivedAt: j['last_received_at'] == null ? null : DateTime.tryParse(j['last_received_at'] as String)?.toLocal(),
+    lastStatus: j['last_status'] as String?,
+    paused: (j['paused'] as bool?) ?? false,
+  );
+}
+
+/// Gmail yönlendirme onayı (`GET /inbound-address/confirmation`): kod ve/veya (yalnızca Google'a ait) onay bağlantısı.
+/// İkisi de isteğe bağlıdır: sunucu kodsuz onayda `code` alanını hiç göndermez; boş/null değerler `null` sayılır.
+class ForwardingConfirmation {
+  final String? code;
+  final String? link;
+  final DateTime? receivedAt;
+  ForwardingConfirmation(String? code, String? link, this.receivedAt)
+      : code = _blankToNull(code),
+        link = _blankToNull(link);
+
+  bool get hasCode => code != null;
+  bool get hasLink => link != null;
+
+  static String? _blankToNull(String? s) {
+    final t = s?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
+}
+
+/// `GET /inbound-address/history` satırı: webhook'a gelen bir e-postanın akıbeti. Gövde/ek saklanmaz; yalnız gönderici,
+/// konu, durum ([status]: saved | ignored | failed), neden ve (varsa) ilgili fiş.
+class InboundHistoryItem {
+  final int id;
+  final String source;
+  final String from;
+  final String subject;
+  final DateTime? receivedAt;
+  final String status;
+  final String? reason;
+  final int? expenseId;
+  const InboundHistoryItem({
+    required this.id,
+    this.source = 'email',
+    this.from = '',
+    this.subject = '',
+    this.receivedAt,
+    required this.status,
+    this.reason,
+    this.expenseId,
+  });
+
+  bool get saved => status == 'saved';
+
+  /// Dokununca fişe gidilebilir mi (kaydedildi ya da mükerrer olarak mevcut bir fişe işaret ediyor).
+  bool get hasExpense => expenseId != null && expenseId! > 0;
+
+  factory InboundHistoryItem.fromJson(Map<String, dynamic> j) => InboundHistoryItem(
+    id: (j['id'] as num?)?.toInt() ?? 0,
+    source: (j['source'] as String?) ?? 'email',
+    from: (j['from'] as String?) ?? '',
+    subject: (j['subject'] as String?) ?? '',
+    receivedAt: j['received_at'] is String ? DateTime.tryParse(j['received_at'] as String)?.toLocal() : null,
+    status: (j['status'] as String?) ?? 'ignored',
+    reason: j['reason'] as String?,
+    expenseId: (j['expense_id'] as num?)?.toInt(),
+  );
 }
 
 class BulkResponse {
@@ -205,7 +322,14 @@ class ApiClient {
     bool authed = true,
     Duration timeout = const Duration(seconds: 10),
   }) async {
-    if (authed && _tokens != null) await _refreshIfExpiring();
+    if (authed && _tokens != null) {
+      try {
+        await _refreshIfExpiring();
+      } on ApiException catch (e) {
+        // Ağ yokluğu isteği zaten düşürürdü; geçici sunucu hatasında (5xx/429) token henüz geçerli olabilir: isteği dene.
+        if (e.network) rethrow;
+      }
+    }
     var used = _tokens?.access;
     var r = await _sendOnce(build(), timeout);
 
@@ -262,7 +386,9 @@ class ApiClient {
       msg,
       status: r.statusCode,
       code: code,
-      retryAfter: (e?['retry_after'] as num?)?.toInt(),
+      // Gövde (auth OTP bekleme süresi) yoksa standart `Retry-After` başlığı (saniye): sunucu genel hız sınırında
+      // (429), tarama sınırında ve `auth_unavailable` (503) yalnız başlığı gönderir.
+      retryAfter: (e?['retry_after'] as num?)?.toInt() ?? int.tryParse(r.headers['retry-after']?.trim() ?? ''),
       current: current,
     );
   }
@@ -292,8 +418,10 @@ class ApiClient {
       setTokens(AuthTokens.fromJson(j as Map<String, dynamic>));
       return true;
     } on ApiException catch (e) {
-      if (e.network) rethrow; // bağlantı yokken oturumu düşürme
-      return false;
+      // Yalnızca sunucunun refresh token'ı AÇIKÇA reddetmesi (400/401/403) oturumu bitirir. Ağ yokluğu, 5xx (DB yeniden
+      // başlangıcı, deploy, proxy 502) ve 429 geçicidir: oturum korunur, istek bu hatayla düşer, sonraki deneme dener.
+      if (e.sessionRejected || e.status == 400) return false;
+      rethrow;
     }
   }
 
@@ -334,6 +462,9 @@ class ApiClient {
       'auth_unavailable': 'Sunucu hazırlanıyor, birkaç saniye sonra tekrar deneyin.',
       'last_profile': 'Son profil silinemez.',
       'conflict': 'Fiş başka bir cihazda değiştirilmiş.',
+      'duplicate_document': 'Bu dijital fatura zaten eklenmiş.',
+      'duplicate_order': 'Bu sipariş zaten eklenmiş.',
+      'document_locked': 'Bu kayıt zaten başka bir resmi faturaya bağlı; üzerine yeni belge yazılamaz.',
     };
     if (code != null && byCode.containsKey(code)) return byCode[code]!;
     const map = {
@@ -576,6 +707,52 @@ class ApiClient {
           as Map<String, dynamic>;
 
   Future<void> deleteBudget(int id) => _send('DELETE', _expense, '/budgets/$id');
+
+  // --- E-posta ile otomatik fiş aktarımı ---
+
+  /// Kullanıcıya özel yönlendirme adresi (yoksa sunucu üretir). Özellik kapalıysa `enabled: false`.
+  Future<InboundAddress> inboundAddress() async =>
+      InboundAddress.fromJson(await _send('GET', _expense, '/inbound-address') as Map<String, dynamic>);
+
+  /// Aktarılan fişlerin düşeceği profil (null = en eski/varsayılan profil).
+  Future<InboundAddress> setInboundProfile(int? profileId) async => InboundAddress.fromJson(
+    await _send('PUT', _expense, '/inbound-address', body: {'profile_id': profileId ?? 0}) as Map<String, dynamic>,
+  );
+
+  /// Adresi yeniler (eski adres hemen geçersiz olur).
+  Future<InboundAddress> rotateInboundAddress() async =>
+      InboundAddress.fromJson(await _send('POST', _expense, '/inbound-address/rotate') as Map<String, dynamic>);
+
+  /// Aktarımı duraklatır / sürdürür (adres ve geçmiş korunur; idempotent).
+  Future<InboundAddress> setInboundPaused(bool paused) async => InboundAddress.fromJson(
+    await _send('POST', _expense, paused ? '/inbound-address/pause' : '/inbound-address/resume') as Map<String, dynamic>,
+  );
+
+  /// Son 24 saatteki Gmail yönlendirme onayı; bekleyen yoksa null.
+  Future<ForwardingConfirmation?> forwardingConfirmation() async {
+    final j = await _send('GET', _expense, '/inbound-address/confirmation');
+    if (j is! Map<String, dynamic>) return null;
+    final code = j['code'];
+    final link = j['link'];
+    final at = j['received_at'];
+    return ForwardingConfirmation(
+      code is String ? code : null,
+      link is String ? link : null,
+      at is String ? DateTime.tryParse(at)?.toLocal() : null,
+    );
+  }
+
+  /// Son aktarılan e-postalar (yeniden eskiye; sunucu en çok 50 tutar). Özellik kapalıysa boş liste.
+  Future<List<InboundHistoryItem>> inboundHistory({int limit = 20}) async {
+    final j = await _send('GET', _expense, '/inbound-address/history?limit=$limit');
+    if (j is! Map<String, dynamic>) return const [];
+    final items = j['items'];
+    if (items is! List) return const [];
+    return [
+      for (final e in items)
+        if (e is Map<String, dynamic>) InboundHistoryItem.fromJson(e),
+    ];
+  }
 
   // --- Fiş fotoğrafları (hesaba bağlı, sunucuda saklanır) ---
   /// Bir fişe fotoğraf yükler (tekrarlanan `file` alanı); yeni görsel kimliklerini döner.

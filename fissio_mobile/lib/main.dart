@@ -13,9 +13,8 @@ final navigatorKey = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // İlk kareler doğru tema/vurgu ile çizilsin diye tercihler runApp'ten önce yüklenir.
-  await themeController.load();
-  await onboardingController.load();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  await Future.wait([themeController.load(), onboardingController.load()]);
   runApp(const FissioApp());
 }
 

@@ -61,6 +61,10 @@ CREATE TABLE IF NOT EXISTS expense.category_rules (
 		return err
 	}
 
+	if err := migrateInbound(db); err != nil {
+		return err
+	}
+
 	// Marka ve urun sozlugu kodda (internal/receiptparse/category_lexicon.go); keywords kolonu ek/ozel marka anahtar
 	// kelimeleri icindir ve bos baslar.
 	seed := []string{
@@ -145,11 +149,67 @@ ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_kind TEXT NOT NU
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS recurring_estimate NUMERIC(12,2) CHECK (recurring_estimate > 0);
 -- ocr_engine: fisi okuyan OCR motoru (paddleocr | custom | mlkit); NULL = manuel girilen / eski kayit. Yalniz bilgi amacli.
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS ocr_engine TEXT;
+-- document_no: dijital fatura kimligi (ETTN UUID ya da VKN_FaturaNo). Ayni hesapta ayni belge ikinci kez eklenemez
+-- (kismi tekil indeks); NULL (fis/manuel/numarasiz belge) mukerrer denetimine girmez.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS document_no TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_expenses_document_no ON expense.expenses (user_id, document_no) WHERE document_no IS NOT NULL;
+-- order_id: platform siparis kodu (Yemeksepeti/Trendyol/Google Play...). has_official_invoice: kayit resmi bir E-Arsiv/E-Fatura
+-- belgesine dayaniyor mu — document_no'dan TURETILIR (API'de salt okunur; geri alinamaz kilit: document_no PUT ile silinemez).
+-- Ayni hesapta ayni siparis kodu + ayni belge turu ikinci kez eklenemez; on ozet (false) ile resmi fatura (true) bir arada
+-- bulunabilir ve smart-merge (bkz. digital_merge.go) ikisini tek kayda indirir.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS has_official_invoice BOOLEAN GENERATED ALWAYS AS (document_no IS NOT NULL) STORED;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_expenses_order_kind ON expense.expenses (user_id, order_id, has_official_invoice) WHERE order_id IS NOT NULL;
+-- merged_client_uids: bu kayda BIRLESTIRILEN fislerin client_uid'leri. Birlestirme yeni kayit acmadigindan, yaniti kaybolan bir
+-- istegin (cevrimdisi kuyruk / webhook yeniden denemesi) tekrari mukerrer gorunurdu; artik ayni client_uid ayni hedefe cozulur.
+ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS merged_client_uids TEXT[] NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS idx_expenses_user_spent ON expense.expenses (user_id, spent_at);
 CREATE INDEX IF NOT EXISTS idx_expenses_recurring ON expense.expenses (profile_id) WHERE recurring_day IS NOT NULL;
 -- Son degisiklik zamani: iyimser eszamanlilik (PUT base_updated_at -> 409) ve artimli liste (GET /expenses?since=).
 -- INSERT varsayilanla, her UPDATE acikca (bkz. updateExpense) gunceller; fotograf ekleme/silme guncellemez.
 ALTER TABLE expense.expenses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 CREATE INDEX IF NOT EXISTS idx_expenses_user_updated ON expense.expenses (user_id, updated_at);`)
+	return err
+}
+
+// migrateInbound e-posta ile otomatik fis aktarimi tablolari (idempotent):
+//   - inbound_aliases: kullanici basina tek, tahmin edilemez yonlendirme takma adi (<alias>@INBOUND_EMAIL_DOMAIN);
+//     profile_id = fislerin dusecegi profil (NULL = en eski/varsayilan profil), last_* = son aktarim durumu.
+//   - forwarding_confirmations: Gmail yonlendirme onay kodu/baglantisi (fis degildir; mobil istemci ceker).
+//   - inbound_history: her gelen mailin akibeti (saved/ignored/failed + neden + fis kimligi); icerik saklanmaz.
+//
+// Hepsi user_id tasir: hesap silinince internal.go userOwnedTables ile temizlenir.
+func migrateInbound(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS expense.inbound_aliases (
+	user_id          BIGINT PRIMARY KEY,
+	alias            TEXT NOT NULL UNIQUE,
+	profile_id       BIGINT REFERENCES expense.profiles(id) ON DELETE SET NULL,
+	created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+	last_received_at TIMESTAMPTZ,
+	last_status      TEXT
+);
+ALTER TABLE expense.inbound_aliases ADD COLUMN IF NOT EXISTS paused BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS expense.forwarding_confirmations (
+	id          BIGSERIAL PRIMARY KEY,
+	user_id     BIGINT NOT NULL,
+	code        TEXT NOT NULL,
+	link        TEXT,
+	received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_forwarding_conf_user ON expense.forwarding_confirmations (user_id, received_at DESC);
+CREATE TABLE IF NOT EXISTS expense.inbound_history (
+	id          BIGSERIAL PRIMARY KEY,
+	user_id     BIGINT NOT NULL,
+	received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	source      TEXT NOT NULL DEFAULT 'email',
+	from_addr   TEXT,
+	subject     TEXT,
+	status      TEXT NOT NULL CHECK (status IN ('saved', 'ignored', 'failed')),
+	reason      TEXT,
+	expense_id  BIGINT REFERENCES expense.expenses(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_history_user ON expense.inbound_history (user_id, received_at DESC);`)
 	return err
 }
 

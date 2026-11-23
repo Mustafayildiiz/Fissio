@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:fissio_mobile/services/launcher_icon.dart';
+import 'package:fissio_mobile/services/pdf_reader.dart';
+import 'package:fissio_mobile/services/share_intent.dart';
 import 'package:fissio_mobile/services/scan_camera.dart';
 import 'package:fissio_mobile/services/notifier.dart';
 import 'package:fissio_mobile/services/widget_sync.dart';
@@ -58,6 +60,47 @@ class FakeWidgetSync implements WidgetSync {
 
   @override
   Future<void> update(WidgetPayload? payload) async => updates.add(payload);
+
+  /// `updateTheme` çağrıları: (tema adı, marka rengi ARGB).
+  final themes = <(String, int)>[];
+  @override
+  Future<void> updateTheme(String theme, int accentArgb) async => themes.add((theme, accentArgb));
+}
+
+/// PDF okuyucu sahtesi: [textPages] metin katmanı, [pageImages] taranmış PDF'in sayfa görselleri; [failure] ile hata.
+class FakePdfReader implements PdfReader {
+  FakePdfReader({this.textPages = const [], this.pageImages = const [], this.failure});
+  List<String> textPages;
+  List<Uint8List> pageImages;
+  PdfReadException? failure;
+  final paths = <String>[];
+  int renderCalls = 0;
+
+  @override
+  Future<List<String>> readText(String path, {int maxPages = 6}) async {
+    paths.add(path);
+    if (failure != null) throw failure!;
+    return textPages;
+  }
+
+  @override
+  Future<List<Uint8List>> renderPages(String path, {int maxPages = 6}) async {
+    renderCalls++;
+    if (failure != null) throw failure!;
+    return pageImages;
+  }
+}
+
+/// Paylaşım köprüsü sahtesi: [initial] soğuk açılış dosyası, [emit] ile sıcak açılış.
+class FakeShareIntent implements ShareIntentPort {
+  FakeShareIntent({this.initial});
+  String? initial;
+  final _c = StreamController<String>.broadcast();
+  @override
+  Future<String?> initialFile() async => initial;
+  @override
+  Stream<String> get files => _c.stream;
+  void emit(String path) => _c.add(path);
 }
 
 class FakeLauncherIcon implements LauncherIcon {

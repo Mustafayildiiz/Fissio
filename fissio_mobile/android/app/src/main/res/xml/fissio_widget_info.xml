@@ -3,7 +3,7 @@
     android:description="@string/widget_description"
     android:initialLayout="@layout/fissio_widget"
     android:previewLayout="@layout/fissio_widget"
-    android:minWidth="180dp"
+    android:minWidth="220dp"
     android:minHeight="110dp"
     android:minResizeWidth="140dp"
     android:minResizeHeight="90dp"

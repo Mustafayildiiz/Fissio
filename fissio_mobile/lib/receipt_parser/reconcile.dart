@@ -135,7 +135,38 @@ int uniqueAmountIndex(List<LocalItem> items, double v) {
 ///   - nakit ödemede ödenen − para üstü = toplam (225,00 − 1,35 = 223,65).
 /// Mevcut toplam zaten tutarlıysa null. Yalnızca toplam/KDV etiketli ilk satırdan itibaren olan blok
 /// kullanılır; ARA TOPLAM ve İNDİRİM satırlarının tutarları havuza girmez.
+/// Kalem tutarları KDV'siz yazılmış faturaları (e-fatura / e-arşiv) tanıyıp uyuşmazlık saymaz (Go `vatExcludedItems`):
+/// toplam kesin "ödenecek / vergiler dahil / genel toplam" etiketli ve (toplam − kalemler) farkı bir KDV satırının (ya da
+/// KDV satırları toplamının) tutarına eşit. Etiket şart: yalnız tesadüfen KDV'ye eşit fark yeterli değildir.
+bool vatExcludedItems(List<String> lines, List<LocalItem> items, double discount, double total) {
+  if (!_labeledGrandTotal(lines, total)) return false;
+  final missing = round2(total - (sumItems(items) - discount));
+  if (missing <= 0.005) return false;
+  final each = <double>[];
+  var sum = 0.0;
+  for (final l in lines) {
+    if (!isKDVLine(l)) continue;
+    final a = amountsIn(l);
+    if (a.isEmpty) continue;
+    each.add(a.last);
+    if (!hasPhrase(l, 'topkdv') && !hasKeyword(l, 'toplam', fuzzyMinLen)) sum += a.last;
+  }
+  each.add(round2(sum));
+  return each.any((v) => v > 0 && approxEq(v, missing));
+}
+
+bool _labeledGrandTotal(List<String> lines, double v) {
+  for (final l in lines) {
+    if (!(hasKeyword(l, 'odenecek', fuzzyMinLen) || hasPhrase(l, 'vergilerdahil') || hasPhrase(l, 'geneltoplam'))) continue;
+    if (amountsIn(l).any((a) => (a - v).abs() < 0.005)) return true;
+  }
+  return false;
+}
+
 double? resolveTotal(List<String> lines, List<LocalItem> items, double discount, double? current) {
+  // Açıkça "ÖDENECEK TUTAR / VERGİLER DAHİL TOPLAM / GENEL TOPLAM" etiketli satırdaki tutar kesin toplamdır (e-fatura:
+  // kalem toplamı KDV'siz ara toplamdır ve alt blokta geçer; toplam olarak ezilmemeli).
+  if (current != null && _labeledGrandTotal(lines, current)) return null;
   var start = -1;
   for (var i = 0; i < lines.length; i++) {
     final l = lines[i];

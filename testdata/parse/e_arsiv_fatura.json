@@ -1,0 +1,24 @@
+{
+  "expect": {
+    "amount": 82.5,
+    "date": "2026-10-05",
+    "discount_total": 0,
+    "item_count": 2,
+    "items": [
+      {
+        "name": "Süt 1 L 2 Adet 30,00 TL",
+        "amount": 60
+      },
+      {
+        "name": "Ekmek 1 Adet 15,00 TL",
+        "amount": 15
+      }
+    ],
+    "merchant": "ACME GIDA TICARET A.S.",
+    "needs_review": false
+  },
+  "known_divergence": [],
+  "name": "e_arsiv_fatura",
+  "note": "Metin katmanli e-Arsiv fatura PDF'inden cikan metin (dijital fis): kalem toplami KDV'siz ara toplamdir ve 'Mal Hizmet Toplam Tutari' olarak alt blokta gecer; 'Odenecek Tutar' etiketli tutar kesin toplamdir (kalem toplami toplami ezmez). Kalem satirlarinda birim fiyat degil satir tutari (en sagdaki) alinir.",
+  "text": "ACME GIDA TICARET A.S.\nVKN: 1750051846\ne-Arşiv Fatura\nETTN: F47AC10B-58CC-4372-A567-0E02B2C3D479\nFatura No: GIB2026000000123\nFatura Tarihi: 05-10-2026\nMal Hizmet Açıklaması Miktar Birim Fiyat Tutar\nSüt 1 L 2 Adet 30,00 TL 60,00 TL\nEkmek 1 Adet 15,00 TL 15,00 TL\nMal Hizmet Toplam Tutarı 75,00 TL\nHesaplanan KDV (%10) 7,50 TL\nÖdenecek Tutar 82,50 TL"
+}

@@ -10,9 +10,10 @@ import '../theme.dart';
 import '../widgets.dart';
 import '../profile_avatar.dart';
 import 'account_widgets.dart';
-import 'avatar_picker.dart';
+import 'profile_edit_page.dart';
 import 'auth_page.dart';
 import 'data_management_page.dart';
+import 'email_import_card.dart' show EmailImportSettingsRow;
 import 'info_page.dart';
 import 'onboarding_page.dart';
 import '../app_info.dart';
@@ -53,16 +54,30 @@ class ProfileAvatar extends StatelessWidget {
 }
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, this.onboarding});
+  const SettingsPage({super.key, this.onboarding, this.inboundApp});
 
   /// Verilmezse global [onboardingController] (testlerde sahte depolu denetleyici verilir).
   final OnboardingController? onboarding;
 
+  /// Rehberin e-posta adımı kararı (ve adımdaki adres/sihirbaz) için kullanılan durum; verilmezse global [appState].
+  final AppState? inboundApp;
+
   /// Tanıtımı açar; bitince/kapatınca Ayarlar'a döner, satır görünür kalır.
-  void _openOnboarding(BuildContext context, OnboardingController ctrl) {
-    Navigator.of(context).push(
+  ///
+  /// E-posta ile otomatik aktarım kullanılabilirse (bulut senkronu açık + sunucuda yapılandırılmış) rehber 4. adım olarak
+  /// onu da anlatır. Karar sayfa AÇILMADAN verilir (adım sayacı akış boyunca sabit kalır; bkz. `AccountReadyPage`).
+  Future<void> _openOnboarding(BuildContext context, OnboardingController ctrl) async {
+    final a = inboundApp ?? appState;
+    await a.loadInbound();
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => OnboardingPage(controller: ctrl, signUp: false),
+        builder: (_) => OnboardingPage(
+          controller: ctrl,
+          signUp: false,
+          includeEmailStep: a.emailImportAvailable,
+          app: inboundApp,
+        ),
       ),
     );
   }
@@ -77,6 +92,53 @@ class SettingsPage extends StatelessWidget {
 
   void _push(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  /// Profil kartına dokununca: tek akış — profil değiştir ya da aktif profilin adını/avatarını düzenle.
+  void _profileActions(BuildContext context) {
+    final c = context.c;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(appState.displayName, style: FissioText.title(c, size: 22)),
+              const SizedBox(height: 12),
+              GroupedCard(
+                children: [
+                  ListRow(
+                    key: const ValueKey('profile-switch'),
+                    leading: IconTile(LucideIcons.repeat, size: 30, radius: 8),
+                    title: 'Profil değiştir',
+                    chevron: true,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _push(context, const ProfileSelectPage());
+                    },
+                  ),
+                  if (appState.activeProfile != null)
+                    ListRow(
+                      key: const ValueKey('profile-edit'),
+                      leading: IconTile(LucideIcons.pencil, size: 30, radius: 8),
+                      title: 'Profili düzenle',
+                      subtitle: 'Ad ve profil fotoğrafı',
+                      chevron: true,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _push(context, const ProfileEditPage());
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _toAuth(BuildContext context) {
@@ -171,7 +233,8 @@ class SettingsPage extends StatelessWidget {
                     GroupedCard(
                       children: [
                         InkWell(
-                          onTap: () => _push(context, const ProfileSelectPage()),
+                          key: const ValueKey('settings-profile-card'),
+                          onTap: () => _profileActions(context),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             child: Row(
@@ -206,20 +269,6 @@ class SettingsPage extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (appState.activeProfile != null)
-                          ListRow(
-                            key: const ValueKey('change-avatar'),
-                            leading: Icon(LucideIcons.camera, size: 20, color: c.accentInk),
-                            title: 'Profil fotoğrafını değiştir',
-                            titleColor: c.accentInk,
-                            onTap: () => changeProfileAvatar(context, appState.activeProfile!),
-                          ),
-                        ListRow(
-                          leading: Icon(LucideIcons.repeat, size: 20, color: c.accentInk),
-                          title: 'Profil değiştir',
-                          titleColor: c.accentInk,
-                          onTap: () => _push(context, const ProfileSelectPage()),
-                        ),
                       ],
                     ),
                     const Rule2(margin: EdgeInsets.fromLTRB(0, 14, 0, 6)),
@@ -227,6 +276,8 @@ class SettingsPage extends StatelessWidget {
                       children: [
                         _row(context, LucideIcons.slidersHorizontal, 'Tercihler',
                             () => _push(context, const PreferencesPage())),
+                        // Bağımsız interaktif rehber: e-posta kurulum sihirbazı. "Yeni" rozeti sihirbaz/kart açılınca kaybolur.
+                        const EmailImportSettingsRow(),
                         _row(context, LucideIcons.database, 'Veri Yönetimi',
                             () => _push(context, const DataManagementPage())),
                       ],
@@ -234,7 +285,7 @@ class SettingsPage extends StatelessWidget {
                     const SizedBox(height: 12),
                     GroupedCard(
                       children: [
-                        _row(context, LucideIcons.bookOpen, 'Tanıtım Rehberini Görüntüle',
+                        _row(context, LucideIcons.bookOpen, 'Uygulama Rehberi / Tanıtımı',
                             () => _openOnboarding(context, onb)),
                         _row(context, LucideIcons.lifeBuoy, 'Destek',
                             () => _push(context, const SupportPage())),

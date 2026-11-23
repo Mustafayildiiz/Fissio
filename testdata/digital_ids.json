@@ -1,0 +1,107 @@
+{
+  "note": "ExtractDocumentNo + ExtractOrderID: Go otorite, Dart ikizi (digital_receipt.dart / digital_ids.dart).",
+  "cases": [
+    {
+      "name": "ettn_etiketli",
+      "text": "e-Arşiv Fatura\nETTN: 3F2A9C1E-5B7D-4E8A-9C3D-1A2B3C4D5E6F\nToplam 10,00",
+      "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+      "order_id": ""
+    },
+    {
+      "name": "ettn_sonraki_satir",
+      "text": "ETTN\n3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f\nToplam 10,00",
+      "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+      "order_id": ""
+    },
+    {
+      "name": "etiketsiz_uuid_kimlik_degil",
+      "text": "Mağaza Kodu 3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f\nToplam 10,00",
+      "document_no": "",
+      "order_id": ""
+    },
+    {
+      "name": "vkn_fatura_no",
+      "text": "Satıcı VKN: 1234567890\nFatura No: gib2026000000123\nToplam 10,00",
+      "document_no": "1234567890_GIB2026000000123",
+      "order_id": ""
+    },
+    {
+      "name": "vkn_fatura_no_sonraki_satir",
+      "text": "Vergi Kimlik No 1234567890\nFatura Numarası\nABC2026000000007",
+      "document_no": "1234567890_ABC2026000000007",
+      "order_id": ""
+    },
+    {
+      "name": "kisa_fis_no_kimlik_degil",
+      "text": "FİŞ NO 0468\nZ NO 12\nToplam 10,00",
+      "document_no": "",
+      "order_id": ""
+    },
+    {
+      "name": "siparis_no_ayni_satir",
+      "text": "Sipariş No: ys-4f7a91c2\nToplam 10,00",
+      "document_no": "",
+      "order_id": "YS-4F7A91C2"
+    },
+    {
+      "name": "siparis_numarasi",
+      "text": "Sipariş Numarası: 1234567890",
+      "document_no": "",
+      "order_id": "1234567890"
+    },
+    {
+      "name": "siparis_kodu_diyez",
+      "text": "Sipariş Kodu #AB12CD",
+      "document_no": "",
+      "order_id": "AB12CD"
+    },
+    {
+      "name": "siparis_etiket_sonraki_satir",
+      "text": "Sipariş Numarası\nTG-998877\nToplam 10,00",
+      "document_no": "",
+      "order_id": "TG-998877"
+    },
+    {
+      "name": "google_play_noktali",
+      "text": "Order number: GPA.3345-1234-5678-12345",
+      "document_no": "",
+      "order_id": "GPA.3345-1234-5678-12345"
+    },
+    {
+      "name": "order_id_ingilizce",
+      "text": "Order ID: 8473920165",
+      "document_no": "",
+      "order_id": "8473920165"
+    },
+    {
+      "name": "siparis_etiketsiz_yok",
+      "text": "Sipariş Özeti\nSipariş Tarihi: 14.11.2026\nToplam 10,00",
+      "document_no": "",
+      "order_id": ""
+    },
+    {
+      "name": "siparis_rakamsiz_deger_yok",
+      "text": "Sipariş no: bekleniyor",
+      "document_no": "",
+      "order_id": ""
+    },
+    {
+      "name": "fatura_no_siparis_degil",
+      "text": "Fatura No: GIB2026000000123\nToplam 10,00",
+      "document_no": "",
+      "order_id": ""
+    },
+    {
+      "name": "kisa_deger_yok",
+      "text": "Sipariş No: 12",
+      "document_no": "",
+      "order_id": ""
+    },
+    {
+      "name": "her_ikisi",
+      "text": "Sipariş No: ZX-4455\nVKN: 1234567890\nFatura No: GIB2026000000124\nETTN: 3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+      "document_no": "3f2a9c1e-5b7d-4e8a-9c3d-1a2b3c4d5e6f",
+      "order_id": "ZX-4455"
+    }
+  ]
+}

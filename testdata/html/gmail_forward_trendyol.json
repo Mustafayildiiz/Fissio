@@ -1,0 +1,10 @@
+{
+  "name": "gmail_forward_trendyol",
+  "note": "Gmail \"İlet\" önsözü (Forwarded message + From/Date/Subject/To) HTML içinde; önsöz atılmalı.",
+  "html": "<div dir=\"ltr\">Bakar mısın?<br><br><div class=\"gmail_quote\"><div dir=\"ltr\" class=\"gmail_attr\">---------- Forwarded message ---------<br>From: <strong class=\"gmail_sendername\" dir=\"auto\">Trendyol Go</strong> <span dir=\"auto\">&lt;<a href=\"mailto:noreply@trendyolgo.com\">noreply@trendyolgo.com</a>&gt;</span><br>Date: Sat, 14 Nov 2026 at 13:12<br>Subject: Sipariş Özeti<br>To: &lt;ahmet@gmail.com&gt;<br></div><br><br><div><p>Sipariş No: TG-998877</p><p>Bim Market</p><p>Makarna 2 x 18,00</p><p>Toplam 36,00</p></div></div></div>",
+  "expect": {
+    "text": "Sipariş No: TG-998877\nBim Market\nMakarna 2 x 18,00\nToplam 36,00",
+    "order_id": "TG-998877",
+    "document_no": ""
+  }
+}

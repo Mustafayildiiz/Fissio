@@ -17,6 +17,7 @@ import '../services/scan_camera.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets.dart';
+import 'digital_import.dart';
 import 'receipt_form_page.dart';
 
 /// Galeriden en çok [remaining] fotoğraf seçer (iptal = boş liste). Testlerde değiştirilebilir.
@@ -47,6 +48,7 @@ class ScanPage extends StatefulWidget {
     this.initialPages,
     this.camera,
     this.pickGallery = pickFromGallery,
+    this.pickPdf = pickPdfFile,
   });
 
   /// Fiş formundan dönüşte mevcut fotoğrafların kaybolmaması için.
@@ -55,6 +57,9 @@ class ScanPage extends StatefulWidget {
   /// Kamera donanımı bu portun arkasındadır; verilmezse genel [scanCameraPort] kullanılır.
   final ScanCameraPort? camera;
   final GalleryPicker pickGallery;
+
+  /// "Dijital Fiş / PDF Ekle" için PDF seçici (testlerde değiştirilebilir).
+  final PdfPicker pickPdf;
 
   @override
   State<ScanPage> createState() => _ScanPageState();
@@ -257,7 +262,8 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
           confirmLabel: 'Yeniden tara',
           cancelLabel: 'Eksik haliyle devam et',
         );
-        if (!retry || !mounted) break;
+        if (!mounted) return; // sayfa kapandıysa aşağıdaki diyalog/yönlendirme ölü context kullanırdı
+        if (!retry) break;
         res = await appState.rescanFailedPages(res, _session.pages, engine: themeController.ocrEngine);
         if (!mounted) return;
       }
@@ -272,7 +278,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
         MaterialPageRoute(builder: (_) => ReceiptFormPage(initialDraft: draft)),
       );
     } on ApiException catch (e) {
-      if (mounted) showMessage(context, e.message);
+      if (mounted) showError(context, e.message);
     } finally {
       if (mounted) {
         setState(() {
@@ -433,6 +439,40 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
               onChange: (scan) {
                 if (!scan) _openManual();
               },
+            ),
+            // E-fatura / e-arşiv / uygulama fişi gibi dijital belgeler kamerayla değil dosyadan eklenir.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Semantics(
+                button: true,
+                label: 'Dijital fiş veya PDF ekle',
+                child: GestureDetector(
+                  key: const Key('digital-import-button'),
+                  onTap: _busy
+                      ? null
+                      : () => runDigitalImport(context, picker: widget.pickPdf, replace: true),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: c.surf2,
+                      borderRadius: BorderRadius.circular(kRadiusSm),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(LucideIcons.fileText, size: 18, color: c.ink),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Dijital Fiş / PDF Ekle',
+                          style: FissioText.body(c, size: 14, weight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
             Expanded(
               child: Container(

@@ -39,12 +39,35 @@
             </intent-filter>
             <!-- Flutter'in varsayılan derin bağlantı işleme kapalı: aksi halde sıcak açılışta fissio://scan, '/' rotasına (ikinci SplashPage) çevrilir. -->
             <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
-            <!-- fissio://scan : ana ekran widget'ının hızlı tarama kısayolu. -->
+            <!-- Hızlı eylemler (HER renk girişinde aynı filtreler olmalı: yalnızca seçili renk etkindir, diğerleri devre dışıdır):
+             fissio://scan = kamerayla tara, fissio://import-digital = dijital fiş/PDF ekle, application/pdf, message/rfc822 (.eml) ve text/html SEND/VIEW =
+             başka uygulamadan "Paylaş → Fissio". test/android_manifest_test.dart bu eşitliği doğrular. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity>
 
@@ -63,6 +86,27 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherGreen" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
@@ -77,6 +121,27 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherDarkred" android:targetActivity=".MainActivity"
@@ -93,6 +158,27 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherBlue" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
@@ -107,6 +193,27 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
             </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherGraphite" android:targetActivity=".MainActivity"
@@ -123,6 +230,27 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".LauncherInk" android:targetActivity=".MainActivity"
             android:enabled="false" android:exported="true" android:label="Fissio"
@@ -138,6 +266,27 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="fissio" android:host="scan"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="fissio" android:host="import-digital"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="message/rfc822"/>
+                <data android:mimeType="text/html"/>
+            </intent-filter>
         </activity-alias>
 
         <!-- Ana ekran widget'ı: bu ayki toplam harcama + hızlı tarama kısayolu. -->
@@ -150,6 +299,27 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/fissio_widget_info"/>
+        </receiver>
+
+        <!-- Yalnızca kısayol içeren 3 sade widget: Fiş tara (fissio://scan), Dijital fiş ekle (fissio://import-digital),
+             ikili (ikisi yan yana). Hepsi Tercihler > Widget renk teması'nı uygular. -->
+        <receiver android:name=".FissioScanWidgetProvider" android:exported="true" android:label="@string/widget_scan_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/fissio_scan_widget_info"/>
+        </receiver>
+        <receiver android:name=".FissioDigitalWidgetProvider" android:exported="true" android:label="@string/widget_digital_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/fissio_digital_widget_info"/>
+        </receiver>
+        <receiver android:name=".FissioCombinedWidgetProvider" android:exported="true" android:label="@string/widget_combined_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/fissio_combined_widget_info"/>
         </receiver>
 
         <!-- Planlı yerel bildirimler (flutter_local_notifications). -->

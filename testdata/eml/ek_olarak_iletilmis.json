@@ -1,0 +1,17 @@
+{
+  "name": "ek_olarak_iletilmis",
+  "note": "message/rfc822: özgün mail ek olarak iletilmiş; iç HTML gövde ve PDF çıkarılır.",
+  "eml": "From: ahmet@gmail.com\r\nTo: x@fis.fissio.app\r\nSubject: Fwd: Siparis\r\nContent-Type: multipart/mixed; boundary=\"o1\"\r\n\r\n--o1\r\nContent-Type: text/plain\r\n\r\nİletiyorum.\r\n--o1\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\nFrom: Yemeksepeti <info@yemeksepeti.com>\r\nTo: ahmet@gmail.com\r\nSubject: Siparişiniz\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Sipariş No: YS-123456</p>\r\n--o1--\r\n",
+  "expect": {
+    "subject": "Fwd: Siparis",
+    "from": "ahmet@gmail.com",
+    "message_id": "",
+    "text": "İletiyorum.",
+    "html": "<p>Sipariş No: YS-123456</p>",
+    "pdf_names": [],
+    "recipients": [
+      "x@fis.fissio.app",
+      "ahmet@gmail.com"
+    ]
+  }
+}

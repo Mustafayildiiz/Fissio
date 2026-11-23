@@ -26,8 +26,9 @@ Future<Uint8List?> Function(ImageSource source) avatarSourcePicker = (source) as
   return x == null ? null : readAndDelete(x.path);
 };
 
-/// "Kamera / Galeri / Fotoğrafı kaldır" seçimini gösterir, sonucu [AppState]'e uygular.
-Future<void> changeProfileAvatar(BuildContext context, Profile profile) async {
+/// "Kamera / Galeri / Fotoğrafı kaldır" seçimini gösterir, sonucu [app]'e (verilmezse global [appState]) uygular.
+Future<void> changeProfileAvatar(BuildContext context, Profile profile, {AppState? app}) async {
+  final a = app ?? appState;
   final choice = await showModalBottomSheet<_AvatarChoice>(
     context: context,
     builder: (ctx) => SafeArea(
@@ -60,22 +61,30 @@ Future<void> changeProfileAvatar(BuildContext context, Profile profile) async {
     ),
   );
   if (choice == null || !context.mounted) return;
+  final camera = choice == _AvatarChoice.camera;
   try {
     if (choice == _AvatarChoice.remove) {
-      await appState.removeProfileAvatar(profile.id);
+      await a.removeProfileAvatar(profile.id);
       return;
     }
-    final bytes = await avatarSourcePicker(
-      choice == _AvatarChoice.camera ? ImageSource.camera : ImageSource.gallery,
-    );
+    final bytes = await avatarSourcePicker(camera ? ImageSource.camera : ImageSource.gallery);
     if (bytes == null || bytes.isEmpty) return;
-    await appState.setProfileAvatar(profile.id, bytes);
+    await a.setProfileAvatar(profile.id, bytes);
   } on PlatformException {
     if (context.mounted) {
-      showMessage(context, 'Kamera erişimi reddedildi. Ayarlardan izin verin veya galeriden seçin.');
+      // Kaynağa göre: galeri hatası "kamera reddedildi" demesin.
+      showMessage(
+        context,
+        camera
+            ? 'Kamera erişimi reddedildi. Ayarlardan izin verin veya galeriden seçin.'
+            : 'Galeriye erişilemedi. Ayarlardan fotoğraf izni verin.',
+      );
     }
   } on ApiException catch (e) {
-    if (context.mounted) showMessage(context, e.message);
+    if (context.mounted) showError(context, e.message);
+  } catch (_) {
+    // Dosya okuma/yazma (FileSystemException) vb.: işlenmemiş async hata yerine kullanıcıya bildirilir.
+    if (context.mounted) showError(context, 'Fotoğraf kaydedilemedi. Lütfen tekrar deneyin.');
   }
 }
 

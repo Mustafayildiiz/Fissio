@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sabit açık / koyu widget temaları (tema "Sistem" ise values / values-night içindeki widget_* renkleri kullanılır). -->
+    <color name="widget_light_ink">#201E1D</color>
+    <color name="widget_light_mute">#605D5D</color>
+    <color name="widget_dark_ink">#F3F2F2</color>
+    <color name="widget_dark_mute">#9B9797</color>
+    <!-- Marka teması renkleri Dart tarafından (fissio_widget_brand_day / _night) yazılır; burada sabit renk yok. -->
+    
+    
+</resources>

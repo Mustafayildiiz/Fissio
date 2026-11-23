@@ -24,8 +24,29 @@ Future<bool> Function(Uri uri) mailLauncher = (uri) async {
   }
 };
 
+/// Harici bir bağlantıyı (ör. Gmail yönlendirme onayı) tarayıcıda açar; açılamazsa false. Testlerde değiştirilebilir.
+Future<bool> Function(Uri uri) externalLinkLauncher = (uri) async {
+  try {
+    return await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    return false;
+  }
+};
+
 Future<void> Function(String text) clipboardWriter =
     (text) => Clipboard.setData(ClipboardData(text: text));
+
+/// "Bağlantıyı Test Et" maili: konu ve gövde. Gövde, sunucunun bir fiş olarak okuyabileceği (mağaza + kalem + toplam) hazır metindir.
+const kTestMailSubject = 'Fissio Test Fişi - Kahve Dünyası';
+const kTestMailBody = 'Fissio e-posta aktarımı bağlantı testi.\n\nTarih: Bugün\nMağaza: Kahve Dünyası\n'
+    '1 x Filtre Kahve: 85,00 TL\nToplam: 85,00 TL';
+
+/// Kullanıcının Fissio adresine hazır test fişi yollayan `mailto:` (Türkçe karakterler ve satır sonları yüzde-kodlanır).
+Uri testMailUri(String address) => Uri(
+      scheme: 'mailto',
+      path: address,
+      query: 'subject=${Uri.encodeComponent(kTestMailSubject)}&body=${Uri.encodeComponent(kTestMailBody)}',
+    );
 
 Uri supportMailUri({String? version}) => Uri(
       scheme: 'mailto',

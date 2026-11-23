@@ -125,7 +125,10 @@ Fazlar sonradan netleşen ihtiyaçlara göre genişlemiştir; Faz 10 ilk plana d
 - [x] Cihaz içi ML Kit OCR + hibrit yönlendirme; cihaz tarafı ayrıştırıcı (Dart) altın vektörlerle Go ile eşitlenir
 - [x] Kategori bazlı ve toplam aylık bütçe limitleri (%80 uyarı, %100 aşım bildirimi)
 - [x] Sabit/değişken tekrarlayan gider projeksiyonu (seri tekilleştirme, ödenen/kalan, 3 aylık ortalama), hatırlatma bildirimleri
-- [x] Android ana ekran widget'ı (aylık toplam, "Fiş tara" kısayolu)
+- [x] Android ana ekran widget'ları (4 adet): aylık toplam + "Fiş tara" + "Dijital fiş"; yalnızca "Fiş tara"; yalnızca "Dijital fiş"; ikili kısayol. Tercihler > Widget renk teması (Sistem / Açık / Koyu / Marka) hepsine uygulanır (iOS kaynağı yazıldı, doğrulanmadı)
+- [x] Dijital fiş / e-fatura (PDF) içe aktarma: metin katmanı cihazda okunur (OCR yok), taranmış PDF OCR hattına düşer; "Paylaş → Fissio" (Android) ve `fissio://import-digital`; mükerrer engeli yalnızca ETTN UUID / `VKN_FaturaNo` ile (`document_no`, 409 `duplicate_document`)
+- [x] Tercihler > "Fiş detayında OCR motorunu göster" anahtarı (varsayılan açık)
+- [x] OCR/ayrıştırma kalitesi (9 yeni gerçek fiş): satır çiftlerinden eğim kestirimi (kıvrık kağıt), iptal/iade satırları, tutara yapışık TL, tarihe yapışık saat, KDV+toplam yer değişimi, KDV'siz e-fatura mutabakatı, başlığı kırpık fişte işletme uydurmama
 - [x] JSON/CSV içe/dışa aktarım (Veri Yönetimi)
 - [x] Marka paleti, tema ve uygulama ikonu seçimi; ilk kullanım tanıtım rehberi; destek/hakkında/gizlilik sayfaları
 - [x] Üretim sertleştirmesi: DB rolleri, EdDSA JWT, zayıf sır kontrolü, Caddy ile TLS ve tek origin, hız/eşzamanlılık sınırları
@@ -192,6 +195,15 @@ Bugün kalemler fişin JSONB alanında `{name, amount, category_id}` olarak duru
 - [ ] Fiş formunda hızlı seçici (14 gün iade, 1/2 yıl garanti) ve işletme türüne göre öneri
 - [ ] Yaklaşan bitişler listesi ve hatırlatma bildirimleri (tekrarlayan gider hatırlatma altyapısı `planReminders` yeniden kullanılır)
 - [ ] Fiş fotoğrafı garanti belgesi olarak kolay erişim (fiş detayında "garanti" filtresi)
+
+### Faz 15: Çok kanallı dijital fiş, akıllı birleştirme ve e-posta aktarımı (uygulandı)
+Dijital fiş yalnızca PDF değildi; Yemeksepeti/Trendyol/Google Play/Spotify gibi platformlar HTML e-posta gövdesinde sipariş özeti, günler sonra e-Arşiv PDF'i yollar.
+- [x] HTML → temiz metin (Go `internal/digital` otorite, Dart ikizi), "İlet" önsözü temizliği, `.eml`/MIME ayrıştırma (PDF > HTML > düz metin; zip içi PDF), ortak altın vektörler (`testdata/`)
+- [x] `order_id` + türetilmiş `has_official_invoice` (`document_no`'dan); mükerrer reddi (409 `duplicate_order`), ön özet + resmi fatura birleştirme (`DecideMerge`: sunucuda `POST /expenses`, `/expenses/bulk`, webhook; cihazda aynı karar), aynı gün iki sipariş asla birleşmez
+- [x] Kullanıcıya özel yönlendirme adresi + `POST /webhooks/inbound-email` (`X-Webhook-Secret`), Gmail onay kodu yakalama (fiş değildir), alias başına limit, hesap silme temizliği
+- [x] Android/iOS paylaşım hedefleri: PDF + `.eml` + HTML; offline-first cihaz içi işleme
+- [x] Hibrit onboarding: ilk açılışta opsiyonel e-posta adımı (yalnızca senkron açık + sunucuda yapılandırılmışsa); Ayarlar'da iki bağımsız rehber (Uygulama Rehberi / E-Posta Kurulum Sihirbazı) + "Yeni" rozeti + ana sayfa kartı
+- [ ] Gerçek bir GİB e-Arşiv PDF'iyle sunucu PDF okuma doğrulaması (CID/ToUnicode fontlar), gerçek MTA/Cloudflare Email Worker ve gerçek Gmail onay maili ile uçtan uca deneme, cihazda `.eml` paylaşım teslimi
 
 ### Diğer açık işler
 - [ ] iOS ana ekran widget hedefi (Xcode, App Group, gece yarısı timeline yenilemesi; kaynak `ios/FissioWidget/` hazır)
