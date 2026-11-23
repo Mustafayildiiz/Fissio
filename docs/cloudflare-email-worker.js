@@ -43,6 +43,12 @@ async function logResponse(res, message, size) {
 }
 
 export default {
+  // Bu Worker yalnız e-posta işler. Adresi tarayıcıdan açan biri (ya da favicon isteği) "Handler does not export a
+  // fetch() function" hatası üretmesin diye zararsız bir yanıt döner; hiçbir değişkeni/sırrı açığa vurmaz.
+  async fetch() {
+    return new Response('Fissio inbound email worker', { status: 200 });
+  },
+
   async email(message, env, ctx) {
     try {
       if (!env.FISSIO_API_BASE || !env.INBOUND_WEBHOOK_SECRET) {

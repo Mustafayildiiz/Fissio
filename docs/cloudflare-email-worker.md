@@ -21,6 +21,23 @@
 
 5. Sunucuda `INBOUND_EMAIL_DOMAIN` ve `INBOUND_WEBHOOK_SECRET` dolu olmalı (`.env.example`).
 
+## Geliştirmede Quick Tunnel ile kullanım
+
+Yerel expense servisi (`localhost:8082`) internete açık değildir; geliştirmede Worker ona Quick Tunnel ile ulaşır.
+
+1. `cloudflared tunnel --url http://localhost:8082` çalıştır, pencereyi açık tut.
+2. Adres çıktıda görünmüyorsa: `curl http://127.0.0.1:20241/quicktunnel` → `{"hostname":"x-y-z.trycloudflare.com"}` (metrics portu 20241-20250 arası seçilir).
+3. Worker'da `FISSIO_API_BASE=https://x-y-z.trycloudflare.com` ayarla ve deploy et.
+4. Doğrula: yanlış sırla `POST https://x-y-z.trycloudflare.com/webhooks/inbound-email` → `401`.
+
+**Geçicidir:** tünel kapanır ya da bilgisayar yeniden başlarsa adres değişir; adım 3 yinelenir. Kalıcı çözüm: Cloudflare Zero Trust → Networks → Tunnels → `fissio` → `cloudflared service install <TOKEN>` (yönetici PowerShell) → Public Hostname `api.<alan>` (Path `webhooks/inbound-email`, Service `HTTP localhost:8082`) → Worker'da `FISSIO_API_BASE=https://api.<alan>`.
+
+**Deploy sonrası kontrol listesi** (Worker kodunu "Edit code" ile yeniden deploy etmek Variables'ı silebilir): `FISSIO_API_BASE` dolu mu, `INBOUND_WEBHOOK_SECRET` (Secret) `.env` ile aynı mı, eski `WEBHOOK_URL` gibi kullanılmayan değişkenler silindi mi.
+
+**Sır üretimi:** düz hex kullan (`openssl rand -hex 32`). Değiştirince `.env`'i kaydet ve `docker compose up -d --no-build --force-recreate expense` ile expense'i yeniden oluştur; konteyner değeri yalnızca başlarken okur.
+
+Worker'ın `fetch` işleyicisi yalnızca `200 "Fissio inbound email worker"` döner (adresi tarayıcıdan açan biri hata günlüğü üretmesin diye); mail akışı `email` işleyicisindedir.
+
 ## Davranış
 
 - Handler **asla fırlatmaz**: yakalanmamış Worker hatası Cloudflare'in maili gönderene ret ile döndürmesine yol açabilir.
@@ -46,5 +63,6 @@
    `new URL`) env eksikken fırlatıp rete yol açabiliyordu.
 5. **Boyut**: Cloudflare 25 MiB üstünü reddeder; `REJECT_OVERSIZE=true` ise Worker da `INBOUND_MAX_BYTES` üstünü reddeder.
 6. Sunucu 401 dönüyorsa sırlar, 413 dönüyorsa `INBOUND_MAX_BYTES` değerleri uyuşmuyor (Worker günlüğünde yazar).
+7. Activity Log'da mail **Handled** görünüyor ama fiş oluşmuyorsa sorun Worker'a ulaşmadan değil, Worker'dan sonradır: Worker günlüğünü (Workers → Logs) aç. `tanımlı değil` = Variables silinmiş; `401` = sır uyuşmuyor; `fetch failed` = tünel kapalı. Sunucuda karşılığı: `expense.inbound_history` tablosunda satır yoksa istek hiç ulaşmamıştır.
 
 Kullanıcıya yönelik açıklama uygulamadaki Destek > SSS'dedir ("Gönderim 5.7.1 / teslim edilemedi hatası").

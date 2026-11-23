@@ -1,6 +1,6 @@
 # Akıllı Fiş İşleme ve Mikro Harcama Yönetimi: Yol Haritası
 
-> Son güncelleme: 2026-11-19. Faz 0-9 çekirdek ürün, Faz 10 sonradan eklenen hesap/senkron/kişisel finans katmanı, Bölüm 7 ise gelecek fazlardır. Ayrıntılı uygulama notları için `CLAUDE.md`, API sözleşmesi için `docs/openapi.yaml`.
+> Son güncelleme: 2026-11-23. Faz 0-9 çekirdek ürün, Faz 10 sonradan eklenen hesap/senkron/kişisel finans katmanı, Faz 15 çok kanallı dijital fiş ve e-posta aktarımı, Bölüm 7 ise gelecek fazlardır. Ayrıntılı uygulama notları için `CLAUDE.md`, API sözleşmesi için `docs/openapi.yaml`.
 
 ## 1. Proje Özeti
 Kullanıcı fişi **uygulama içi kamerayla** (canlı önizleme, hizalama kılavuzu, flaş ve dokunarak odak) veya galeriden çeker; uzun fişler için 6 sayfaya kadar çekim yapılır. Görsel, cihazdaki ML Kit ile (**cihaz içi OCR**) ya da ayrı bir **OCR servisine** (Python/FastAPI, PaddleOCR) işlenir. Sunucu servisi görseli yalnızca bellekte işler, diske yazmaz ve saklamaz. Hibrit yönlendirme: bulut eşitleme kapalıysa fotoğraf hiç cihazdan çıkmaz; açıkken çevrimiçiyse sunucu OCR'ı, çevrimdışıyken cihaz OCR'ı kullanılır. Çıkan ham metin **Go** backend'inde ayrıştırılır (tutar, tarih, işletme, kalemler, kategori), kullanıcı sonucu onaylar veya düzenler, kayıt **PostgreSQL**'e (çevrimdışıysa önce cihazdaki kuyruğa) yazılır. Ana ekranda haftalık/aylık özet, kategori dağılımı, aylık bütçeler ve tekrarlayan giderler gösterilir.
@@ -17,7 +17,15 @@ flowchart LR
   C -->|internal API| B
   B --> D[(PostgreSQL: auth şeması)]
   C --> D2[(PostgreSQL: expense şeması)]
+  G[Gmail / Outlook: Fwd veya filtre] -->|yönlendirme adresi| R[Cloudflare Email Routing]
+  R -->|catch-all| W[Cloudflare Email Worker]
+  W -->|HTTPS + X-Webhook-Secret| T[Cloudflare Tunnel]
+  T -->|localhost:8082| C
 ```
+
+**E-posta aktarımı (Faz 15) akışı:** Kullanıcı sipariş/fatura mailini kendine özel `alias@INBOUND_EMAIL_DOMAIN` adresine iletir. Cloudflare Email Routing mailı catch-all kuralıyla Worker'a verir (SPF/DKIM/DMARC Cloudflare'de doğrulanır). Worker ham MIME'ı `POST /webhooks/inbound-email?rcpt=...` ile expense servisine gönderir; servis alias'tan kullanıcıyı bulur, UBL-XML > PDF > HTML > metin önceliğiyle ayrıştırır, `DecideMerge` ile yinelenen/birleşen fişi karara bağlar ve sonucu `expense.inbound_history`'ye yazar. Worker hata verse bile maili reddetmez (gönderene "teslim edilemedi" gitmesin); nedenler Worker günlüğünde ve uygulamadaki "Son Aktarılan E-Postalar" listesinde görünür.
+
+**Geliştirme ortamı köprüsü:** Yerel expense servisi internete açık olmadığından Worker ona **Cloudflare Quick Tunnel** ile ulaşır (`cloudflared tunnel --url http://localhost:8082`). Quick Tunnel adresi (`*.trycloudflare.com`) geçicidir; tünel kapanınca ya da bilgisayar yeniden başlayınca değişir ve Worker'daki `FISSIO_API_BASE` güncellenmelidir. Kalıcı çözüm adlandırılmış tünel + sabit alt alan adıdır (aşağıda "Diğer açık işler"). Adım adım işletim rehberi: `docs/cloudflare-email-worker.md`.
 
 **OCR motoru stratejisi**
 - Strategy + Factory Registry deseni üç katmanda aynı biçimde uygulanır: OCR servisi (`services/ocr/ocr/`), Expense servisi (`internal/scan`, `ocr_engine.go`), mobil uygulama (`lib/ocr/ocr_engine.dart`).
@@ -50,6 +58,7 @@ flowchart LR
 | 8. Hata yönetimi ve test | 1 hafta | İzin reddi, okunamayan fiş modalı, ağ hatası, birim/entegrasyon/widget testleri | Bölüm 8 | Tamam (E2E senaryo açık) |
 | 9. Cilalama ve teslim | 3-4 gün | Dokümantasyon, demo videosu, sunum, gerçek fişlerle son test | Tümü | Sürüyor |
 | 10. Hesap, senkron ve kişisel finans | - | OTP'li hesap, profil izolasyonu, offline-first, bütçe, tekrarlayan gider, widget, veri aktarımı | - | Tamam |
+| 15. Dijital fiş ve e-posta aktarımı | - | PDF/.eml/HTML/UBL-XML okuma, akıllı birleştirme, kullanıcıya özel yönlendirme adresi, Cloudflare Email Worker, aktarım geçmişi, duraklatma | - | Uygulandı; canlı e-posta akışı 2026-11-23'te doğrulandı (kalıcı tünel ve GİB PDF doğrulaması açık) |
 
 Fazlar sonradan netleşen ihtiyaçlara göre genişlemiştir; Faz 10 ilk plana dahil değildi.
 
@@ -147,6 +156,7 @@ Fazlar sonradan netleşen ihtiyaçlara göre genişlemiştir; Faz 10 ilk plana d
 | Kamera/izin farklılıkları (cihaz, işletim sistemi sürümü) | Orta | Donanım `ScanCameraPort` arkasında; açılamazsa yedek ekran (galeri/manuel), her cihazda gerçek kamera elle doğrulanmalı |
 | JWT sırrının kod içinde kalması | Orta | `.env` ve compose değişkenleri; `APP_ENV=production` zayıf sırları reddeder; isteğe bağlı EdDSA anahtar çifti |
 | Mantığın Go/Dart/Python'da çoğaltılması (sapma riski) | Orta | `testdata/` altın vektörleri, kaynak-gerçek tablosu (`CLAUDE.md`), sözleşme testleri |
+| E-posta aktarımı geliştirme ortamında geçici tünele bağlı (Quick Tunnel adresi değişir, bilgisayar kapalıyken mail işlenmez) | Orta | Worker mail reddetmez, mail kullanıcının kutusunda kalır; tünel adresi değişince `FISSIO_API_BASE` güncellenir; kalıcı çözüm adlandırılmış tünel ya da sunucuya taşıma; Worker deploy'unda Variables kontrolü (`docs/cloudflare-email-worker.md`) |
 | Kapsam büyümesi | Orta | Çoklu para birimi gibi özellikler bu sürümün dışında; yeni fikirler Bölüm 7'de sıralı |
 
 ## 5. SRS'te Netleştirilmesi Gereken Noktalar
@@ -203,9 +213,14 @@ Dijital fiş yalnızca PDF değildi; Yemeksepeti/Trendyol/Google Play/Spotify gi
 - [x] Kullanıcıya özel yönlendirme adresi + `POST /webhooks/inbound-email` (`X-Webhook-Secret`), Gmail onay kodu yakalama (fiş değildir), alias başına limit, hesap silme temizliği
 - [x] Android/iOS paylaşım hedefleri: PDF + `.eml` + HTML; offline-first cihaz içi işleme
 - [x] Hibrit onboarding: ilk açılışta opsiyonel e-posta adımı (yalnızca senkron açık + sunucuda yapılandırılmışsa); Ayarlar'da iki bağımsız rehber (Uygulama Rehberi / E-Posta Kurulum Sihirbazı) + "Yeni" rozeti + ana sayfa kartı
-- [ ] Gerçek bir GİB e-Arşiv PDF'iyle sunucu PDF okuma doğrulaması (CID/ToUnicode fontlar), gerçek MTA/Cloudflare Email Worker ve gerçek Gmail onay maili ile uçtan uca deneme, cihazda `.eml` paylaşım teslimi
+- [x] E-posta aktarım geçmişi (`expense.inbound_history`, son 50), `last_status`/`last_received_at` her mailde güncellenir, UBL-XML eki desteği, duraklat/devam, bağlantı testi, Gmail filtresi rehberi
+- [x] **Canlı doğrulama (2026-11-23):** gerçek Cloudflare Email Routing + Email Worker + Gmail yönlendirmesi + Gmail onay maili uçtan uca çalıştı (`inbound_history`: `saved/created`, `ignored/gmail_confirmation`; 21 ve 23 Kasım). Email Routing Activity Log'da SPF/DKIM/DMARC/ARC = pass
+- [x] **Olay (2026-11-23) ve çıkarılan dersler:** mailler "Handled" görünüp fişe dönüşmedi. Kök neden: Worker yeniden deploy edilirken `FISSIO_API_BASE` ve `INBOUND_WEBHOOK_SECRET` değişkenleri silinmişti (Worker günlüğü: `tanımlı değil; mail işlenmedi (ret yok)`); ardından sır Cloudflare'e farklı girildi (`webhook sırrı reddedildi (401)`); ayrıca Quick Tunnel süreci çalışmıyordu. Düzeltme: değişkenler yeniden girildi, yeni sır üretildi (`.env` ve Worker'da aynı), tünel yeniden açıldı. Worker'a zararsız bir `fetch` işleyicisi eklendi (tarayıcıdan açılınca "Handler does not export a fetch()" hatası yerine 200 döner). Ders: her deploy sonrası Variables sayfası kontrol edilmeli; sır `openssl`/PowerShell ile üretilen düz hex olmalı
+- [ ] Gerçek bir GİB e-Arşiv PDF'iyle sunucu PDF okuma doğrulaması (CID/ToUnicode fontlar), cihazda `.eml` paylaşım teslimi
+- [ ] Kalıcı Cloudflare Tunnel (adlandırılmış tünel + `api.<alan>` + Windows servisi) ve Worker'ı sabit adrese alma (şimdilik Quick Tunnel; bkz. Diğer açık işler)
 
 ### Diğer açık işler
+- [ ] E-posta aktarımı için kalıcı Cloudflare Tunnel: Zero Trust → Tunnels → `fissio` → Windows servisi (`cloudflared service install <TOKEN>`) → Public Hostname `api.<alan>` (Path `webhooks/inbound-email`, `HTTP localhost:8082`) → Worker'da `FISSIO_API_BASE=https://api.<alan>`. Karar (2026-11-23): şimdilik Quick Tunnel ile devam
 - [ ] iOS ana ekran widget hedefi (Xcode, App Group, gece yarısı timeline yenilemesi; kaynak `ios/FissioWidget/` hazır)
 - [ ] Release derlemesinin https üzerinden gerçek cihazda doğrulanması (Caddy + güvenilir sertifika, `--dart-define=API_BASE=https://...`)
 - [ ] Uygulama içi kameranın gerçek cihazlarda (Android + iOS) elle doğrulanması: flaş/fener, odak, ön plan-arka plan geçişi
