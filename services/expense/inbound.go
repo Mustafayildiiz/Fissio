@@ -258,7 +258,9 @@ func buildMessage(p inboundPayload, raw []byte) *digital.Message {
 		ct := strings.ToLower(a.ContentType)
 		switch {
 		case strings.Contains(ct, "pdf") || strings.HasSuffix(name, ".pdf"):
-			m.PDFs = append(m.PDFs, digital.Attachment{Name: a.Filename, Data: data})
+			if len(m.PDFs) < 5 {
+				m.PDFs = append(m.PDFs, digital.Attachment{Name: a.Filename, Data: data})
+			}
 		case strings.Contains(ct, "zip") || strings.HasSuffix(name, ".zip"):
 			m.PDFs = append(m.PDFs, digital.ExtractZipPDFs(data, 5)...)
 			m.XMLs = append(m.XMLs, digital.ExtractZipXMLs(data, 5)...)
@@ -526,6 +528,7 @@ func (h *handler) inboundEmail(c *gin.Context) {
 	}
 	if outcome == writeCreated {
 		if err := saveRules(tx, userID, collectRuleUpdates(in)); err != nil {
+			_ = tx.Rollback() // fail() ayrı bağlantıdan yazar; açık tx kilitlerini önce bırak
 			fail("db_error", err)
 			return
 		}

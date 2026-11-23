@@ -21,12 +21,17 @@ function maxBytesOf(env) {
 }
 
 function webhookURL(env, rcpt) {
-  const url = new URL('/webhooks/inbound-email', env.FISSIO_API_BASE);
+  // Mutlak yol ('/webhooks/...') FISSIO_API_BASE içindeki alt yolu (ör. https://host/api) atardı: yola eklenir.
+  const url = new URL(String(env.FISSIO_API_BASE).replace(/\/+$/, '') + '/webhooks/inbound-email');
   url.searchParams.set('rcpt', rcpt); // zarf alıcısı: auto-forward'da To: başlığı kullanıcının kendi adresidir
   return url;
 }
 
-function logResponse(res, message, size) {
+async function logResponse(res, message, size) {
+  // Yanıt gövdesi okunmayacak: bağlantıyı/akışı serbest bırak (askıda kalan yanıt akışı uyarısını önler). Asla fırlatmaz.
+  try {
+    await res.body?.cancel();
+  } catch (_) {}
   if (res.ok) return;
   if (res.status === 401) {
     console.error('fissio: webhook sırrı reddedildi (401); Worker ve sunucudaki INBOUND_WEBHOOK_SECRET değerlerini eşitle');
@@ -70,7 +75,7 @@ export default {
             }),
             signal: AbortSignal.timeout(TIMEOUT_MS),
           });
-          logResponse(res, message, size);
+          await logResponse(res, message, size);
         } catch (err) {
           console.error(`fissio: boyut bildirimi gönderilemedi: ${err} to=${message.to}`);
         }
@@ -88,7 +93,7 @@ export default {
         body: message.raw,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      logResponse(res, message, size);
+      await logResponse(res, message, size);
       // Sunucu bilinmeyen alias / okunamayan maili de 200 `ignored` ile yanıtlar (yeniden deneme fırtınası olmasın).
     } catch (err) {
       // Ağ hatası, zaman aşımı, geçersiz FISSIO_API_BASE…: günlüğe yaz, maili REDDETME.

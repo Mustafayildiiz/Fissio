@@ -69,6 +69,22 @@ void main() {
     expect(changes.last, isNull);
   });
 
+  test('refresh geçici sunucu hatası (5xx) verirse oturum KORUNUR; istek bu hatayla düşer', () async {
+    var expired = 0;
+    final api = await loggedIn(onUnauthorized: () => expired++);
+    final before = api.tokens!;
+    backend.expireAccess(before.access);
+    backend.failPaths.add('POST /auth/refresh'); // 500
+    await expectLater(api.categories(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 500)));
+    expect(expired, 0, reason: 'geçici 5xx oturumu bitirmemeli');
+    expect(api.tokens, isNotNull);
+    expect(api.tokens!.refresh, before.refresh);
+    // Sunucu düzelince aynı refresh token ile devam edilir.
+    backend.failPaths.clear();
+    expect(await api.categories(), isNotEmpty);
+    expect(expired, 0);
+  });
+
   test('refresh sırasında ağ yoksa oturum KORUNUR (çevrimdışı kullanıcıyı düşürme)', () async {
     var expired = 0;
     final api = await loggedIn(onUnauthorized: () => expired++);

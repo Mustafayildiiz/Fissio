@@ -135,8 +135,24 @@ func (h *handler) rotateInboundAddress(c *gin.Context) {
 		serverError(c)
 		return
 	}
-	for attempt := 0; attempt < 5; attempt++ {
-		_, err := h.db.Exec(`UPDATE expense.inbound_aliases SET alias = $2, last_received_at = NULL, last_status = NULL, paused = false WHERE user_id = $1`, userID, newAlias())
+	rotated := false
+	for attempt := 0; attempt < 5 && !rotated; attempt++ {
+		// Takma ad değişimi ve eski adrese ait Gmail onaylarının silinmesi tek işlemde: eski adresin kodu/bağlantısı
+		// sihirbaz yeniden açıldığında (24 saat içinde) görünmemeli.
+		tx, err := h.db.Begin()
+		if err != nil {
+			serverError(c)
+			return
+		}
+		_, err = tx.Exec(`UPDATE expense.inbound_aliases SET alias = $2, last_received_at = NULL, last_status = NULL, paused = false WHERE user_id = $1`, userID, newAlias())
+		if err == nil {
+			_, err = tx.Exec(`DELETE FROM expense.forwarding_confirmations WHERE user_id = $1`, userID)
+		}
+		if err == nil {
+			err = tx.Commit()
+		} else {
+			_ = tx.Rollback()
+		}
 		if isUniqueViolation(err) {
 			continue
 		}
@@ -144,7 +160,11 @@ func (h *handler) rotateInboundAddress(c *gin.Context) {
 			serverError(c)
 			return
 		}
-		break
+		rotated = true
+	}
+	if !rotated { // 5 çakışma: eski adresle sessizce 200 dönme
+		serverError(c)
+		return
 	}
 	h.getInboundAddress(c)
 }

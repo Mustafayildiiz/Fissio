@@ -465,6 +465,17 @@ func TestPGInboundGmailConfirmationIsNotAReceipt(t *testing.T) {
 	}
 	code, b = e.as(u, "GET", "/inbound-address/confirmation", nil)
 	e.want(code, 204, b, "süresi dolmuş onay")
+
+	// Adres yenilenince eski adrese ait (24 saat içindeki) onaylar da silinir: sihirbaz yeniden açılsa eski kod görünmez.
+	if _, err := e.db.Exec(`INSERT INTO expense.forwarding_confirmations (user_id, code, link) VALUES ($1, '555666777', NULL)`, u); err != nil {
+		t.Fatal(err)
+	}
+	code, b = e.as(u, "GET", "/inbound-address/confirmation", nil)
+	e.want(code, 200, b, "yeni onay")
+	code, b = e.as(u, "POST", "/inbound-address/rotate", nil)
+	e.want(code, 200, b, "rotate")
+	code, b = e.as(u, "GET", "/inbound-address/confirmation", nil)
+	e.want(code, 204, b, "rotate sonrası eski onay")
 }
 
 // Türkçe Gmail onay maili ham MIME (quoted-printable, bölünmüş URL) olarak gelir: fiş değil, kod+link saklanır.

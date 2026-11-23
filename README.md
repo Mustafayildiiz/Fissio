@@ -20,7 +20,7 @@ Akıllı fiş işleme ve mikro harcama yönetimi. Fişin fotoğrafını çekin; 
 | Bileşen | Teknoloji | Erişim |
 |---|---|---|
 | `services/auth` | Go (gin) | geliştirmede `localhost:8081` |
-| `services/expense` | Go (gin); `internal/receiptparse` (saf ayrıştırma), `internal/scan` (OCR istemcisi) | geliştirmede `localhost:8082` |
+| `services/expense` | Go (gin); `internal/receiptparse` (saf ayrıştırma), `internal/digital` (dijital fiş: HTML/PDF/.eml/UBL-XML), `internal/scan` (OCR istemcisi) | geliştirmede `localhost:8082` |
 | `services/ocr` | Python 3.11, FastAPI, PaddleOCR | **yalnızca Docker iç ağı** (`http://ocr:8080`; kimlik doğrulaması yoktur, host'a açılmaz) |
 | PostgreSQL | postgres:16 | yalnızca Docker iç ağı; şemalar `auth` ve `expense` |
 | `fissio_mobile/` | Flutter | - |

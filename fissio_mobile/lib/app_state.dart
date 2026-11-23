@@ -327,12 +327,12 @@ class AppState extends ChangeNotifier {
       user = await api.me();
       await _write(_userKey, jsonEncode(user!.toJson()));
     } on ApiException catch (e) {
-      if (!e.network) {
+      if (e.sessionRejected) {
         // refresh de başarısızsa api zaten _handleUnauthorized'ı çağırmış olabilir.
         await _localSignOut();
         return false;
       }
-      // çevrimdışı: yerel veriyle devam
+      // çevrimdışı ya da geçici sunucu hatası (5xx/429): oturum korunur, yerel veriyle devam
     }
     if (!loggedIn) return false;
     _startBackground();
@@ -354,13 +354,15 @@ class AppState extends ChangeNotifier {
       user = u;
       await _write(_userKey, jsonEncode(u.toJson()));
     } on ApiException catch (e) {
-      if (!e.network) {
+      // Bu arada çıkış/hesap değişimi olduysa eski isteğin gecikmeli hatası yeni oturumu düşürmemeli.
+      if (user?.id != uid) return;
+      if (e.sessionRejected) {
         // Oturum sunucuca geçersiz: yerel oturum temizlenir ve giriş ekranına dönülür (api zaten başlatmış olabilir:
         // tek seferlik).
         _handleUnauthorized();
         return;
       }
-      // çevrimdışı: yerel veriyle devam
+      // çevrimdışı ya da geçici sunucu hatası (5xx/429): yerel veriyle devam
     }
     if (!loggedIn) return;
     await refresh();
@@ -503,6 +505,7 @@ class AppState extends ChangeNotifier {
     _flushBackoffUntil = null;
     _flushFailures = 0;
     _needsRefresh = false;
+    _lastRefreshOkAt = null;
   }
 
   bool _expiring = false;
@@ -823,7 +826,7 @@ class AppState extends ChangeNotifier {
     final active = _refreshLatest;
     if (active != null) return active;
     final at = _lastRefreshOkAt;
-    if (at != null && DateTime.now().difference(at) < maxAge) return Future.value();
+    if (at != null && _clock().difference(at) < maxAge) return Future.value();
     return refresh();
   }
 
@@ -857,7 +860,7 @@ class AppState extends ChangeNotifier {
       await _refreshBudgets(ps);
       await _persistSnapshot();
       offline = false;
-      _lastRefreshOkAt = DateTime.now();
+      _lastRefreshOkAt = _clock();
     } on ApiException catch (e) {
       if (e.network) {
         // Bağlantı yok: hata değil, cihazdaki son veriyle çalışma modu (okuma-geçişli önbellek).

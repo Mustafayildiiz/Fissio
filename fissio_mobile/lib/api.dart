@@ -32,6 +32,9 @@ class ApiException implements Exception {
     this.current,
   });
 
+  /// Sunucu kimliği/oturumu reddetti (401/403). 5xx ve ağ hataları geçicidir ve oturumu bitirmemelidir.
+  bool get sessionRejected => status == 401 || status == 403;
+
   /// Düzenleme, dayandığı sürümden (`base_updated_at`) sonra sunucuda değişmiş bir fişe yapıldı; yazılmadı.
   bool get conflict => status == 409 && code == 'conflict';
 
@@ -319,7 +322,14 @@ class ApiClient {
     bool authed = true,
     Duration timeout = const Duration(seconds: 10),
   }) async {
-    if (authed && _tokens != null) await _refreshIfExpiring();
+    if (authed && _tokens != null) {
+      try {
+        await _refreshIfExpiring();
+      } on ApiException catch (e) {
+        // Ağ yokluğu isteği zaten düşürürdü; geçici sunucu hatasında (5xx/429) token henüz geçerli olabilir: isteği dene.
+        if (e.network) rethrow;
+      }
+    }
     var used = _tokens?.access;
     var r = await _sendOnce(build(), timeout);
 
@@ -408,8 +418,10 @@ class ApiClient {
       setTokens(AuthTokens.fromJson(j as Map<String, dynamic>));
       return true;
     } on ApiException catch (e) {
-      if (e.network) rethrow; // bağlantı yokken oturumu düşürme
-      return false;
+      // Yalnızca sunucunun refresh token'ı AÇIKÇA reddetmesi (400/401/403) oturumu bitirir. Ağ yokluğu, 5xx (DB yeniden
+      // başlangıcı, deploy, proxy 502) ve 429 geçicidir: oturum korunur, istek bu hatayla düşer, sonraki deneme dener.
+      if (e.sessionRejected || e.status == 400) return false;
+      rethrow;
     }
   }
 
